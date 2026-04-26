@@ -20,8 +20,8 @@ This project is a small editor-style sandbox built around:
 - `LineRenderer`: immediate-style 3D line renderer for debug visualization
 - `QuadtreeMeshRenderer`: heightmap-backed terrain renderer using indirect indexed draws
 - `CameraManager` + `FreeFlightCameraController`: camera storage and free-flight gamepad control
-- `WorldGridQuadtree`: dynamic per-cell quadtree generation around the active camera
-- `WorldGridQuadtreeHeightmapManager`: quadtree-owned heightmap LRU cache and terrain emission
+- `WorldGridQuadtree`: dynamic per-cell quadtree generation, transition tracking, and terrain/debug draw submission around the active camera
+- `WorldGridQuadtreeHeightmapManager`: quadtree-owned heightmap LRU cache for leaf nodes and parents-of-leaves
 - `LightingSystem`: global sun light state used by the terrain path
 - `PerfPanel` + `PerformanceCapture`: rolling frame timing, CPU timing, and flame graph inspection
 
@@ -37,8 +37,8 @@ This project is a small editor-style sandbox built around:
 - `src/CameraManager.*`: camera storage and projection building
 - `src/FreeFlightCameraController.*`: gamepad-driven 6-DoF camera movement
 - `src/LightingSystem.*`: global light state
-- `src/WorldGridQuadtree.*`: quadtree generation and visibility counting
-- `src/WorldGridQuadtreeHeightmapManager.*`: heightmap slice cache and terrain submission
+- `src/WorldGridQuadtree.*`: quadtree generation, transition state, visibility counting, and terrain/debug submission
+- `src/WorldGridQuadtreeHeightmapManager.*`: heightmap slice cache and upload queue management
 - `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug rendering
 - `src/Position.hpp`: global-grid-aware position type
 - `src/SceneTypes.hpp`: scene-facing data types
@@ -55,6 +55,7 @@ This project is a small editor-style sandbox built around:
 - Triangle instance editing in grid/local coordinates
 - Debug axis rendering and optional quadtree border rendering
 - Quadtree terrain rendering with 512 cached `257 x 257` heightmap slices
+- Terrain patches render the interior `1..255` sample region, leaving the outer heightmap ring available for border / LOD handling
 - CPU-side octave noise height generation feeding an SDL GPU storage buffer
 - Simple sun-light controls with Gouraud terrain shading
 - Reversed-Z depth with an infinite far plane
@@ -132,4 +133,5 @@ These are useful for startup/debugging checks without leaving the app running.
 - The viewport is rendered to an offscreen SDL GPU texture and then displayed in ImGui.
 - Triangle and debug-line submissions are rebuilt each frame in an immediate-style flow.
 - World positions use a large horizontal grid with local coordinates per cell to keep camera-relative rendering stable at large distances.
+- The quadtree keeps per-frame transition counts in its debug stats, while resident/queued slice counts are reported by the heightmap manager.
 - Shaders are compiled into the active build directory, for example `build/Release/shaders`.
