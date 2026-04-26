@@ -235,14 +235,7 @@ bool QuadtreeMeshRenderer::queueHeightmapGeneration(
         return false;
     }
 
-    TerrainNoiseSettings sanitized = settings;
-    sanitized.baseWavelength = std::max(1.0, sanitized.baseWavelength);
-    sanitized.initialFrequency = std::max(0.0001, sanitized.initialFrequency);
-    sanitized.initialAmplitude = std::max(0.0, sanitized.initialAmplitude);
-    sanitized.octaveCount = std::max<std::uint32_t>(1, sanitized.octaveCount);
-    sanitized.octaveFrequencyScale = std::max(1.01, sanitized.octaveFrequencyScale);
-    sanitized.octaveAmplitudeScale = std::clamp(sanitized.octaveAmplitudeScale, 0.0, 1.0);
-    sanitized.gradientDampenStrength = std::max(0.0, sanitized.gradientDampenStrength);
+    const TerrainNoiseSettings sanitized = sanitizeTerrainNoiseSettings(settings);
 
     const auto [a, b] = worldGridQuadtreeLeafBounds(leafId);
     const double leafIntervalCount = static_cast<double>(AppConfig::Terrain::kHeightmapLeafIntervalCount);
@@ -258,20 +251,71 @@ bool QuadtreeMeshRenderer::queueHeightmapGeneration(
     HeightmapGenerationUniforms& uniforms = m_pendingHeightmapGenerations[m_pendingHeightmapGenerationCount++];
     m_pendingGenerationLeafIds[m_pendingHeightmapGenerationCount - 1] = leafId;
     uniforms.sampleOriginAndStep = glm::vec4(
-        static_cast<float>(worldMinX / sanitized.baseWavelength),
-        static_cast<float>(worldMinZ / sanitized.baseWavelength),
-        static_cast<float>(stepX / sanitized.baseWavelength),
-        static_cast<float>(stepZ / sanitized.baseWavelength));
-    uniforms.noiseBase = glm::vec4(
-        static_cast<float>(sanitized.baseHeight),
-        static_cast<float>(sanitized.initialFrequency),
-        static_cast<float>(sanitized.initialAmplitude),
-        static_cast<float>(sanitized.gradientDampenStrength));
-    uniforms.octaveParams = glm::vec4(
-        static_cast<float>(sanitized.octaveFrequencyScale),
-        static_cast<float>(sanitized.octaveAmplitudeScale),
-        static_cast<float>(sanitized.octaveCount),
+        static_cast<float>(worldMinX),
+        static_cast<float>(worldMinZ),
+        static_cast<float>(stepX),
+        static_cast<float>(stepZ));
+    uniforms.hillsLayerA = glm::vec4(
+        static_cast<float>(sanitized.hills.wavelength),
+        static_cast<float>(sanitized.hills.amplitude),
+        static_cast<float>(sanitized.hills.bias),
+        static_cast<float>(sanitized.hills.initialFrequency));
+    uniforms.hillsLayerB = glm::vec4(
+        static_cast<float>(sanitized.hills.initialAmplitude),
+        static_cast<float>(sanitized.hills.octaveFrequencyScale),
+        static_cast<float>(sanitized.hills.octaveAmplitudeScale),
+        static_cast<float>(sanitized.hills.octaveCount));
+    uniforms.hillsLayerC = glm::vec4(
+        static_cast<float>(sanitized.hills.gradientDampenStrength),
+        static_cast<float>(sanitized.hills.octaveRotationDegrees),
+        0.0f,
         0.0f);
+    uniforms.mediumLayerA = glm::vec4(
+        static_cast<float>(sanitized.mediumDetail.wavelength),
+        static_cast<float>(sanitized.mediumDetail.amplitude),
+        static_cast<float>(sanitized.mediumDetail.bias),
+        static_cast<float>(sanitized.mediumDetail.initialFrequency));
+    uniforms.mediumLayerB = glm::vec4(
+        static_cast<float>(sanitized.mediumDetail.initialAmplitude),
+        static_cast<float>(sanitized.mediumDetail.octaveFrequencyScale),
+        static_cast<float>(sanitized.mediumDetail.octaveAmplitudeScale),
+        static_cast<float>(sanitized.mediumDetail.octaveCount));
+    uniforms.mediumLayerC = glm::vec4(
+        static_cast<float>(sanitized.mediumDetail.gradientDampenStrength),
+        static_cast<float>(sanitized.mediumDetail.octaveRotationDegrees),
+        0.0f,
+        0.0f);
+    uniforms.highLayerA = glm::vec4(
+        static_cast<float>(sanitized.highDetail.wavelength),
+        static_cast<float>(sanitized.highDetail.amplitude),
+        static_cast<float>(sanitized.highDetail.bias),
+        static_cast<float>(sanitized.highDetail.initialFrequency));
+    uniforms.highLayerB = glm::vec4(
+        static_cast<float>(sanitized.highDetail.initialAmplitude),
+        static_cast<float>(sanitized.highDetail.octaveFrequencyScale),
+        static_cast<float>(sanitized.highDetail.octaveAmplitudeScale),
+        static_cast<float>(sanitized.highDetail.octaveCount));
+    uniforms.highLayerC = glm::vec4(
+        static_cast<float>(sanitized.highDetail.gradientDampenStrength),
+        static_cast<float>(sanitized.highDetail.octaveRotationDegrees),
+        0.0f,
+        0.0f);
+    uniforms.blendLayerA = glm::vec4(
+        static_cast<float>(sanitized.blend.wavelength),
+        static_cast<float>(sanitized.blend.initialFrequency),
+        static_cast<float>(sanitized.blend.initialAmplitude),
+        static_cast<float>(sanitized.blend.octaveFrequencyScale));
+    uniforms.blendLayerB = glm::vec4(
+        static_cast<float>(sanitized.blend.octaveAmplitudeScale),
+        static_cast<float>(sanitized.blend.octaveCount),
+        static_cast<float>(sanitized.blend.gradientDampenStrength),
+        static_cast<float>(sanitized.blend.octaveRotationDegrees));
+    uniforms.blendLayerC = glm::vec4(
+        static_cast<float>(sanitized.blend.lowThreshold),
+        static_cast<float>(sanitized.blend.highThreshold),
+        static_cast<float>(sanitized.blend.lowTransitionWidth),
+        static_cast<float>(sanitized.baseHeight));
+    uniforms.highLayerC.z = static_cast<float>(sanitized.blend.highTransitionWidth);
     uniforms.dispatchParams = glm::uvec4(
         static_cast<std::uint32_t>(sliceIndex),
         AppConfig::Terrain::kHeightmapResolution,

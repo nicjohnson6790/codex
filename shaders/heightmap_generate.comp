@@ -5,8 +5,18 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 layout(set=2, binding=0) uniform HeightmapGenerationUniforms
 {
     vec4 sampleOriginAndStep;
-    vec4 noiseBase;
-    vec4 octaveParams;
+    vec4 hillsLayerA;
+    vec4 hillsLayerB;
+    vec4 hillsLayerC;
+    vec4 mediumLayerA;
+    vec4 mediumLayerB;
+    vec4 mediumLayerC;
+    vec4 highLayerA;
+    vec4 highLayerB;
+    vec4 highLayerC;
+    vec4 blendLayerA;
+    vec4 blendLayerB;
+    vec4 blendLayerC;
     uvec4 dispatchParams;
 } params;
 
@@ -26,9 +36,21 @@ layout(set=1, binding=1, std430) buffer HeightmapExtentsBuffer
     HeightmapExtents extents[];
 } heightmapExtentsBuffer;
 
-const float kHeightAmplitude = 2800.0;
-const float kOctaveRotationCosine = 0.8;
-const float kOctaveRotationSine = 0.6;
+const float kDegreesToRadians = 0.017453292519943295;
+
+struct NoiseLayer
+{
+    float wavelength;
+    float amplitude;
+    float bias;
+    float initialFrequency;
+    float initialAmplitude;
+    float octaveFrequencyScale;
+    float octaveAmplitudeScale;
+    float octaveCount;
+    float gradientDampenStrength;
+    float octaveRotationDegrees;
+};
 
 float smoothStepQuintic(float t)
 {
@@ -40,16 +62,32 @@ float smoothStepQuinticDerivative(float t)
     return 30.0 * t * t * ((t * (t - 2.0)) + 1.0);
 }
 
-float valueNoise(int x, int z)
+uint hashNoise(int x, int z)
 {
     uint hash = uint(x) * 0x8DA6B343u;
     hash ^= uint(z) * 0xD8163841u;
     hash = (hash ^ (hash >> 13u)) * 0x85EBCA6Bu;
     hash ^= hash >> 16u;
-    return (float(hash & 0x00FFFFFFu) / float(0x00FFFFFFu)) * 2.0 - 1.0;
+    return hash;
 }
 
-vec3 sampleValueNoise(vec2 p)
+vec2 gradientFromHash(uint hash)
+{
+    const float kDiagonal = 0.7071067811865476;
+    switch (hash & 7u)
+    {
+    case 0u: return vec2(1.0, 0.0);
+    case 1u: return vec2(-1.0, 0.0);
+    case 2u: return vec2(0.0, 1.0);
+    case 3u: return vec2(0.0, -1.0);
+    case 4u: return vec2(kDiagonal, kDiagonal);
+    case 5u: return vec2(-kDiagonal, kDiagonal);
+    case 6u: return vec2(kDiagonal, -kDiagonal);
+    default: return vec2(-kDiagonal, -kDiagonal);
+    }
+}
+
+vec3 sampleGradientNoise(vec2 p)
 {
     int baseX = int(floor(p.x));
     int baseZ = int(floor(p.y));
@@ -60,46 +98,86 @@ vec3 sampleValueNoise(vec2 p)
     float derivativeX = smoothStepQuinticDerivative(fracX);
     float derivativeZ = smoothStepQuinticDerivative(fracZ);
 
-    float n00 = valueNoise(baseX, baseZ);
-    float n10 = valueNoise(baseX + 1, baseZ);
-    float n01 = valueNoise(baseX, baseZ + 1);
-    float n11 = valueNoise(baseX + 1, baseZ + 1);
+    vec2 g00 = gradientFromHash(hashNoise(baseX, baseZ));
+    vec2 g10 = gradientFromHash(hashNoise(baseX + 1, baseZ));
+    vec2 g01 = gradientFromHash(hashNoise(baseX, baseZ + 1));
+    vec2 g11 = gradientFromHash(hashNoise(baseX + 1, baseZ + 1));
 
-    float nx0 = mix(n00, n10, smoothX);
-    float nx1 = mix(n01, n11, smoothX);
-    float value = mix(nx0, nx1, smoothZ);
+    float v00 = dot(g00, vec2(fracX, fracZ));
+    float v10 = dot(g10, vec2(fracX - 1.0, fracZ));
+    float v01 = dot(g01, vec2(fracX, fracZ - 1.0));
+    float v11 = dot(g11, vec2(fracX - 1.0, fracZ - 1.0));
 
-    float dValueDx =
-        (((n10 - n00) * (1.0 - smoothZ)) + ((n11 - n01) * smoothZ)) * derivativeX;
-    float dValueDz = (nx1 - nx0) * derivativeZ;
+    float ix0 = mix(v00, v10, smoothX);
+    float ix1 = mix(v01, v11, smoothX);
+    float value = mix(ix0, ix1, smoothZ);
+
+    float row0Dx = mix(g00.x, g10.x, smoothX) + ((v10 - v00) * derivativeX);
+    float row1Dx = mix(g01.x, g11.x, smoothX) + ((v11 - v01) * derivativeX);
+    float dValueDx = mix(row0Dx, row1Dx, smoothZ);
+
+    float row0Dz = mix(g00.y, g10.y, smoothX);
+    float row1Dz = mix(g01.y, g11.y, smoothX);
+    float dValueDz = mix(row0Dz, row1Dz, smoothZ) + ((ix1 - ix0) * derivativeZ);
 
     return vec3(value, dValueDx, dValueDz);
 }
 
-float octaveNoise(vec2 sampleCoord)
+float octaveNoise(vec2 sampleCoord, NoiseLayer layer)
 {
-    vec2 p = sampleCoord * params.noiseBase.y;
+    float rotationRadians = layer.octaveRotationDegrees * kDegreesToRadians;
+    float rotationCosine = cos(rotationRadians);
+    float rotationSine = sin(rotationRadians);
+    vec2 p = vec2(
+        (rotationCosine * sampleCoord.x) - (rotationSine * sampleCoord.y),
+        (rotationSine * sampleCoord.x) + (rotationCosine * sampleCoord.y));
+    p *= layer.initialFrequency;
+
     float value = 0.0;
-    float amplitude = params.noiseBase.z;
+    float amplitude = layer.initialAmplitude;
+    float amplitudeSum = 0.0;
     vec2 accumulatedGradient = vec2(0.0);
-    uint octaveCount = uint(max(params.octaveParams.z, 1.0));
+    uint octaveCount = uint(max(layer.octaveCount, 1.0));
 
     for (uint octave = 0u; octave < octaveCount; ++octave)
     {
-        vec3 sampleResult = sampleValueNoise(p);
+        amplitudeSum += amplitude;
+        vec3 sampleResult = sampleGradientNoise(p);
         accumulatedGradient += sampleResult.yz;
         value +=
             (amplitude * sampleResult.x) /
-            (1.0 + (params.noiseBase.w * dot(accumulatedGradient, accumulatedGradient)));
+            (1.0 + (layer.gradientDampenStrength * dot(accumulatedGradient, accumulatedGradient)));
 
-        amplitude *= params.octaveParams.y;
+        amplitude *= layer.octaveAmplitudeScale;
         p = vec2(
-            (kOctaveRotationCosine * p.x) - (kOctaveRotationSine * p.y),
-            (kOctaveRotationSine * p.x) + (kOctaveRotationCosine * p.y));
-        p *= params.octaveParams.x;
+            (rotationCosine * p.x) - (rotationSine * p.y),
+            (rotationSine * p.x) + (rotationCosine * p.y));
+        p *= layer.octaveFrequencyScale;
     }
 
-    return value;
+    return amplitudeSum > 0.0 ? (value / amplitudeSum) : 0.0;
+}
+
+NoiseLayer makeFractalNoiseLayer(vec4 paramsA, vec4 paramsB, vec4 paramsC)
+{
+    NoiseLayer layer;
+    layer.wavelength = max(paramsA.x, 1.0);
+    layer.amplitude = max(paramsA.y, 0.0);
+    layer.bias = paramsA.z;
+    layer.initialFrequency = max(paramsA.w, 0.0001);
+    layer.initialAmplitude = max(paramsB.x, 0.0);
+    layer.octaveFrequencyScale = max(paramsB.y, 1.01);
+    layer.octaveAmplitudeScale = clamp(paramsB.z, 0.0, 1.0);
+    layer.octaveCount = max(paramsB.w, 1.0);
+    layer.gradientDampenStrength = max(paramsC.x, 0.0);
+    layer.octaveRotationDegrees = clamp(paramsC.y, -180.0, 180.0);
+    return layer;
+}
+
+float sampleLayerHeight(vec2 worldCoord, NoiseLayer layer)
+{
+    vec2 noiseCoord = worldCoord / layer.wavelength;
+    return layer.bias + (octaveNoise(noiseCoord, layer) * layer.amplitude);
 }
 
 void main()
@@ -111,9 +189,37 @@ void main()
         return;
     }
 
-    vec2 noiseCoord = params.sampleOriginAndStep.xy +
+    vec2 worldCoord = params.sampleOriginAndStep.xy +
         (vec2(sampleCoord) * params.sampleOriginAndStep.zw);
-    float height = params.noiseBase.x + (octaveNoise(noiseCoord) * kHeightAmplitude);
+
+    NoiseLayer hillsLayer = makeFractalNoiseLayer(params.hillsLayerA, params.hillsLayerB, params.hillsLayerC);
+    NoiseLayer mediumLayer = makeFractalNoiseLayer(params.mediumLayerA, params.mediumLayerB, params.mediumLayerC);
+    NoiseLayer highLayer = makeFractalNoiseLayer(params.highLayerA, params.highLayerB, params.highLayerC);
+    NoiseLayer blendLayer = makeFractalNoiseLayer(
+        vec4(params.blendLayerA.x, 1.0, params.blendLayerA.y, params.blendLayerA.z),
+        vec4(params.blendLayerA.w, params.blendLayerB.x, params.blendLayerB.y, params.blendLayerB.z),
+        vec4(0.0, params.blendLayerB.w, 0.0, 0.0));
+
+    float blendValue = 0.5 + (0.5 * sampleLayerHeight(worldCoord, blendLayer));
+    float lowThreshold = params.blendLayerC.x;
+    float highThreshold = params.blendLayerC.y;
+    float lowTransitionWidth = params.blendLayerC.z;
+    float highTransitionWidth = params.highLayerC.z;
+    float lowToMedium = smoothStepQuintic(clamp(
+        (blendValue - lowThreshold) /
+        max(abs(lowTransitionWidth), 0.0001),
+        0.0,
+        1.0));
+    float mediumToHigh = smoothStepQuintic(clamp(
+        (blendValue - highThreshold) /
+        max(abs(highTransitionWidth), 0.0001),
+        0.0,
+        1.0));
+
+    float height = params.blendLayerC.w +
+        sampleLayerHeight(worldCoord, hillsLayer) +
+        (sampleLayerHeight(worldCoord, mediumLayer) * lowToMedium) +
+        (sampleLayerHeight(worldCoord, highLayer) * mediumToHigh);
     int heightCentimeters = int(round(height * 100.0));
 
     uint sliceIndex = params.dispatchParams.x;

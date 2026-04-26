@@ -262,7 +262,7 @@ void App::updateSceneForFrame()
         m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_lineRenderer);
         m_quadtreeMeshRenderer.setTerrainHeightParams(
             static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
-            AppConfig::Terrain::kHeightAmplitude);
+            static_cast<float>(terrainNoiseMaxAmplitude(m_worldGridQuadtree.terrainSettings())));
     }
 
     {

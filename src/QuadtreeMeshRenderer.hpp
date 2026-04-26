@@ -32,7 +32,7 @@ public:
         glm::mat4 viewProjection{1.0f};
         glm::vec4 sunDirectionIntensity{0.0f, 1.0f, 0.0f, 1.0f};
         glm::vec4 sunColorAmbient{1.0f, 1.0f, 1.0f, 0.2f};
-        glm::vec4 terrainHeightParams{0.0f, AppConfig::Terrain::kHeightAmplitude, 0.0f, 0.0f};
+        glm::vec4 terrainHeightParams{0.0f, static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude), 0.0f, 0.0f};
     };
 
     QuadtreeMeshRenderer() = default;
@@ -93,8 +93,18 @@ private:
     struct alignas(16) HeightmapGenerationUniforms
     {
         glm::vec4 sampleOriginAndStep{ 0.0f };
-        glm::vec4 noiseBase{ 0.0f };
-        glm::vec4 octaveParams{ 0.0f };
+        glm::vec4 hillsLayerA{ 0.0f };
+        glm::vec4 hillsLayerB{ 0.0f };
+        glm::vec4 hillsLayerC{ 0.0f };
+        glm::vec4 mediumLayerA{ 0.0f };
+        glm::vec4 mediumLayerB{ 0.0f };
+        glm::vec4 mediumLayerC{ 0.0f };
+        glm::vec4 highLayerA{ 0.0f };
+        glm::vec4 highLayerB{ 0.0f };
+        glm::vec4 highLayerC{ 0.0f };
+        glm::vec4 blendLayerA{ 0.0f };
+        glm::vec4 blendLayerB{ 0.0f };
+        glm::vec4 blendLayerC{ 0.0f };
         glm::uvec4 dispatchParams{ 0u };
     };
 
@@ -116,7 +126,7 @@ private:
     static_assert(sizeof(InstanceData) == 16, "Terrain instance data must stay 16 bytes.");
     static_assert(offsetof(InstanceData, position) == 0, "Terrain instance position must start at offset 0.");
     static_assert(offsetof(InstanceData, packedMetadata) == 12, "Terrain packed metadata must stay at offset 12.");
-    static_assert(sizeof(HeightmapGenerationUniforms) == 64, "Heightmap generation uniforms must stay tightly packed.");
+    static_assert(sizeof(HeightmapGenerationUniforms) == 224, "Heightmap generation uniforms must stay tightly packed.");
 
     [[nodiscard]] static std::uint32_t packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow);
 
@@ -174,5 +184,5 @@ private:
     std::uint16_t m_pendingFenceReadbackSlot = UINT16_MAX;
     std::uint16_t m_nextReadbackSlot = 0;
     float m_terrainBaseHeight = 0.0f;
-    float m_terrainHeightAmplitude = AppConfig::Terrain::kHeightAmplitude;
+    float m_terrainHeightAmplitude = static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude);
 };
