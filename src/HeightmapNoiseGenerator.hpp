@@ -24,7 +24,7 @@ public:
     [[nodiscard]] TerrainNoiseSettings& settings() { return m_settings; }
     [[nodiscard]] const TerrainNoiseSettings& settings() const { return m_settings; }
 
-    [[nodiscard]] std::pair<float, float> fillNoise(const Position& a, const Position& b, float* buffer) const;
+    [[nodiscard]] std::pair<float, float> fillNoise(const Position& a, const Position& b, float* buffer = nullptr) const;
 
 private:
     TerrainNoiseSettings m_settings{};

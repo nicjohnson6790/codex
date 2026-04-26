@@ -1,0 +1,127 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set=2, binding=0) uniform HeightmapGenerationUniforms
+{
+    vec4 sampleOriginAndStep;
+    vec4 noiseBase;
+    vec4 octaveParams;
+    uvec4 dispatchParams;
+} params;
+
+layout(set=1, binding=0, std430) buffer HeightmapBuffer
+{
+    float heights[];
+} heightmapBuffer;
+
+struct HeightmapExtents
+{
+    int minHeightCentimeters;
+    int maxHeightCentimeters;
+};
+
+layout(set=1, binding=1, std430) buffer HeightmapExtentsBuffer
+{
+    HeightmapExtents extents[];
+} heightmapExtentsBuffer;
+
+const float kHeightAmplitude = 2800.0;
+const float kOctaveRotationCosine = 0.8;
+const float kOctaveRotationSine = 0.6;
+
+float smoothStepQuintic(float t)
+{
+    return t * t * t * ((t * ((t * 6.0) - 15.0)) + 10.0);
+}
+
+float smoothStepQuinticDerivative(float t)
+{
+    return 30.0 * t * t * ((t * (t - 2.0)) + 1.0);
+}
+
+float valueNoise(int x, int z)
+{
+    uint hash = uint(x) * 0x8DA6B343u;
+    hash ^= uint(z) * 0xD8163841u;
+    hash = (hash ^ (hash >> 13u)) * 0x85EBCA6Bu;
+    hash ^= hash >> 16u;
+    return (float(hash & 0x00FFFFFFu) / float(0x00FFFFFFu)) * 2.0 - 1.0;
+}
+
+vec3 sampleValueNoise(vec2 p)
+{
+    int baseX = int(floor(p.x));
+    int baseZ = int(floor(p.y));
+    float fracX = p.x - float(baseX);
+    float fracZ = p.y - float(baseZ);
+    float smoothX = smoothStepQuintic(fracX);
+    float smoothZ = smoothStepQuintic(fracZ);
+    float derivativeX = smoothStepQuinticDerivative(fracX);
+    float derivativeZ = smoothStepQuinticDerivative(fracZ);
+
+    float n00 = valueNoise(baseX, baseZ);
+    float n10 = valueNoise(baseX + 1, baseZ);
+    float n01 = valueNoise(baseX, baseZ + 1);
+    float n11 = valueNoise(baseX + 1, baseZ + 1);
+
+    float nx0 = mix(n00, n10, smoothX);
+    float nx1 = mix(n01, n11, smoothX);
+    float value = mix(nx0, nx1, smoothZ);
+
+    float dValueDx =
+        (((n10 - n00) * (1.0 - smoothZ)) + ((n11 - n01) * smoothZ)) * derivativeX;
+    float dValueDz = (nx1 - nx0) * derivativeZ;
+
+    return vec3(value, dValueDx, dValueDz);
+}
+
+float octaveNoise(vec2 sampleCoord)
+{
+    vec2 p = sampleCoord * params.noiseBase.y;
+    float value = 0.0;
+    float amplitude = params.noiseBase.z;
+    vec2 accumulatedGradient = vec2(0.0);
+    uint octaveCount = uint(max(params.octaveParams.z, 1.0));
+
+    for (uint octave = 0u; octave < octaveCount; ++octave)
+    {
+        vec3 sampleResult = sampleValueNoise(p);
+        accumulatedGradient += sampleResult.yz;
+        value +=
+            (amplitude * sampleResult.x) /
+            (1.0 + (params.noiseBase.w * dot(accumulatedGradient, accumulatedGradient)));
+
+        amplitude *= params.octaveParams.y;
+        p = vec2(
+            (kOctaveRotationCosine * p.x) - (kOctaveRotationSine * p.y),
+            (kOctaveRotationSine * p.x) + (kOctaveRotationCosine * p.y));
+        p *= params.octaveParams.x;
+    }
+
+    return value;
+}
+
+void main()
+{
+    uvec2 sampleCoord = gl_GlobalInvocationID.xy;
+    uint resolution = params.dispatchParams.y;
+    if (sampleCoord.x >= resolution || sampleCoord.y >= resolution)
+    {
+        return;
+    }
+
+    vec2 noiseCoord = params.sampleOriginAndStep.xy +
+        (vec2(sampleCoord) * params.sampleOriginAndStep.zw);
+    float height = params.noiseBase.x + (octaveNoise(noiseCoord) * kHeightAmplitude);
+    int heightCentimeters = int(round(height * 100.0));
+
+    uint sliceIndex = params.dispatchParams.x;
+    uint linearIndex =
+        (sliceIndex * resolution * resolution) +
+        (sampleCoord.y * resolution) +
+        sampleCoord.x;
+    heightmapBuffer.heights[linearIndex] = height;
+    atomicMin(heightmapExtentsBuffer.extents[sliceIndex].minHeightCentimeters, heightCentimeters);
+    atomicMax(heightmapExtentsBuffer.extents[sliceIndex].maxHeightCentimeters, heightCentimeters);
+}

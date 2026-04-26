@@ -1,15 +1,15 @@
 #include "WorldGridQuadtree.hpp"
 
 #include "PerformanceCapture.hpp"
+#include "QuadtreeMeshRenderer.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>
+#include <vector>
 
 namespace
 {
-constexpr double kMinimumTerrainVisibilityRadius = 1000.0;
-constexpr double kTerrainForwardVisibilityDotThreshold = 0.5;
 constexpr double kVisibilityBoundsHalfHeight = 10000.0;
 
 glm::dvec3 nodeCenterAtZeroHeight(const Position& minCorner, const Position& maxCorner)
@@ -174,32 +174,65 @@ bool nodeIsParentOfLeaves(
 
 WorldGridQuadtree::WorldGridQuadtree() { reset(); }
 
+void WorldGridQuadtree::beginHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer)
+{
+    HELLO_PROFILE_SCOPE("WorldGridQuadtree::BeginHeightmapUpdate");
+
+    std::vector<QuadtreeMeshRenderer::GeneratedHeightmapExtents> completedExtents;
+    meshRenderer.collectCompletedHeightmapExtents(completedExtents);
+    for (const QuadtreeMeshRenderer::GeneratedHeightmapExtents& generatedExtents : completedExtents)
+    {
+        m_heightmapManager.applyGeneratedExtents(
+            generatedExtents.leafId,
+            generatedExtents.sliceIndex,
+            generatedExtents.extents);
+        applyGeneratedExtentsToKnownNodes(
+            generatedExtents.leafId,
+            generatedExtents.extents);
+    }
+}
+
+void WorldGridQuadtree::endHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer)
+{
+    HELLO_PROFILE_SCOPE("WorldGridQuadtree::EndHeightmapUpdate");
+    m_heightmapManager.dispatchFromQueue(meshRenderer);
+}
+
 void WorldGridQuadtree::updateTree(const CameraManager::Camera& activeCamera, Extent2D viewportExtent)
 {
     HELLO_PROFILE_SCOPE("WorldGridQuadtree::UpdateTree");
 
     m_viewportExtent = viewportExtent;
-    refreshBaseNodes(activeCamera.position);
-    m_heightmapManager.ageMap();
+    {
+        HELLO_PROFILE_SCOPE("WorldGridQuadtree::RefreshBaseNodes");
+        refreshBaseNodes(activeCamera.position);
+    }
+    {
+        HELLO_PROFILE_SCOPE("WorldGridQuadtree::AgeHeightmapResidency");
+        m_heightmapManager.ageMap();
+    }
     treeData = {};
 
-    for (const std::uint16_t nodeIndex : m_baseNodes)
     {
-        if (nodeIndex != QuadtreeNode::NullNodeIndex)
+        HELLO_PROFILE_SCOPE("WorldGridQuadtree::UpdateBaseNodes");
+        for (const std::uint16_t nodeIndex : m_baseNodes)
         {
-            updateNode(nodeIndex, activeCamera);
+            if (nodeIndex != QuadtreeNode::NullNodeIndex)
+            {
+                updateNode(nodeIndex, activeCamera);
+            }
         }
     }
 }
 
 void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
 {
+    HELLO_PROFILE_SCOPE("WorldGridQuadtree::EmitMeshDraws");
+
     if (renderEngines.quadtreeMeshRenderer == nullptr)
     {
         return;
     }
-
-    m_heightmapManager.uploadFromQueue(*renderEngines.quadtreeMeshRenderer);
 
     for (const QuadtreeNode& node : m_nodes)
     {
@@ -227,8 +260,21 @@ void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
     }
 }
 
+void WorldGridQuadtree::clearTerrainCache()
+{
+    m_heightmapManager.clearCache();
+    for (QuadtreeNode& node : m_nodes)
+    {
+        setNodeFlag(node, QuadtreeNode::HasExtentsMask, false);
+        node.minHeight = 0.0f;
+        node.maxHeight = 0.0f;
+    }
+}
+
 void WorldGridQuadtree::emitDebugDraws(RenderEngines& renderEngines) const
 {
+    HELLO_PROFILE_SCOPE("WorldGridQuadtree::EmitDebugDraws");
+
     for (const QuadtreeNode& node : m_nodes)
     {
         if (nodeHasFlag(node, QuadtreeNode::IsUsedMask) &&
@@ -376,7 +422,7 @@ void WorldGridQuadtree::ensureChildren(std::uint16_t nodeIndex)
     setNodeFlag(node, QuadtreeNode::IsLeafMask, false);
 }
 
-void WorldGridQuadtree::updateNodeExtentsFromCache(QuadtreeNode& node)
+void WorldGridQuadtree::applyKnownExtentsToNode(QuadtreeNode& node)
 {
     HeightmapExtents extents{};
     if (!m_heightmapManager.getExtents(node.nodeId, extents))
@@ -389,6 +435,23 @@ void WorldGridQuadtree::updateNodeExtentsFromCache(QuadtreeNode& node)
     setNodeFlag(node, QuadtreeNode::HasExtentsMask, true);
 }
 
+void WorldGridQuadtree::applyGeneratedExtentsToKnownNodes(
+    const WorldGridQuadtreeLeafId& leafId,
+    const HeightmapExtents& extents)
+{
+    for (QuadtreeNode& node : m_nodes)
+    {
+        if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask) || node.nodeId != leafId)
+        {
+            continue;
+        }
+
+        node.minHeight = extents.minHeight;
+        node.maxHeight = extents.maxHeight;
+        setNodeFlag(node, QuadtreeNode::HasExtentsMask, true);
+    }
+}
+
 void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager::Camera& activeCamera)
 {
     QuadtreeNode& node = m_nodes[nodeIndex];
@@ -397,16 +460,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         return;
     }
 
-    updateNodeExtentsFromCache(node);
-
     const double size = worldGridQuadtreeLeafSize(node.nodeId);
-    const double terrainMinY = terrainMinHeight();
-    const double terrainMaxY = terrainMaxHeight();
-    const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(
-        node.nodeId,
-        terrainMinY,
-        terrainMaxY);
-
     const double drawMinHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
         ? static_cast<double>(node.minHeight)
         : -kVisibilityBoundsHalfHeight;
@@ -439,9 +493,9 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
         {
             const bool resident = m_heightmapManager.makeResident(node.nodeId);
-            if (resident)
+            if (resident && !nodeHasFlag(node, QuadtreeNode::HasExtentsMask))
             {
-                updateNodeExtentsFromCache(node);
+                applyKnownExtentsToNode(node);
             }
             setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
             setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
@@ -473,9 +527,9 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
         const bool wasSubdividing = nodeHasFlag(node, QuadtreeNode::IsSubdividingMask);
         const bool resident = m_heightmapManager.makeResident(node.nodeId);
-        if (resident)
+        if (resident && !nodeHasFlag(node, QuadtreeNode::HasExtentsMask))
         {
-            updateNodeExtentsFromCache(node);
+            applyKnownExtentsToNode(node);
         }
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
 
@@ -492,9 +546,9 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
     {
         const bool resident = m_heightmapManager.makeResident(node.nodeId);
-        if (resident)
+        if (resident && !nodeHasFlag(node, QuadtreeNode::HasExtentsMask))
         {
-            updateNodeExtentsFromCache(node);
+            applyKnownExtentsToNode(node);
         }
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
         setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
@@ -520,9 +574,9 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
     const bool wasCollapsing = nodeHasFlag(node, QuadtreeNode::IsCollapsingMask);
     const bool resident = m_heightmapManager.makeResident(node.nodeId);
-    if (resident)
+    if (resident && !nodeHasFlag(node, QuadtreeNode::HasExtentsMask))
     {
-        updateNodeExtentsFromCache(node);
+        applyKnownExtentsToNode(node);
     }
     setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
     setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
@@ -614,14 +668,4 @@ double WorldGridQuadtree::distanceSquaredToBounds(
     const double deltaY = pointY < minY ? minY - pointY : (pointY > maxY ? pointY - maxY : 0.0);
     const double deltaZ = pointZ < minZ ? minZ - pointZ : (pointZ > maxZ ? pointZ - maxZ : 0.0);
     return (deltaX * deltaX) + (deltaY * deltaY) + (deltaZ * deltaZ);
-}
-
-double WorldGridQuadtree::terrainMinHeight() const
-{
-    return terrainSettings().baseHeight - static_cast<double>(AppConfig::Terrain::kHeightAmplitude);
-}
-
-double WorldGridQuadtree::terrainMaxHeight() const
-{
-    return terrainSettings().baseHeight + static_cast<double>(AppConfig::Terrain::kHeightAmplitude);
 }

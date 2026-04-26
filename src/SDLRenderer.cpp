@@ -146,6 +146,19 @@ void SDLRenderer::renderFrame(
         SDL_EndGPUCopyPass(copyPass);
     }
 
+    quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
+
+    {
+        HELLO_PROFILE_SCOPE("SDLRenderer::DownloadTerrainExtents");
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+        if (copyPass == nullptr)
+        {
+            throwSdlError("Failed to begin SDL GPU extents download copy pass.");
+        }
+        quadtreeMeshRenderer.queueHeightmapExtentsDownload(copyPass);
+        SDL_EndGPUCopyPass(copyPass);
+    }
+
     if (drawData != nullptr)
     {
         HELLO_PROFILE_SCOPE("SDLRenderer::PrepareImGui");
@@ -240,7 +253,9 @@ void SDLRenderer::renderFrame(
         SDL_EndGPURenderPass(renderPass);
     }
 
-    if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
+    SDL_GPUFence* submittedFence = SDL_SubmitGPUCommandBufferAndAcquireFence(commandBuffer);
+    quadtreeMeshRenderer.attachSubmittedFence(submittedFence);
+    if (submittedFence == nullptr)
     {
         throwSdlError("Failed to submit SDL GPU command buffer.");
     }

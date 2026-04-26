@@ -32,11 +32,17 @@ public:
     void ageMap();
     bool makeResident(const WorldGridQuadtreeLeafId& leafId);
     void requestLeaf(const WorldGridQuadtreeLeafId& leafId, QuadtreeMeshRenderer& meshRenderer);
-    void uploadFromQueue(QuadtreeMeshRenderer& meshRenderer);
+    void dispatchFromQueue(QuadtreeMeshRenderer& meshRenderer);
+    void applyGeneratedExtents(
+        const WorldGridQuadtreeLeafId& leafId,
+        std::uint16_t sliceIndex,
+        const HeightmapExtents& extents);
     void clearCache();
     [[nodiscard]] bool getExtents(const WorldGridQuadtreeLeafId& leafId, HeightmapExtents& extents) const;
     [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_noiseGenerator.settings(); }
     [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_noiseGenerator.settings(); }
+    [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_computeDispatchBudget; }
+    void setComputeDispatchBudget(std::uint16_t budget);
     [[nodiscard]] std::uint16_t residentCount() const { return m_residentCount; }
     [[nodiscard]] std::uint16_t queuedCount() const { return m_queueCount; }
 
@@ -55,9 +61,11 @@ private:
     std::array<ResidentMapEntry, kCapacity> m_residentMap{};
     std::uint16_t m_residentCount = 0;
 
-    std::array<HeightmapExtents, kCapacity> m_sliceExtents{};
+    std::array<HeightmapExtents, kCapacity> m_knownExtents{};
+    std::array<bool, kCapacity> m_knownExtentsValid{};
     std::array<std::uint16_t, kCapacity> m_freeSlots{};
     std::uint16_t m_freeSlotCount = 0;
+    std::uint16_t m_computeDispatchBudget = 4;
 
     HeightmapNoiseGenerator m_noiseGenerator;
 };

@@ -139,7 +139,10 @@ std::pair<float, float> HeightmapNoiseGenerator::fillNoise(const Position& a, co
         {
             const double sampleX = worldMinX + (stepX * static_cast<double>(x));
             const float height = static_cast<float>(sampleHeight(sampleX, sampleZ, m_settings));
-            buffer[(static_cast<std::size_t>(z) * AppConfig::Terrain::kHeightmapResolution) + x] = height;
+            if (buffer != nullptr)
+            {
+                buffer[(static_cast<std::size_t>(z) * AppConfig::Terrain::kHeightmapResolution) + x] = height;
+            }
             minHeight = std::min(minHeight, height);
             maxHeight = std::max(maxHeight, height);
         }

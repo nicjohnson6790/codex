@@ -237,6 +237,7 @@ void AppPanels::drawTerrainTab(Context& context)
 
     TerrainNoiseSettings& settings = context.worldGridQuadtree.terrainSettings();
     int octaveCount = static_cast<int>(settings.octaveCount);
+    int computeDispatchBudget = static_cast<int>(context.worldGridQuadtree.computeDispatchBudget());
 
     ImGui::TextWrapped("Terrain slices keep their generated heightmaps in the LRU cache. After changing these values, regenerate the cache to rebuild terrain with the new noise settings.");
     ImGui::Spacing();
@@ -250,6 +251,8 @@ void AppPanels::drawTerrainTab(Context& context)
     ImGui::InputDouble("Octave frequency scale", &settings.octaveFrequencyScale, 0.05, 0.25, "%.2f");
     ImGui::InputDouble("Octave amplitude scale", &settings.octaveAmplitudeScale, 0.02, 0.10, "%.2f");
     ImGui::InputDouble("Gradient dampening k", &settings.gradientDampenStrength, 0.05, 0.25, "%.2f");
+    ImGui::SliderInt("Compute dispatches/frame", &computeDispatchBudget, 1, 64);
+    context.worldGridQuadtree.setComputeDispatchBudget(static_cast<std::uint16_t>(std::max(computeDispatchBudget, 1)));
 
     settings.baseWavelength = std::max(1.0, settings.baseWavelength);
     settings.initialFrequency = std::max(0.0001, settings.initialFrequency);

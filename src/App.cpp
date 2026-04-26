@@ -246,46 +246,76 @@ void App::buildUi()
 
 void App::updateSceneForFrame()
 {
+    HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame");
+
     if (m_panels.viewportPaused() || !m_cameraManager.hasActiveCamera())
     {
         return;
     }
 
     const Extent2D viewportExtent = m_panels.viewportExtent();
-    const Position& cameraPosition = m_cameraManager.activeCameraPosition();
 
-    m_renderer.setViewportSize(viewportExtent);
-    m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_lineRenderer);
-    m_quadtreeMeshRenderer.setTerrainHeightParams(
-        static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
-        AppConfig::Terrain::kHeightAmplitude);
-
-    m_triangleRenderer.clear();
-    m_quadtreeMeshRenderer.clear();
-    for (const TriangleInstance& instance : m_instances)
     {
-        m_triangleRenderer.addTriangle(instance.position);
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncRenderState");
+        const Position& cameraPosition = m_cameraManager.activeCameraPosition();
+        m_renderer.setViewportSize(viewportExtent);
+        m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_lineRenderer);
+        m_quadtreeMeshRenderer.setTerrainHeightParams(
+            static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
+            AppConfig::Terrain::kHeightAmplitude);
     }
 
-    m_lineRenderer.clear();
-    const Position origin(0, 0, { 0.0, 0.0, 0.0 });
-    const Position axisX(0, 0, { 1.0, 0.0, 0.0 });
-    const Position axisY(0, 0, { 0.0, 1.0, 0.0 });
-    const Position axisZ(0, 0, { 0.0, 0.0, 1.0 });
-    m_lineRenderer.addLine(origin, axisX, glm::vec3(1.0f, 0.25f, 0.25f));
-    m_lineRenderer.addLine(origin, axisY, glm::vec3(0.25f, 1.0f, 0.25f));
-    m_lineRenderer.addLine(origin, axisZ, glm::vec3(0.35f, 0.6f, 1.0f));
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BuildTriangles");
+        m_triangleRenderer.clear();
+        m_quadtreeMeshRenderer.clear();
+        for (const TriangleInstance& instance : m_instances)
+        {
+            m_triangleRenderer.addTriangle(instance.position);
+        }
+    }
 
-    m_worldGridQuadtree.updateTree(m_cameraManager.activeCamera(), viewportExtent);
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BuildDebugAxes");
+        m_lineRenderer.clear();
+        const Position origin(0, 0, { 0.0, 0.0, 0.0 });
+        const Position axisX(0, 0, { 1.0, 0.0, 0.0 });
+        const Position axisY(0, 0, { 0.0, 1.0, 0.0 });
+        const Position axisZ(0, 0, { 0.0, 0.0, 1.0 });
+        m_lineRenderer.addLine(origin, axisX, glm::vec3(1.0f, 0.25f, 0.25f));
+        m_lineRenderer.addLine(origin, axisY, glm::vec3(0.25f, 1.0f, 0.25f));
+        m_lineRenderer.addLine(origin, axisZ, glm::vec3(0.35f, 0.6f, 1.0f));
+    }
+
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BeginHeightmapUpdate");
+        m_worldGridQuadtree.beginHeightmapUpdate(m_quadtreeMeshRenderer);
+    }
+
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::UpdateQuadtree");
+        m_worldGridQuadtree.updateTree(m_cameraManager.activeCamera(), viewportExtent);
+    }
+
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EndHeightmapUpdate");
+        m_worldGridQuadtree.endHeightmapUpdate(m_quadtreeMeshRenderer);
+    }
 
     RenderEngines renderEngines{
         .triangleRenderer = m_triangleRenderer,
         .lineRenderer = m_lineRenderer,
         .quadtreeMeshRenderer = &m_quadtreeMeshRenderer,
     };
-    m_worldGridQuadtree.emitMeshDraws(renderEngines);
+
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitTerrainDraws");
+        m_worldGridQuadtree.emitMeshDraws(renderEngines);
+    }
+
     if (m_panels.showQuadtreeBorders())
     {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitDebugDraws");
         m_worldGridQuadtree.emitDebugDraws(renderEngines);
     }
 }

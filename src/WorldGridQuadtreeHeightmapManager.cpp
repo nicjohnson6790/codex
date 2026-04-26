@@ -1,8 +1,10 @@
 #include "WorldGridQuadtreeHeightmapManager.hpp"
 
 #include "AppConfig.hpp"
+#include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 
+#include <algorithm>
 #include <limits>
 
 WorldGridQuadtreeHeightmapManager::WorldGridQuadtreeHeightmapManager()
@@ -37,7 +39,8 @@ void WorldGridQuadtreeHeightmapManager::clearCache()
     {
         m_leafQueue[slot] = {};
         m_residentMap[slot] = {};
-        m_sliceExtents[slot] = {};
+        m_knownExtents[slot] = {};
+        m_knownExtentsValid[slot] = false;
         m_freeSlots[slot] = static_cast<std::uint16_t>(kCapacity - 1 - slot);
     }
 
@@ -78,61 +81,94 @@ bool WorldGridQuadtreeHeightmapManager::getExtents(const WorldGridQuadtreeLeafId
         return false;
     }
 
-    extents = m_sliceExtents[m_residentMap[residentIndex].lruSlice];
+    const std::uint16_t sliceIndex = m_residentMap[residentIndex].lruSlice;
+    if (!m_knownExtentsValid[sliceIndex])
+    {
+        return false;
+    }
+
+    extents = m_knownExtents[sliceIndex];
     return true;
 }
 
-void WorldGridQuadtreeHeightmapManager::uploadFromQueue(QuadtreeMeshRenderer& meshRenderer)
+void WorldGridQuadtreeHeightmapManager::applyGeneratedExtents(
+    const WorldGridQuadtreeLeafId& leafId,
+    std::uint16_t sliceIndex,
+    const HeightmapExtents& extents)
 {
-    WorldGridQuadtreeLeafId leafId{};
-    if (!dequeueLeaf(leafId))
+    const std::uint16_t residentIndex = findResidentIndex(leafId);
+    if (residentIndex == kCapacity || m_residentMap[residentIndex].lruSlice != sliceIndex)
     {
         return;
     }
 
-    std::uint16_t residentIndex = findResidentIndex(leafId);
-    if (residentIndex != kCapacity)
-    {
-        m_residentMap[residentIndex].age = 0;
-        return;
-    }
+    m_knownExtents[sliceIndex] = extents;
+    m_knownExtentsValid[sliceIndex] = true;
+}
 
-    std::uint16_t slice = 0;
-    if (m_freeSlotCount > 0)
+void WorldGridQuadtreeHeightmapManager::setComputeDispatchBudget(std::uint16_t budget)
+{
+    m_computeDispatchBudget = std::max<std::uint16_t>(1, budget);
+}
+
+void WorldGridQuadtreeHeightmapManager::dispatchFromQueue(QuadtreeMeshRenderer& meshRenderer)
+{
+    HELLO_PROFILE_SCOPE("WorldGridQuadtreeHeightmapManager::DispatchFromQueue");
+
+    for (std::uint16_t dispatchIndex = 0; dispatchIndex < m_computeDispatchBudget; ++dispatchIndex)
     {
-        slice = m_freeSlots[--m_freeSlotCount];
-        residentIndex = m_residentCount++;
-    }
-    else
-    {
-        residentIndex = findOldestResidentIndex();
-        if (residentIndex == kCapacity)
+        HELLO_PROFILE_SCOPE("WorldGridQuadtreeHeightmapManager::DispatchQueuedLeaf");
+
+        WorldGridQuadtreeLeafId leafId{};
+        if (!dequeueLeaf(leafId))
+        {
+            return;
+        }
+
+        std::uint16_t residentIndex = findResidentIndex(leafId);
+        if (residentIndex != kCapacity)
+        {
+            m_residentMap[residentIndex].age = 0;
+            continue;
+        }
+
+        std::uint16_t slice = 0;
+        bool appendResident = false;
+        if (m_freeSlotCount > 0)
+        {
+            slice = m_freeSlots[m_freeSlotCount - 1];
+            residentIndex = m_residentCount;
+            appendResident = true;
+        }
+        else
+        {
+            residentIndex = findOldestResidentIndex();
+            if (residentIndex == kCapacity)
+            {
+                enqueueLeaf(leafId);
+                return;
+            }
+            slice = m_residentMap[residentIndex].lruSlice;
+        }
+
+        if (!meshRenderer.queueHeightmapGeneration(leafId, slice, m_noiseGenerator.settings()))
         {
             enqueueLeaf(leafId);
             return;
         }
-        slice = m_residentMap[residentIndex].lruSlice;
+
+        m_knownExtentsValid[slice] = false;
+        m_residentMap[residentIndex] = {
+            .leafId = leafId,
+            .lruSlice = slice,
+            .age = 0,
+        };
+        if (appendResident)
+        {
+            --m_freeSlotCount;
+            ++m_residentCount;
+        }
     }
-
-    float* buffer = meshRenderer.getCopyBuffer(slice);
-    if (buffer == nullptr)
-    {
-        enqueueLeaf(leafId);
-        return;
-    }
-
-    const auto [a, b] = worldGridQuadtreeLeafBounds(leafId);
-    const auto [minHeight, maxHeight] = m_noiseGenerator.fillNoise(a, b, buffer);
-    m_sliceExtents[slice] = {
-        .minHeight = minHeight,
-        .maxHeight = maxHeight,
-    };
-
-    m_residentMap[residentIndex] = {
-        .leafId = leafId,
-        .lruSlice = slice,
-        .age = 0,
-    };
 }
 
 std::uint16_t WorldGridQuadtreeHeightmapManager::findResidentIndex(const WorldGridQuadtreeLeafId& leafId) const

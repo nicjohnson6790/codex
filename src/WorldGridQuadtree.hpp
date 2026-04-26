@@ -12,6 +12,7 @@
 #include <cstdint>
 
 class RenderEngines;
+class QuadtreeMeshRenderer;
 
 struct QuadtreeNode
 {
@@ -58,12 +59,16 @@ public:
     WorldGridQuadtree(const WorldGridQuadtree&) = delete;
     WorldGridQuadtree& operator=(const WorldGridQuadtree&) = delete;
 
+    void beginHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer);
     void updateTree(const CameraManager::Camera& activeCamera, Extent2D viewportExtent);
+    void endHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer);
     void emitMeshDraws(RenderEngines& renderEngines);
     void emitDebugDraws(RenderEngines& renderEngines) const;
-    void clearTerrainCache() { m_heightmapManager.clearCache(); }
+    void clearTerrainCache();
     [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_heightmapManager.terrainSettings(); }
     [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_heightmapManager.terrainSettings(); }
+    [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_heightmapManager.computeDispatchBudget(); }
+    void setComputeDispatchBudget(std::uint16_t budget) { m_heightmapManager.setComputeDispatchBudget(budget); }
     [[nodiscard]] std::uint16_t residentCount() const { return m_heightmapManager.residentCount(); }
     [[nodiscard]] std::uint16_t queuedCount() const { return m_heightmapManager.queuedCount(); }
 
@@ -79,7 +84,10 @@ private:
     void freeSubtree(std::uint16_t nodeIndex);
     void ensureChildren(std::uint16_t nodeIndex);
     void updateNode(std::uint16_t nodeIndex, const CameraManager::Camera& activeCamera);
-    void updateNodeExtentsFromCache(QuadtreeNode& node);
+    void applyKnownExtentsToNode(QuadtreeNode& node);
+    void applyGeneratedExtentsToKnownNodes(
+        const WorldGridQuadtreeLeafId& leafId,
+        const HeightmapExtents& extents);
     [[nodiscard]] bool shouldSubdivide(const QuadtreeNode& node, const Position& cameraPosition) const;
     [[nodiscard]] static bool nodeHasFlag(const QuadtreeNode& node, std::uint8_t mask);
     static void setNodeFlag(QuadtreeNode& node, std::uint8_t mask, bool enabled);
@@ -93,9 +101,6 @@ private:
         double maxX,
         double maxY,
         double maxZ);
-    [[nodiscard]] double terrainMinHeight() const;
-    [[nodiscard]] double terrainMaxHeight() const;
-
     WorldGridQuadtreeDebugRenderer m_debugRenderer;
     WorldGridQuadtreeHeightmapManager m_heightmapManager;
     std::array<QuadtreeNode, kNodeCapacity> m_nodes{};

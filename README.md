@@ -1,76 +1,99 @@
-# SDL3 GPU + ImGui World Grid Sandbox
+# SDL3 GPU + ImGui Terrain Sandbox
 
-This project is a small editor-style sandbox built around:
+This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, and a quadtree terrain renderer.
 
-- SDL3 windowing and gamepad input
-- SDL3 GPU as the rendering API
-- Dear ImGui docking UI
-- An offscreen viewport rendered into an ImGui panel
-- Immediate-mode style engine renderers for triangles and lines
-- A global-grid-aware camera and position system
-- A quadtree world-grid debug overlay
-- A quadtree-driven terrain mesh renderer with heightmap LRU management
-- A simple global sun light with Gouraud terrain shading
-- Built-in CPU/frame-time capture with a flame graph
+## Overview
 
-## Current Stack
+The app renders into an offscreen viewport that is shown inside an ImGui layout. Terrain is managed as quadtree patches, with heightmaps cached in an LRU and rendered through a reusable indexed patch mesh. Heightmaps are generated on the GPU with a compute shader, and per-slice min/max extents are reduced on the GPU and read back asynchronously for culling, subdivision, and debug bounds.
 
-- `SDLRenderer`: platform renderer that owns SDL GPU device setup, swapchain flow, viewport targets, and presentation
-- `TriangleRenderer`: immediate-style triangle renderer with instanced drawing
-- `LineRenderer`: immediate-style 3D line renderer for debug visualization
-- `QuadtreeMeshRenderer`: heightmap-backed terrain renderer using indirect indexed draws
-- `CameraManager` + `FreeFlightCameraController`: camera storage and free-flight gamepad control
-- `WorldGridQuadtree`: dynamic per-cell quadtree generation, transition tracking, and terrain/debug draw submission around the active camera
-- `WorldGridQuadtreeHeightmapManager`: quadtree-owned heightmap LRU cache for leaf nodes and parents-of-leaves
-- `LightingSystem`: global sun light state used by the terrain path
-- `PerfPanel` + `PerformanceCapture`: rolling frame timing, CPU timing, and flame graph inspection
+Core pieces:
 
-## Project Layout
+- `SDLRenderer`: SDL GPU device, swapchain, viewport targets, and frame submission
+- `TriangleRenderer`: simple instanced triangle rendering
+- `LineRenderer`: immediate-style debug line rendering
+- `QuadtreeMeshRenderer`: terrain draw path, compute heightmap generation, and async extents readback
+- `WorldGridQuadtree`: quadtree update, draw selection, subdivision/collapse, and debug draw emission
+- `WorldGridQuadtreeHeightmapManager`: heightmap residency, LRU replacement, and compute dispatch queueing
+- `CameraManager` + `FreeFlightCameraController`: camera storage and free-flight controls
+- `LightingSystem`: global sun direction, color, and intensity
+- `PerformanceCapture` + `PerfPanel`: frame timing and flame graph UI
 
-- `src/App.*`: app lifetime, frame loop, scene update, and high-level wiring
-- `src/AppPanels.*`: dock layout and editor panels
-- `src/PerfPanel.*`: perf tab UI and flame graph rendering
-- `src/SDLRenderer.*`: SDL GPU platform renderer
-- `src/TriangleRenderer.*`: instanced triangle rendering
-- `src/LineRenderer.*`: immediate-mode debug line rendering
-- `src/QuadtreeMeshRenderer.*`: quadtree terrain rendering
-- `src/CameraManager.*`: camera storage and projection building
-- `src/FreeFlightCameraController.*`: gamepad-driven 6-DoF camera movement
-- `src/LightingSystem.*`: global light state
-- `src/WorldGridQuadtree.*`: quadtree generation, transition state, visibility counting, and terrain/debug submission
-- `src/WorldGridQuadtreeHeightmapManager.*`: heightmap slice cache and upload queue management
-- `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug rendering
-- `src/Position.hpp`: global-grid-aware position type
-- `src/SceneTypes.hpp`: scene-facing data types
-- `src/RenderTypes.hpp`: render-facing data types
-- `src/AppConfig.hpp`: shared tuning/config constants
-- `shaders/triangle.*`: triangle shaders
-- `shaders/line.*`: line shaders
+## Current Terrain Pipeline
+
+Each frame, terrain work is split into three phases:
+
+1. `beginHeightmapUpdate`
+   Completed GPU extents readbacks are collected and folded back into the heightmap manager and any live quadtree nodes.
+2. `updateTree`
+   The quadtree updates from cached residency/extents state, decides subdivision/collapse, and marks nodes for drawing.
+3. `endHeightmapUpdate`
+   Queued leaf requests are pushed from the heightmap manager into the compute generation path.
+
+The renderer then:
+
+1. uploads draw-instance data
+2. initializes per-slice extents sentinels
+3. dispatches compute jobs for queued terrain slices
+4. queues an async extents download
+5. renders the terrain, triangles, debug lines, and ImGui
 
 ## Features
 
-- Docked `Info` pane on the left and `Viewport` on the right by default
-- Gamepad free-flight camera controls
+- Docked `Info` and `Viewport` panes with ImGui docking
+- Offscreen SDL GPU viewport displayed inside the UI
+- Free-flight camera controls with gamepad support
 - Multiple cameras with active-camera switching
 - Triangle instance editing in grid/local coordinates
-- Debug axis rendering and optional quadtree border rendering
-- Quadtree terrain rendering with 512 cached `259 x 259` heightmap slices
-- Terrain patches keep a 1-sample halo outside the leaf bounds, and currently render the interior `2..256` sample region as `254 x 254` quads while leaving edge closure for later
-- CPU-side octave noise height generation feeding an SDL GPU storage buffer
-- Simple sun-light controls with Gouraud terrain shading
-- Reversed-Z depth with an infinite far plane
-- Rolling frame-time graph with CPU overlay
-- Click-to-freeze frame inspection and a flame graph in the `Perf` tab
-- Compact CPU flame-graph mode that collapses idle/wait time for readability
+- Quadtree terrain rendering with runtime residency and subdivision
+- `259 x 259` heightmap slices with halo samples and a reusable terrain patch mesh
+- GPU compute terrain generation with async GPU extents readback
+- Runtime terrain tuning:
+  - base height
+  - base wavelength
+  - initial frequency
+  - initial amplitude
+  - octave count
+  - octave frequency scale
+  - octave amplitude scale
+  - gradient dampening `k`
+  - compute dispatches per frame
+- Quadtree debug bounds using real extents when known, falling back to a flat square when not
+- Gouraud terrain shading with a tunable global sun light
+- Built-in frame graph and CPU flame graph
+
+## Project Layout
+
+- `src/App.*`: app lifetime, frame loop, and scene/update orchestration
+- `src/AppPanels.*`: UI layout and editor panels
+- `src/SDLRenderer.*`: SDL GPU setup and frame submission
+- `src/QuadtreeMeshRenderer.*`: terrain draw path and compute integration
+- `src/WorldGridQuadtree.*`: quadtree state and traversal
+- `src/WorldGridQuadtreeHeightmapManager.*`: heightmap LRU and compute queue management
+- `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug box rendering
+- `src/HeightmapNoiseGenerator.*`: CPU reference terrain sampling and shared settings
+- `src/TriangleRenderer.*`: triangle rendering
+- `src/LineRenderer.*`: debug line rendering
+- `src/CameraManager.*`: camera storage and projection building
+- `src/FreeFlightCameraController.*`: free-flight controls
+- `src/LightingSystem.*`: sun-light state
+- `src/PerformanceCapture.*`: timing capture
+- `src/PerfPanel.*`: performance UI
+- `src/Position.hpp`: large-world grid/local position type
+- `src/WorldGridQuadtreeTypes.hpp`: quadtree leaf ids and bounds helpers
+- `src/AppConfig.hpp`: shared constants and tuning defaults
+- `shaders/triangle.*`: triangle shaders
+- `shaders/line.*`: line shaders
+- `shaders/quadtree_mesh.*`: terrain graphics shaders
+- `shaders/heightmap_generate.comp`: terrain compute shader
 
 ## Dependencies
 
 - CMake 3.25+
 - A C++20 compiler
 - Vulkan SDK with `glslc`
-- Internet access during configure time for CMake `FetchContent`
+- Internet access during configure time for `FetchContent`
 
-The project fetches:
+Fetched dependencies:
 
 - SDL `release-3.4.0`
 - Dear ImGui `v1.92.5-docking`
@@ -85,9 +108,6 @@ tools\configure.cmd
 tools\build.cmd
 ```
 
-These default to an optimized `Release` build in `build\Release`.
-If the requested build directory does not exist yet, the scripts will create it automatically.
-
 For a debug build:
 
 ```powershell
@@ -95,7 +115,7 @@ tools\configure.cmd Debug
 tools\build.cmd Debug
 ```
 
-If the build directory already exists and only code changed, you can usually skip configure and just run:
+If the build directory already exists and only source changed, you can usually skip configure:
 
 ```powershell
 tools\build.cmd
@@ -115,24 +135,19 @@ Debug:
 .\build\Debug\hello_triangle.exe
 ```
 
-## Startup Diagnostics
-
-The executable supports two optional flags:
+Startup flags:
 
 ```powershell
 .\build\Debug\hello_triangle.exe --verbose-startup --quit-after-first-frame
 ```
 
-- `--verbose-startup`: prints startup progress to the console
-- `--quit-after-first-frame`: exits after the first frame is submitted
-
-These are useful for startup/debugging checks without leaving the app running.
+- `--verbose-startup`: print startup progress
+- `--quit-after-first-frame`: submit one frame and exit
 
 ## Notes
 
-- The rendering path is SDL GPU-first, not direct Vulkan-first, though shader compilation still uses `glslc`.
-- The viewport is rendered to an offscreen SDL GPU texture and then displayed in ImGui.
-- Triangle and debug-line submissions are rebuilt each frame in an immediate-style flow.
-- World positions use a large horizontal grid with local coordinates per cell to keep camera-relative rendering stable at large distances.
-- The quadtree keeps per-frame transition counts in its debug stats, while resident/queued slice counts are reported by the heightmap manager.
-- Shaders are compiled into the active build directory, for example `build/Release/shaders`.
+- The rendering API is SDL GPU, with shaders compiled by `glslc`.
+- World positions use large horizontal grid cells plus local coordinates for stable camera-relative rendering.
+- Terrain extents are produced on the GPU and read back asynchronously, so newly generated slices may briefly fall back to conservative bounds until their readback completes.
+- The quadtree processes all allocated nodes during update; draw selection is separate from subdivision/collapse decisions.
+- Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.

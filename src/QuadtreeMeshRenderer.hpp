@@ -1,8 +1,10 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "HeightmapNoiseGenerator.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
+#include "WorldGridQuadtreeHeightmapManager.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
 
 #include <SDL3/SDL_gpu.h>
@@ -12,10 +14,18 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <vector>
 
 class QuadtreeMeshRenderer : private EngineRendererBase
 {
 public:
+    struct GeneratedHeightmapExtents
+    {
+        WorldGridQuadtreeLeafId leafId{};
+        std::uint16_t sliceIndex = 0;
+        HeightmapExtents extents{};
+    };
+
     // Per-frame shader constants shared by every terrain draw.
     struct TerrainUniforms
     {
@@ -45,13 +55,22 @@ public:
     void setActiveCamera(const Position& cameraPosition);
     void setTerrainHeightParams(float baseHeight, float heightAmplitude);
 
-    float* getCopyBuffer(std::uint16_t slice);
+    [[nodiscard]] bool queueHeightmapGeneration(
+        const WorldGridQuadtreeLeafId& leafId,
+        std::uint16_t sliceIndex,
+        const TerrainNoiseSettings& settings);
 
     // Queues one quadtree leaf instance for drawing, using the given heightmap slice.
     void addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
 
-    // Uploads staged instance, indirect, and heightmap data into GPU buffers.
+    // Uploads staged instance and indirect draw data into GPU buffers.
     void upload(SDL_GPUCopyPass *copyPass);
+
+    // Dispatches any queued heightmap compute jobs into the heightmap storage buffer.
+    void dispatchHeightmapGenerations(SDL_GPUCommandBuffer* commandBuffer);
+    void queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPass);
+    void attachSubmittedFence(SDL_GPUFence* fence);
+    void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents);
 
     // Issues the terrain draws for all queued leaf instances.
     void render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection, const LightingSystem &lightingSystem) const;
@@ -71,14 +90,39 @@ private:
         std::uint32_t packedMetadata = 0;
     };
 
+    struct alignas(16) HeightmapGenerationUniforms
+    {
+        glm::vec4 sampleOriginAndStep{ 0.0f };
+        glm::vec4 noiseBase{ 0.0f };
+        glm::vec4 octaveParams{ 0.0f };
+        glm::uvec4 dispatchParams{ 0u };
+    };
+
+    struct alignas(8) GpuHeightmapExtents
+    {
+        std::int32_t minHeightCentimeters = 0;
+        std::int32_t maxHeightCentimeters = 0;
+    };
+
+    struct PendingExtentsReadback
+    {
+        SDL_GPUTransferBuffer* transferBuffer = nullptr;
+        SDL_GPUFence* fence = nullptr;
+        std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> leafIds{};
+        std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> sliceIndices{};
+        std::uint16_t count = 0;
+    };
+
     static_assert(sizeof(InstanceData) == 16, "Terrain instance data must stay 16 bytes.");
     static_assert(offsetof(InstanceData, position) == 0, "Terrain instance position must start at offset 0.");
     static_assert(offsetof(InstanceData, packedMetadata) == 12, "Terrain packed metadata must stay at offset 12.");
+    static_assert(sizeof(HeightmapGenerationUniforms) == 64, "Heightmap generation uniforms must stay tightly packed.");
 
     [[nodiscard]] static std::uint32_t packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow);
 
     // Creates the terrain graphics pipeline and loads the terrain shaders.
     void createPipeline(const std::filesystem::path &shaderDirectory);
+    void createHeightmapComputePipeline(const std::filesystem::path& shaderDirectory);
 
     // Builds the static mesh buffers for the reusable terrain patch.
     void createStaticMeshResources();
@@ -93,6 +137,7 @@ private:
 
     // Pipeline object for the terrain pass.
     SDL_GPUGraphicsPipeline *m_pipeline = nullptr;
+    SDL_GPUComputePipeline* m_heightmapComputePipeline = nullptr;
 
     // Static patch mesh buffers plus their one-time upload buffers.
     SDL_GPUBuffer *m_vertexBuffer = nullptr;
@@ -108,16 +153,26 @@ private:
     SDL_GPUBuffer *m_indirectBuffer = nullptr;
     SDL_GPUTransferBuffer *m_indirectTransferBuffer = nullptr;
 
-    // GPU heightmap slice storage plus the staging buffer used to upload regenerated slices.
+    // GPU heightmap slice storage written directly by the compute shader.
     SDL_GPUBuffer *m_heightmapBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_heightmapTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_heightmapExtentsBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_heightmapExtentsInitTransferBuffer = nullptr;
 
     // Cached index count for the reusable terrain patch mesh.
     std::uint32_t m_mainIndexCount = 0;
 
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
+    std::array<HeightmapGenerationUniforms, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingHeightmapGenerations{};
+    std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationLeafIds{};
+    std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedLeafIds{};
+    std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedSlices{};
+    static constexpr std::size_t kHeightmapReadbackSlotCount = 8;
+    std::array<PendingExtentsReadback, kHeightmapReadbackSlotCount> m_pendingExtentsReadbacks{};
     std::uint16_t m_instanceCount = 0;
-    std::uint16_t m_uploadSlice = UINT16_MAX;
+    std::uint16_t m_pendingHeightmapGenerationCount = 0;
+    std::uint16_t m_lastDispatchedGenerationCount = 0;
+    std::uint16_t m_pendingFenceReadbackSlot = UINT16_MAX;
+    std::uint16_t m_nextReadbackSlot = 0;
     float m_terrainBaseHeight = 0.0f;
     float m_terrainHeightAmplitude = AppConfig::Terrain::kHeightAmplitude;
 };
