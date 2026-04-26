@@ -2,6 +2,7 @@
 set "BUILD_TYPE=%~1"
 if not defined BUILD_TYPE set "BUILD_TYPE=Release"
 set "BUILD_DIR=build\%BUILD_TYPE%"
+if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
 set "VS_ROOT="
 if exist "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" set "VS_ROOT=C:\Program Files\Microsoft Visual Studio\18\Community"

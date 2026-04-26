@@ -2,6 +2,7 @@
 set "BUILD_TYPE=%~1"
 if not defined BUILD_TYPE set "BUILD_TYPE=Release"
 set "BUILD_DIR=build\%BUILD_TYPE%"
+if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 if not exist "%BUILD_DIR%\CMakeCache.txt" call "%~dp0configure.cmd" %BUILD_TYPE%
 if errorlevel 1 exit /b %errorlevel%
 

@@ -86,6 +86,7 @@ tools\build.cmd
 ```
 
 These default to an optimized `Release` build in `build\Release`.
+If the requested build directory does not exist yet, the scripts will create it automatically.
 
 For a debug build:
 
