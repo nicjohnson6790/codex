@@ -54,8 +54,8 @@ This project is a small editor-style sandbox built around:
 - Multiple cameras with active-camera switching
 - Triangle instance editing in grid/local coordinates
 - Debug axis rendering and optional quadtree border rendering
-- Quadtree terrain rendering with 512 cached `257 x 257` heightmap slices
-- Terrain patches render the interior `1..255` sample region, leaving the outer heightmap ring available for border / LOD handling
+- Quadtree terrain rendering with 512 cached `259 x 259` heightmap slices
+- Terrain patches keep a 1-sample halo outside the leaf bounds, and currently render the interior `2..256` sample region as `254 x 254` quads while leaving edge closure for later
 - CPU-side octave noise height generation feeding an SDL GPU storage buffer
 - Simple sun-light controls with Gouraud terrain shading
 - Reversed-Z depth with an infinite far plane

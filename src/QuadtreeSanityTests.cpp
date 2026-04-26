@@ -13,6 +13,10 @@
 namespace
 {
 constexpr std::size_t kResolution = AppConfig::Terrain::kHeightmapResolution;
+constexpr std::size_t kLeafSampleStart = AppConfig::Terrain::kHeightmapLeafHalo;
+constexpr std::size_t kLeafSampleStop = AppConfig::Terrain::kHeightmapResolution - AppConfig::Terrain::kHeightmapLeafHalo;
+constexpr std::size_t kRenderedSampleStart = kLeafSampleStart + AppConfig::Terrain::kRenderedPatchInset;
+constexpr std::size_t kRenderedSampleStop = kLeafSampleStop - AppConfig::Terrain::kRenderedPatchInset;
 
 std::vector<float> buildHeightmap(const WorldGridQuadtreeLeafId& leafId)
 {
@@ -41,8 +45,8 @@ float maxSameLevelVerticalEdgeError(const WorldGridQuadtreeLeafId& leftLeaf, con
     float maxError = 0.0f;
     for (std::size_t row = 0; row < kResolution; ++row)
     {
-        const float leftValue = left[(row * kResolution) + (kResolution - 1)];
-        const float rightValue = right[row * kResolution];
+        const float leftValue = left[(row * kResolution) + (kLeafSampleStop - 1)];
+        const float rightValue = right[(row * kResolution) + kLeafSampleStart];
         maxError = std::max(maxError, std::fabs(leftValue - rightValue));
     }
     return maxError;
@@ -54,10 +58,10 @@ float maxRenderedVerticalEdgeError(const WorldGridQuadtreeLeafId& leftLeaf, cons
     const std::vector<float> right = buildHeightmap(rightLeaf);
 
     float maxError = 0.0f;
-    for (std::size_t row = 1; row < (kResolution - 1); ++row)
+    for (std::size_t row = kRenderedSampleStart; row < kRenderedSampleStop; ++row)
     {
-        const float leftValue = left[(row * kResolution) + (kResolution - 2)];
-        const float rightValue = right[(row * kResolution) + 1];
+        const float leftValue = left[(row * kResolution) + (kRenderedSampleStop - 1)];
+        const float rightValue = right[(row * kResolution) + kRenderedSampleStart];
         maxError = std::max(maxError, std::fabs(leftValue - rightValue));
     }
     return maxError;
@@ -71,8 +75,8 @@ float maxSameLevelHorizontalEdgeError(const WorldGridQuadtreeLeafId& bottomLeaf,
     float maxError = 0.0f;
     for (std::size_t column = 0; column < kResolution; ++column)
     {
-        const float bottomValue = bottom[((kResolution - 1) * kResolution) + column];
-        const float topValue = top[column];
+        const float bottomValue = bottom[((kLeafSampleStop - 1) * kResolution) + column];
+        const float topValue = top[(kLeafSampleStart * kResolution) + column];
         maxError = std::max(maxError, std::fabs(bottomValue - topValue));
     }
     return maxError;
@@ -84,10 +88,10 @@ float maxRenderedHorizontalEdgeError(const WorldGridQuadtreeLeafId& bottomLeaf, 
     const std::vector<float> top = buildHeightmap(topLeaf);
 
     float maxError = 0.0f;
-    for (std::size_t column = 1; column < (kResolution - 1); ++column)
+    for (std::size_t column = kRenderedSampleStart; column < kRenderedSampleStop; ++column)
     {
-        const float bottomValue = bottom[((kResolution - 2) * kResolution) + column];
-        const float topValue = top[(1 * kResolution) + column];
+        const float bottomValue = bottom[((kRenderedSampleStop - 1) * kResolution) + column];
+        const float topValue = top[(kRenderedSampleStart * kResolution) + column];
         maxError = std::max(maxError, std::fabs(bottomValue - topValue));
     }
     return maxError;
@@ -108,16 +112,18 @@ float maxParentChildError(const WorldGridQuadtreeLeafId& parentLeaf, const World
     double childSize = 0.0;
     worldGridQuadtreeLeafExtents(childLeaf, childMinX, childMinZ, childSize);
 
-    const std::size_t xOffset = static_cast<std::size_t>(std::llround(((childMinX - parentMinX) / parentSize) * static_cast<double>(kResolution - 1)));
-    const std::size_t zOffset = static_cast<std::size_t>(std::llround(((childMinZ - parentMinZ) / parentSize) * static_cast<double>(kResolution - 1)));
+    const std::size_t xOffset = static_cast<std::size_t>(std::llround(
+        ((childMinX - parentMinX) / parentSize) * static_cast<double>(AppConfig::Terrain::kHeightmapLeafIntervalCount)));
+    const std::size_t zOffset = static_cast<std::size_t>(std::llround(
+        ((childMinZ - parentMinZ) / parentSize) * static_cast<double>(AppConfig::Terrain::kHeightmapLeafIntervalCount)));
 
     float maxError = 0.0f;
-    for (std::size_t childZ = 0; childZ < kResolution; childZ += 2)
+    for (std::size_t childZ = kLeafSampleStart; childZ < kLeafSampleStop; childZ += 2)
     {
-        for (std::size_t childX = 0; childX < kResolution; childX += 2)
+        for (std::size_t childX = kLeafSampleStart; childX < kLeafSampleStop; childX += 2)
         {
-            const std::size_t parentX = xOffset + (childX / 2);
-            const std::size_t parentZ = zOffset + (childZ / 2);
+            const std::size_t parentX = kLeafSampleStart + xOffset + ((childX - kLeafSampleStart) / 2);
+            const std::size_t parentZ = kLeafSampleStart + zOffset + ((childZ - kLeafSampleStart) / 2);
             const float parentValue = parent[(parentZ * kResolution) + parentX];
             const float childValue = child[(childZ * kResolution) + childX];
             maxError = std::max(maxError, std::fabs(parentValue - childValue));

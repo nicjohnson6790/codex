@@ -64,13 +64,15 @@ double sampleHeight(double worldX, double worldZ)
 
 void HeightmapNoiseGenerator::fillNoise(const Position& a, const Position& b, float* buffer) const
 {
-    const double intervalCount = static_cast<double>(AppConfig::Terrain::kHeightmapResolution - 1);
-    const double worldMinX = a.worldPosition().x;
-    const double worldMinZ = a.worldPosition().z;
-    const double worldMaxX = b.worldPosition().x;
-    const double worldMaxZ = b.worldPosition().z;
-    const double stepX = (worldMaxX - worldMinX) / intervalCount;
-    const double stepZ = (worldMaxZ - worldMinZ) / intervalCount;
+    const double leafIntervalCount = static_cast<double>(AppConfig::Terrain::kHeightmapLeafIntervalCount);
+    const double leafWorldMinX = a.worldPosition().x;
+    const double leafWorldMinZ = a.worldPosition().z;
+    const double leafWorldMaxX = b.worldPosition().x;
+    const double leafWorldMaxZ = b.worldPosition().z;
+    const double stepX = (leafWorldMaxX - leafWorldMinX) / leafIntervalCount;
+    const double stepZ = (leafWorldMaxZ - leafWorldMinZ) / leafIntervalCount;
+    const double worldMinX = leafWorldMinX - (stepX * static_cast<double>(AppConfig::Terrain::kHeightmapLeafHalo));
+    const double worldMinZ = leafWorldMinZ - (stepZ * static_cast<double>(AppConfig::Terrain::kHeightmapLeafHalo));
 
     for (std::uint32_t z = 0; z < AppConfig::Terrain::kHeightmapResolution; ++z)
     {

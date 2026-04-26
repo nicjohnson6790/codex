@@ -11,8 +11,12 @@
 
 namespace
 {
-constexpr std::uint32_t kMainGridVertexResolution = AppConfig::Terrain::kHeightmapResolution - 2;
+constexpr std::uint32_t kMainGridVertexResolution =
+    AppConfig::Terrain::kHeightmapLeafResolution - (AppConfig::Terrain::kRenderedPatchInset * 2);
 constexpr std::uint32_t kMainGridQuadResolution = kMainGridVertexResolution - 1;
+constexpr float kRenderedLocalCoordOffset = static_cast<float>(AppConfig::Terrain::kRenderedPatchInset);
+constexpr float kRenderedSampleCoordOffset = static_cast<float>(
+    AppConfig::Terrain::kHeightmapLeafHalo + AppConfig::Terrain::kRenderedPatchInset);
 constexpr std::size_t kHeightmapSliceFloatCount =
     static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) *
     static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
@@ -347,10 +351,12 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     {
         for (std::uint32_t x = 0; x < kMainGridVertexResolution; ++x)
         {
-            const float sampleX = static_cast<float>(x + 1);
-            const float sampleZ = static_cast<float>(z + 1);
+            const float localX = static_cast<float>(x) + kRenderedLocalCoordOffset;
+            const float localZ = static_cast<float>(z) + kRenderedLocalCoordOffset;
+            const float sampleX = static_cast<float>(x) + kRenderedSampleCoordOffset;
+            const float sampleZ = static_cast<float>(z) + kRenderedSampleCoordOffset;
             vertices.push_back({
-                { sampleX, sampleZ },
+                { localX, localZ },
                 { sampleX, sampleZ },
             });
         }

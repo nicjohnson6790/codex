@@ -44,7 +44,11 @@ inline constexpr double kDebugBaseHeightOffset = 0.02;
 
 namespace Terrain
 {
-inline constexpr std::uint32_t kHeightmapResolution = 257;
+inline constexpr std::uint32_t kHeightmapResolution = 259;
+inline constexpr std::uint32_t kHeightmapLeafResolution = kHeightmapResolution - 2;
+inline constexpr std::uint32_t kHeightmapLeafIntervalCount = kHeightmapLeafResolution - 1;
+inline constexpr std::uint32_t kHeightmapLeafHalo = 1;
+inline constexpr std::uint32_t kRenderedPatchInset = 1;
 inline constexpr std::uint32_t kHeightmapSliceCapacity = 512;
 inline constexpr double kNoiseFrequency = 1.0 / 1800.0;
 inline constexpr float kHeightAmplitude = 1000.0f;

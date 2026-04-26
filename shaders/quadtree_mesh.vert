@@ -28,15 +28,16 @@ layout(location = 1) in vec2 inSampleCoord;
 
 layout(location = 0) out vec3 fragColor;
 
-const uint kHeightmapResolution = 257u;
-const float kHeightmapIntervalCount = 256.0;
+const uint kHeightmapResolution = 259u;
+const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
+const float kHeightmapLeafIntervalCount = 256.0;
 const float kMinimumQuadSize = 256.0;
 const float kHeightAmplitude = 1000.0;
 const float kBaseHeight = 0.0;
 
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {
-    ivec2 clampedCoord = clamp(sampleCoord, ivec2(0), ivec2(256));
+    ivec2 clampedCoord = clamp(sampleCoord, ivec2(0), ivec2(int(kHeightmapMaxCoord)));
     uint linearIndex =
         (sliceIndex * kHeightmapResolution * kHeightmapResolution) +
         (uint(clampedCoord.y) * kHeightmapResolution) +
@@ -47,9 +48,9 @@ float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 vec3 computeNormal(uint sliceIndex, ivec2 sampleCoord, float sampleSpacing)
 {
     ivec2 leftCoord = ivec2(max(sampleCoord.x - 1, 0), sampleCoord.y);
-    ivec2 rightCoord = ivec2(min(sampleCoord.x + 1, 256), sampleCoord.y);
+    ivec2 rightCoord = ivec2(min(sampleCoord.x + 1, int(kHeightmapMaxCoord)), sampleCoord.y);
     ivec2 downCoord = ivec2(sampleCoord.x, max(sampleCoord.y - 1, 0));
-    ivec2 upCoord = ivec2(sampleCoord.x, min(sampleCoord.y + 1, 256));
+    ivec2 upCoord = ivec2(sampleCoord.x, min(sampleCoord.y + 1, int(kHeightmapMaxCoord)));
 
     float hL = sampleHeight(sliceIndex, leftCoord);
     float hR = sampleHeight(sliceIndex, rightCoord);
@@ -78,7 +79,7 @@ void main()
     uint sliceIndex = instance.packedMetadata & 0xFFFFu;
     uint scalePow = (instance.packedMetadata >> 16u) & 0xFFu;
     float leafSize = kMinimumQuadSize * exp2(float(scalePow));
-    float sampleSpacing = leafSize / kHeightmapIntervalCount;
+    float sampleSpacing = leafSize / kHeightmapLeafIntervalCount;
     vec2 localOffset = vec2(inLocalCoord.x * sampleSpacing, inLocalCoord.y * sampleSpacing);
     ivec2 sampleCoord = ivec2(inSampleCoord);
 
