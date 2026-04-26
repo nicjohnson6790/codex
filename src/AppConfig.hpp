@@ -49,11 +49,11 @@ inline constexpr std::uint32_t kHeightmapLeafResolution = kHeightmapResolution -
 inline constexpr std::uint32_t kHeightmapLeafIntervalCount = kHeightmapLeafResolution - 1;
 inline constexpr std::uint32_t kHeightmapLeafHalo = 1;
 inline constexpr std::uint32_t kRenderedPatchInset = 1;
-inline constexpr std::uint32_t kHeightmapSliceCapacity = 512;
-inline constexpr double kNoiseFrequency = 1.0 / 1800.0;
-inline constexpr float kHeightAmplitude = 1000.0f;
-inline constexpr float kBaseHeight = 0.0f;
-inline constexpr float kAmbientLight = 0.26f;
+    inline constexpr std::uint32_t kHeightmapSliceCapacity = 512;
+    inline constexpr double kNoiseFrequency = 1.0 / 1800.0;
+    inline constexpr float kHeightAmplitude = 2800.0f;
+    inline constexpr float kBaseHeight = 4800.0f;
+    inline constexpr float kAmbientLight = 0.26f;
 }
 
 namespace Renderer

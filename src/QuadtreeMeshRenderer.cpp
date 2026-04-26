@@ -161,6 +161,12 @@ void QuadtreeMeshRenderer::setActiveCamera(const Position& cameraPosition)
     setActiveCameraPosition(cameraPosition);
 }
 
+void QuadtreeMeshRenderer::setTerrainHeightParams(float baseHeight, float heightAmplitude)
+{
+    m_terrainBaseHeight = baseHeight;
+    m_terrainHeightAmplitude = heightAmplitude;
+}
+
 float* QuadtreeMeshRenderer::getCopyBuffer(std::uint16_t slice)
 {
     if (m_uploadSlice != UINT16_MAX)
@@ -272,6 +278,7 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass* renderPass, SDL_GPUCommandB
     const glm::vec3 sunDirection = lightingSystem.sunDirection();
     uniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     uniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
+    uniforms.terrainHeightParams = glm::vec4(m_terrainBaseHeight, m_terrainHeightAmplitude, 0.0f, 0.0f);
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
     SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);

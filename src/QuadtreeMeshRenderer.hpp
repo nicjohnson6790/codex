@@ -22,6 +22,7 @@ public:
         glm::mat4 viewProjection{1.0f};
         glm::vec4 sunDirectionIntensity{0.0f, 1.0f, 0.0f, 1.0f};
         glm::vec4 sunColorAmbient{1.0f, 1.0f, 1.0f, 0.2f};
+        glm::vec4 terrainHeightParams{0.0f, AppConfig::Terrain::kHeightAmplitude, 0.0f, 0.0f};
     };
 
     QuadtreeMeshRenderer() = default;
@@ -42,6 +43,7 @@ public:
 
     // Sets the camera used to convert world Positions into camera-local coordinates.
     void setActiveCamera(const Position& cameraPosition);
+    void setTerrainHeightParams(float baseHeight, float heightAmplitude);
 
     float* getCopyBuffer(std::uint16_t slice);
 
@@ -116,4 +118,6 @@ private:
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
     std::uint16_t m_instanceCount = 0;
     std::uint16_t m_uploadSlice = UINT16_MAX;
+    float m_terrainBaseHeight = 0.0f;
+    float m_terrainHeightAmplitude = AppConfig::Terrain::kHeightAmplitude;
 };

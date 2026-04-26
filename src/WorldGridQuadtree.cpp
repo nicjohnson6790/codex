@@ -8,10 +8,26 @@
 
 namespace
 {
-bool aabbIsVisible(
-    const Position& aabbCornerA,
-    const Position& aabbCornerB,
-    const CameraManager::Camera& activeCamera)
+constexpr double kMinimumTerrainVisibilityRadius = 1000.0;
+constexpr double kTerrainForwardVisibilityDotThreshold = 0.5;
+constexpr double kVisibilityBoundsHalfHeight = 10000.0;
+
+glm::dvec3 nodeCenterAtZeroHeight(const Position& minCorner, const Position& maxCorner)
+{
+    const glm::dvec3 minWorld = minCorner.worldPosition();
+    const glm::dvec3 maxWorld = maxCorner.worldPosition();
+    return {
+        (minWorld.x + maxWorld.x) * 0.5,
+        0.0,
+        (minWorld.z + maxWorld.z) * 0.5,
+    };
+}
+
+bool shouldDrawNodeFrustum(
+    const Position& minCornerPosition,
+    const Position& maxCornerPosition,
+    const CameraManager::Camera& activeCamera,
+    Extent2D viewportExtent)
 {
     const glm::dvec3 forward = glm::normalize(activeCamera.forward);
     glm::dvec3 right = glm::cross(forward, activeCamera.up);
@@ -22,8 +38,8 @@ bool aabbIsVisible(
     right = glm::normalize(right);
     const glm::dvec3 up = glm::normalize(glm::cross(right, forward));
 
-    const glm::dvec3 minCorner = aabbCornerA.localCoordinatesInCellOf(activeCamera.position);
-    const glm::dvec3 maxCorner = aabbCornerB.localCoordinatesInCellOf(activeCamera.position);
+    const glm::dvec3 minCorner = minCornerPosition.localCoordinatesInCellOf(activeCamera.position);
+    const glm::dvec3 maxCorner = maxCornerPosition.localCoordinatesInCellOf(activeCamera.position);
 
     const glm::dvec3 corners[8]{
         { minCorner.x, minCorner.y, minCorner.z },
@@ -36,9 +52,11 @@ bool aabbIsVisible(
         { maxCorner.x, maxCorner.y, maxCorner.z },
     };
 
-    constexpr double kAspectRatio = 16.0 / 9.0;
+    const double aspectRatio =
+        static_cast<double>(std::max(viewportExtent.width, 1u)) /
+        static_cast<double>(std::max(viewportExtent.height, 1u));
     const double tanHalfVerticalFov = std::tan(AppConfig::Camera::kVerticalFovRadians * 0.5);
-    const double tanHalfHorizontalFov = tanHalfVerticalFov * kAspectRatio;
+    const double tanHalfHorizontalFov = tanHalfVerticalFov * aspectRatio;
 
     bool anyInFrontOfNearPlane = false;
     bool allLeftOfFrustum = true;
@@ -95,8 +113,7 @@ bool subtreeCanRenderWithoutParentFallback(
     const std::array<QuadtreeNode, WorldGridQuadtree::kNodeCapacity>& nodes,
     const QuadtreeNode& node)
 {
-    if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask) ||
-        !nodeHasFlag(node, QuadtreeNode::IsVisibleMask))
+    if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask))
     {
         return true;
     }
@@ -157,10 +174,11 @@ bool nodeIsParentOfLeaves(
 
 WorldGridQuadtree::WorldGridQuadtree() { reset(); }
 
-void WorldGridQuadtree::updateTree(const CameraManager::Camera& activeCamera)
+void WorldGridQuadtree::updateTree(const CameraManager::Camera& activeCamera, Extent2D viewportExtent)
 {
     HELLO_PROFILE_SCOPE("WorldGridQuadtree::UpdateTree");
 
+    m_viewportExtent = viewportExtent;
     refreshBaseNodes(activeCamera.position);
     m_heightmapManager.ageMap();
     treeData = {};
@@ -186,7 +204,7 @@ void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
     for (const QuadtreeNode& node : m_nodes)
     {
         if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask) ||
-            !nodeHasFlag(node, QuadtreeNode::IsVisibleMask))
+            !nodeHasFlag(node, QuadtreeNode::ShouldDrawMask))
         {
             continue;
         }
@@ -203,7 +221,7 @@ void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
         if (nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) &&
             !nodeHasFlag(node, QuadtreeNode::IsUploadingMask))
         {
-            // While subdividing, the parent stays visible until the child subtrees can cover its area.
+            // While subdividing, the parent stays drawable until the child subtrees can cover its area.
             m_heightmapManager.requestLeaf(node.nodeId, *renderEngines.quadtreeMeshRenderer);
         }
     }
@@ -214,9 +232,15 @@ void WorldGridQuadtree::emitDebugDraws(RenderEngines& renderEngines) const
     for (const QuadtreeNode& node : m_nodes)
     {
         if (nodeHasFlag(node, QuadtreeNode::IsUsedMask) &&
-            nodeHasFlag(node, QuadtreeNode::IsVisibleMask))
+            nodeHasFlag(node, QuadtreeNode::ShouldDrawMask))
         {
-            m_debugRenderer.appendNodeBorder(renderEngines, node.nodeId, treeData.maxDepth);
+            m_debugRenderer.appendNodeBorder(
+                renderEngines,
+                node.nodeId,
+                treeData.maxDepth,
+                nodeHasFlag(node, QuadtreeNode::HasExtentsMask),
+                node.minHeight,
+                node.maxHeight);
         }
     }
 }
@@ -352,6 +376,19 @@ void WorldGridQuadtree::ensureChildren(std::uint16_t nodeIndex)
     setNodeFlag(node, QuadtreeNode::IsLeafMask, false);
 }
 
+void WorldGridQuadtree::updateNodeExtentsFromCache(QuadtreeNode& node)
+{
+    HeightmapExtents extents{};
+    if (!m_heightmapManager.getExtents(node.nodeId, extents))
+    {
+        return;
+    }
+
+    node.minHeight = extents.minHeight;
+    node.maxHeight = extents.maxHeight;
+    setNodeFlag(node, QuadtreeNode::HasExtentsMask, true);
+}
+
 void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager::Camera& activeCamera)
 {
     QuadtreeNode& node = m_nodes[nodeIndex];
@@ -360,44 +397,41 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         return;
     }
 
+    updateNodeExtentsFromCache(node);
+
     const double size = worldGridQuadtreeLeafSize(node.nodeId);
+    const double terrainMinY = terrainMinHeight();
+    const double terrainMaxY = terrainMaxHeight();
     const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(
         node.nodeId,
-        static_cast<double>(AppConfig::Terrain::kBaseHeight - AppConfig::Terrain::kHeightAmplitude),
-        static_cast<double>(AppConfig::Terrain::kBaseHeight + AppConfig::Terrain::kHeightAmplitude));
+        terrainMinY,
+        terrainMaxY);
 
-    const bool isVisible = aabbIsVisible(minCorner, maxCorner, activeCamera);
-    setNodeFlag(node, QuadtreeNode::IsVisibleMask, isVisible);
+    const double drawMinHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
+        ? static_cast<double>(node.minHeight)
+        : -kVisibilityBoundsHalfHeight;
+    const double drawMaxHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
+        ? static_cast<double>(node.maxHeight)
+        : kVisibilityBoundsHalfHeight;
+    const auto [drawMinCorner, drawMaxCorner] = worldGridQuadtreeLeafBounds(
+        node.nodeId,
+        drawMinHeight,
+        drawMaxHeight);
+    const bool shouldDraw = shouldDrawNodeFrustum(
+        drawMinCorner,
+        drawMaxCorner,
+        activeCamera,
+        m_viewportExtent);
+    setNodeFlag(node, QuadtreeNode::ShouldDrawMask, shouldDraw);
     treeData.maxDepth = std::max(treeData.maxDepth, worldGridQuadtreeLeafDepth(node.nodeId));
-    if (isVisible)
+    if (shouldDraw)
     {
-        ++treeData.visibleNodeCount;
-    }
-
-    if (!isVisible)
-    {
-        if (!nodeHasFlag(node, QuadtreeNode::IsLeafMask))
-        {
-            for (std::uint16_t& childIndex : node.children)
-            {
-                if (childIndex != QuadtreeNode::NullNodeIndex)
-                {
-                    freeSubtree(childIndex);
-                    childIndex = QuadtreeNode::NullNodeIndex;
-                }
-            }
-            setNodeFlag(node, QuadtreeNode::IsLeafMask, true);
-        }
-
-        setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
-        setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
-        setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
-        return;
+        ++treeData.drawableNodeCount;
     }
 
     const bool wantsChildren =
         size > AppConfig::Quadtree::kMinimumQuadSize &&
-        shouldSubdivide(node.nodeId, activeCamera.position);
+        shouldSubdivide(node, activeCamera.position);
 
     if (wantsChildren)
     {
@@ -405,6 +439,10 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
         {
             const bool resident = m_heightmapManager.makeResident(node.nodeId);
+            if (resident)
+            {
+                updateNodeExtentsFromCache(node);
+            }
             setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
             setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
             setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
@@ -435,6 +473,10 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
         const bool wasSubdividing = nodeHasFlag(node, QuadtreeNode::IsSubdividingMask);
         const bool resident = m_heightmapManager.makeResident(node.nodeId);
+        if (resident)
+        {
+            updateNodeExtentsFromCache(node);
+        }
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
 
         const bool isSubdividing = !allChildrenReady;
@@ -450,6 +492,10 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
     {
         const bool resident = m_heightmapManager.makeResident(node.nodeId);
+        if (resident)
+        {
+            updateNodeExtentsFromCache(node);
+        }
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
         setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
         setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
@@ -474,9 +520,13 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
     const bool wasCollapsing = nodeHasFlag(node, QuadtreeNode::IsCollapsingMask);
     const bool resident = m_heightmapManager.makeResident(node.nodeId);
+    if (resident)
+    {
+        updateNodeExtentsFromCache(node);
+    }
     setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
     setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
-    // While collapsing, the children remain visible until the parent slice is resident again.
+    // While collapsing, the children remain drawable until the parent slice is resident again.
     setNodeFlag(node, QuadtreeNode::IsCollapsingMask, !resident);
 
     if (resident)
@@ -517,35 +567,36 @@ void WorldGridQuadtree::setNodeFlag(QuadtreeNode& node, std::uint8_t mask, bool 
     }
 }
 
-bool WorldGridQuadtree::shouldSubdivide(const WorldGridQuadtreeLeafId& leafId, const Position& cameraPosition)
+bool WorldGridQuadtree::shouldSubdivide(const QuadtreeNode& node, const Position& cameraPosition) const
 {
-    const double size = worldGridQuadtreeLeafSize(leafId);
-
-    const double cellSize = static_cast<double>(Position::kCellSize);
-    const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(
-        leafId,
-        static_cast<double>(AppConfig::Terrain::kBaseHeight - AppConfig::Terrain::kHeightAmplitude),
-        static_cast<double>(AppConfig::Terrain::kBaseHeight + AppConfig::Terrain::kHeightAmplitude));
-    const double minX = (static_cast<double>(minCorner.gridX()) * cellSize) + minCorner.localPosition().x;
-    const double minZ = (static_cast<double>(minCorner.gridY()) * cellSize) + minCorner.localPosition().z;
-    const double maxX = (static_cast<double>(maxCorner.gridX()) * cellSize) + maxCorner.localPosition().x;
-    const double maxZ = (static_cast<double>(maxCorner.gridY()) * cellSize) + maxCorner.localPosition().z;
-    const double minY = static_cast<double>(AppConfig::Terrain::kBaseHeight - AppConfig::Terrain::kHeightAmplitude);
-    const double maxY = static_cast<double>(AppConfig::Terrain::kBaseHeight + AppConfig::Terrain::kHeightAmplitude);
-
+    const double size = worldGridQuadtreeLeafSize(node.nodeId);
     const glm::dvec3 cameraWorld = cameraPosition.worldPosition();
     const double subdivisionDistance = size * AppConfig::Quadtree::kSubdivisionDistanceFactor;
 
-    return distanceSquaredToBounds(
-        cameraWorld.x,
-        cameraWorld.y,
-        cameraWorld.z,
-        minX,
-        minY,
-        minZ,
-        maxX,
-        maxY,
-        maxZ) <= subdivisionDistance * subdivisionDistance;
+    if (nodeHasFlag(node, QuadtreeNode::HasExtentsMask))
+    {
+        const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(
+            node.nodeId,
+            static_cast<double>(node.minHeight),
+            static_cast<double>(node.maxHeight));
+        const glm::dvec3 minWorld = minCorner.worldPosition();
+        const glm::dvec3 maxWorld = maxCorner.worldPosition();
+        return distanceSquaredToBounds(
+            cameraWorld.x,
+            cameraWorld.y,
+            cameraWorld.z,
+            minWorld.x,
+            minWorld.y,
+            minWorld.z,
+            maxWorld.x,
+            maxWorld.y,
+            maxWorld.z) <= subdivisionDistance * subdivisionDistance;
+    }
+
+    const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
+    const glm::dvec3 nodeCenter = nodeCenterAtZeroHeight(minCorner, maxCorner);
+    const glm::dvec3 toCenter = cameraWorld - nodeCenter;
+    return glm::dot(toCenter, toCenter) <= subdivisionDistance * subdivisionDistance;
 }
 
 double WorldGridQuadtree::distanceSquaredToBounds(
@@ -563,4 +614,14 @@ double WorldGridQuadtree::distanceSquaredToBounds(
     const double deltaY = pointY < minY ? minY - pointY : (pointY > maxY ? pointY - maxY : 0.0);
     const double deltaZ = pointZ < minZ ? minZ - pointZ : (pointZ > maxZ ? pointZ - maxZ : 0.0);
     return (deltaX * deltaX) + (deltaY * deltaY) + (deltaZ * deltaZ);
+}
+
+double WorldGridQuadtree::terrainMinHeight() const
+{
+    return terrainSettings().baseHeight - static_cast<double>(AppConfig::Terrain::kHeightAmplitude);
+}
+
+double WorldGridQuadtree::terrainMaxHeight() const
+{
+    return terrainSettings().baseHeight + static_cast<double>(AppConfig::Terrain::kHeightAmplitude);
 }

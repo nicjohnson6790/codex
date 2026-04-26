@@ -8,5 +8,11 @@
 class WorldGridQuadtreeDebugRenderer
 {
 public:
-    void appendNodeBorder(RenderEngines& renderEngines, const WorldGridQuadtreeLeafId& nodeId, std::uint32_t maxDepth) const;
+    void appendNodeBorder(
+        RenderEngines& renderEngines,
+        const WorldGridQuadtreeLeafId& nodeId,
+        std::uint32_t maxDepth,
+        bool hasExtents,
+        float minHeight,
+        float maxHeight) const;
 };

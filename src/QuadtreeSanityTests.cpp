@@ -23,7 +23,7 @@ std::vector<float> buildHeightmap(const WorldGridQuadtreeLeafId& leafId)
     HeightmapNoiseGenerator generator;
     std::vector<float> heightmap(kResolution * kResolution);
     const auto [a, b] = worldGridQuadtreeLeafBounds(leafId);
-    generator.fillNoise(a, b, heightmap.data());
+    (void)generator.fillNoise(a, b, heightmap.data());
     return heightmap;
 }
 

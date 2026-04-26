@@ -9,6 +9,12 @@
 
 class QuadtreeMeshRenderer;
 
+struct HeightmapExtents
+{
+    float minHeight = 0.0f;
+    float maxHeight = 0.0f;
+};
+
 struct ResidentMapEntry
 {
     WorldGridQuadtreeLeafId leafId{};
@@ -27,6 +33,10 @@ public:
     bool makeResident(const WorldGridQuadtreeLeafId& leafId);
     void requestLeaf(const WorldGridQuadtreeLeafId& leafId, QuadtreeMeshRenderer& meshRenderer);
     void uploadFromQueue(QuadtreeMeshRenderer& meshRenderer);
+    void clearCache();
+    [[nodiscard]] bool getExtents(const WorldGridQuadtreeLeafId& leafId, HeightmapExtents& extents) const;
+    [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_noiseGenerator.settings(); }
+    [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_noiseGenerator.settings(); }
     [[nodiscard]] std::uint16_t residentCount() const { return m_residentCount; }
     [[nodiscard]] std::uint16_t queuedCount() const { return m_queueCount; }
 
@@ -45,6 +55,7 @@ private:
     std::array<ResidentMapEntry, kCapacity> m_residentMap{};
     std::uint16_t m_residentCount = 0;
 
+    std::array<HeightmapExtents, kCapacity> m_sliceExtents{};
     std::array<std::uint16_t, kCapacity> m_freeSlots{};
     std::uint16_t m_freeSlotCount = 0;
 

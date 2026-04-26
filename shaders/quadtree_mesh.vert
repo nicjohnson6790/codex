@@ -5,6 +5,7 @@ layout(set=1, binding=0) uniform TerrainUniforms
     mat4 viewProjection;
     vec4 sunDirectionIntensity;
     vec4 sunColorAmbient;
+    vec4 terrainHeightParams;
 } terrain;
 
 layout(set=0, binding=0, std430) readonly buffer HeightmapBuffer
@@ -32,9 +33,6 @@ const uint kHeightmapResolution = 259u;
 const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
 const float kHeightmapLeafIntervalCount = 256.0;
 const float kMinimumQuadSize = 256.0;
-const float kHeightAmplitude = 1000.0;
-const float kBaseHeight = 0.0;
-
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {
     ivec2 clampedCoord = clamp(sampleCoord, ivec2(0), ivec2(int(kHeightmapMaxCoord)));
@@ -67,7 +65,9 @@ vec3 computeNormal(uint sliceIndex, ivec2 sampleCoord, float sampleSpacing)
 
 vec3 terrainAlbedo(float height)
 {
-    float normalizedHeight = clamp((height - kBaseHeight) / (kHeightAmplitude * 1.8), 0.0, 1.0);
+    float baseHeight = terrain.terrainHeightParams.x;
+    float heightAmplitude = max(terrain.terrainHeightParams.y, 0.001);
+    float normalizedHeight = clamp((height - baseHeight) / (heightAmplitude * 1.8), 0.0, 1.0);
     vec3 lowland = vec3(0.14, 0.34, 0.16);
     vec3 highland = vec3(0.46, 0.40, 0.31);
     return mix(lowland, highland, normalizedHeight);

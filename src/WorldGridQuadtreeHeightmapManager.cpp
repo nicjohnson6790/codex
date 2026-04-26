@@ -26,6 +26,24 @@ void WorldGridQuadtreeHeightmapManager::ageMap()
     }
 }
 
+void WorldGridQuadtreeHeightmapManager::clearCache()
+{
+    m_queueStart = 0;
+    m_queueEnd = 0;
+    m_queueCount = 0;
+    m_residentCount = 0;
+
+    for (std::uint16_t slot = 0; slot < kCapacity; ++slot)
+    {
+        m_leafQueue[slot] = {};
+        m_residentMap[slot] = {};
+        m_sliceExtents[slot] = {};
+        m_freeSlots[slot] = static_cast<std::uint16_t>(kCapacity - 1 - slot);
+    }
+
+    m_freeSlotCount = kCapacity;
+}
+
 bool WorldGridQuadtreeHeightmapManager::makeResident(const WorldGridQuadtreeLeafId& leafId)
 {
     const std::uint16_t residentIndex = findResidentIndex(leafId);
@@ -50,6 +68,18 @@ void WorldGridQuadtreeHeightmapManager::requestLeaf(const WorldGridQuadtreeLeafI
     ResidentMapEntry& entry = m_residentMap[residentIndex];
     entry.age = 0;
     meshRenderer.addLeaf(leafId, entry.lruSlice);
+}
+
+bool WorldGridQuadtreeHeightmapManager::getExtents(const WorldGridQuadtreeLeafId& leafId, HeightmapExtents& extents) const
+{
+    const std::uint16_t residentIndex = findResidentIndex(leafId);
+    if (residentIndex == kCapacity)
+    {
+        return false;
+    }
+
+    extents = m_sliceExtents[m_residentMap[residentIndex].lruSlice];
+    return true;
 }
 
 void WorldGridQuadtreeHeightmapManager::uploadFromQueue(QuadtreeMeshRenderer& meshRenderer)
@@ -92,7 +122,11 @@ void WorldGridQuadtreeHeightmapManager::uploadFromQueue(QuadtreeMeshRenderer& me
     }
 
     const auto [a, b] = worldGridQuadtreeLeafBounds(leafId);
-    m_noiseGenerator.fillNoise(a, b, buffer);
+    const auto [minHeight, maxHeight] = m_noiseGenerator.fillNoise(a, b, buffer);
+    m_sliceExtents[slice] = {
+        .minHeight = minHeight,
+        .maxHeight = maxHeight,
+    };
 
     m_residentMap[residentIndex] = {
         .leafId = leafId,

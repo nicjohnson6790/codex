@@ -25,7 +25,7 @@ public:
         const std::vector<std::string>& gpuDrivers;
         std::string_view gamepadName;
         LightingSystem& lightingSystem;
-        const WorldGridQuadtree& worldGridQuadtree;
+        WorldGridQuadtree& worldGridQuadtree;
         ImTextureID viewportTextureId = 0;
     };
 
@@ -40,6 +40,7 @@ private:
     void applyDockLayout();
     void drawInfoPane(Context& context);
     void drawControlsTab(Context& context);
+    void drawTerrainTab(Context& context);
     void drawDebugTab(Context& context);
     void drawViewportPane(Context& context);
 

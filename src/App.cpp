@@ -256,6 +256,9 @@ void App::updateSceneForFrame()
 
     m_renderer.setViewportSize(viewportExtent);
     m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_lineRenderer);
+    m_quadtreeMeshRenderer.setTerrainHeightParams(
+        static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
+        AppConfig::Terrain::kHeightAmplitude);
 
     m_triangleRenderer.clear();
     m_quadtreeMeshRenderer.clear();
@@ -273,7 +276,7 @@ void App::updateSceneForFrame()
     m_lineRenderer.addLine(origin, axisY, glm::vec3(0.25f, 1.0f, 0.25f));
     m_lineRenderer.addLine(origin, axisZ, glm::vec3(0.35f, 0.6f, 1.0f));
 
-    m_worldGridQuadtree.updateTree(m_cameraManager.activeCamera());
+    m_worldGridQuadtree.updateTree(m_cameraManager.activeCamera(), viewportExtent);
 
     RenderEngines renderEngines{
         .triangleRenderer = m_triangleRenderer,

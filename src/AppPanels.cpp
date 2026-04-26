@@ -107,6 +107,12 @@ void AppPanels::drawInfoPane(Context& context)
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("Terrain"))
+        {
+            drawTerrainTab(context);
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Debug"))
         {
             drawDebugTab(context);
@@ -225,6 +231,44 @@ void AppPanels::drawControlsTab(Context& context)
     }
 }
 
+void AppPanels::drawTerrainTab(Context& context)
+{
+    HELLO_PROFILE_SCOPE("AppPanels::DrawTerrainTab");
+
+    TerrainNoiseSettings& settings = context.worldGridQuadtree.terrainSettings();
+    int octaveCount = static_cast<int>(settings.octaveCount);
+
+    ImGui::TextWrapped("Terrain slices keep their generated heightmaps in the LRU cache. After changing these values, regenerate the cache to rebuild terrain with the new noise settings.");
+    ImGui::Spacing();
+
+    ImGui::InputDouble("Base height", &settings.baseHeight, 100.0, 500.0, "%.1f");
+    ImGui::InputDouble("Base wavelength", &settings.baseWavelength, 50.0, 250.0, "%.1f");
+    ImGui::InputDouble("Initial frequency", &settings.initialFrequency, 0.05, 0.25, "%.3f");
+    ImGui::InputDouble("Initial amplitude", &settings.initialAmplitude, 0.05, 0.25, "%.3f");
+    ImGui::SliderInt("Octaves", &octaveCount, 1, 12);
+    settings.octaveCount = static_cast<std::uint32_t>(std::max(octaveCount, 1));
+    ImGui::InputDouble("Octave frequency scale", &settings.octaveFrequencyScale, 0.05, 0.25, "%.2f");
+    ImGui::InputDouble("Octave amplitude scale", &settings.octaveAmplitudeScale, 0.02, 0.10, "%.2f");
+    ImGui::InputDouble("Gradient dampening k", &settings.gradientDampenStrength, 0.05, 0.25, "%.2f");
+
+    settings.baseWavelength = std::max(1.0, settings.baseWavelength);
+    settings.initialFrequency = std::max(0.0001, settings.initialFrequency);
+    settings.initialAmplitude = std::max(0.0, settings.initialAmplitude);
+    settings.octaveFrequencyScale = std::max(1.01, settings.octaveFrequencyScale);
+    settings.octaveAmplitudeScale = std::clamp(settings.octaveAmplitudeScale, 0.0, 1.0);
+    settings.gradientDampenStrength = std::max(0.0, settings.gradientDampenStrength);
+
+    ImGui::Spacing();
+    if (ImGui::Button("Regenerate Terrain Cache"))
+    {
+        context.worldGridQuadtree.clearTerrainCache();
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Resident slices: %u", context.worldGridQuadtree.residentCount());
+    ImGui::Text("Queued leaves: %u", context.worldGridQuadtree.queuedCount());
+}
+
 void AppPanels::drawDebugTab(Context& context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawDebugTab");
@@ -234,7 +278,7 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::Separator();
     ImGui::Checkbox("Show quadtree borders", &m_showQuadtreeBorders);
     ImGui::Text("Generated cells: 9");
-    ImGui::Text("Visible nodes: %u", treeData.visibleNodeCount);
+    ImGui::Text("Drawable nodes: %u", treeData.drawableNodeCount);
     ImGui::Text("Started subdividing this frame: %u", treeData.subdivisionCountThisFrame);
     ImGui::Text("Started collapsing this frame: %u", treeData.collapseCountThisFrame);
     ImGui::Text("Max depth: %u", treeData.maxDepth);
