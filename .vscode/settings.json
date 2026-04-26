@@ -1,0 +1,32 @@
+{
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.generator": "NMake Makefiles",
+  "cmake.configureOnOpen": false,
+  "cmake.buildDirectory": "${workspaceFolder}/build/${buildType}",
+  "cmake.configureSettings": {
+    "CMAKE_BUILD_TYPE": "${buildType}",
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+  },
+  "C_Cpp.default.compilerPath": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+  "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.defines": [
+    "NOMINMAX",
+    "HELLO_TRIANGLE_SHADER_DIR=\"${workspaceFolder}/build/Debug/shaders\""
+  ],
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/src",
+    "${workspaceFolder}/build/Debug/_deps/sdl3-src/include",
+    "${workspaceFolder}/build/Debug/_deps/imgui-src",
+    "${workspaceFolder}/build/Debug/_deps/imgui-src/backends",
+    "${workspaceFolder}/build/Debug/_deps/glm-src",
+    "${workspaceFolder}/build/Release/_deps/sdl3-src/include",
+    "${workspaceFolder}/build/Release/_deps/imgui-src",
+    "${workspaceFolder}/build/Release/_deps/imgui-src/backends",
+    "${workspaceFolder}/build/Release/_deps/glm-src"
+  ],
+  "files.associations": {
+    "*.vert": "glsl",
+    "*.frag": "glsl"
+  }
+}

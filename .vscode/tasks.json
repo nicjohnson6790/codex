@@ -1,0 +1,88 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure Debug",
+      "type": "shell",
+      "command": "${workspaceFolder}\\tools\\configure.cmd",
+      "args": [
+        "Debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Configure Release",
+      "type": "shell",
+      "command": "${workspaceFolder}\\tools\\configure.cmd",
+      "args": [
+        "Release"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Build Debug",
+      "type": "shell",
+      "command": "${workspaceFolder}\\tools\\build.cmd",
+      "args": [
+        "Debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build Release",
+      "type": "shell",
+      "command": "${workspaceFolder}\\tools\\build.cmd",
+      "args": [
+        "Release"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Run Debug",
+      "type": "shell",
+      "command": "${workspaceFolder}\\build\\Debug\\hello_triangle.exe",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Build Debug",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Release",
+      "type": "shell",
+      "command": "${workspaceFolder}\\build\\Release\\hello_triangle.exe",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Build Release",
+      "problemMatcher": []
+    }
+  ]
+}

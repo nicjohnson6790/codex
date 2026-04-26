@@ -1,0 +1,41 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "Win32",
+      "includePath": [
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/build/Debug/_deps/sdl3-src/include",
+        "${workspaceFolder}/build/Debug/_deps/imgui-src",
+        "${workspaceFolder}/build/Debug/_deps/imgui-src/backends",
+        "${workspaceFolder}/build/Debug/_deps/glm-src",
+        "${workspaceFolder}/build/Release/_deps/sdl3-src/include",
+        "${workspaceFolder}/build/Release/_deps/imgui-src",
+        "${workspaceFolder}/build/Release/_deps/imgui-src/backends",
+        "${workspaceFolder}/build/Release/_deps/glm-src"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}/src",
+          "${workspaceFolder}/build/Debug/_deps/sdl3-src/include",
+          "${workspaceFolder}/build/Debug/_deps/imgui-src",
+          "${workspaceFolder}/build/Debug/_deps/imgui-src/backends",
+          "${workspaceFolder}/build/Debug/_deps/glm-src",
+          "${workspaceFolder}/build/Release/_deps/sdl3-src/include",
+          "${workspaceFolder}/build/Release/_deps/imgui-src",
+          "${workspaceFolder}/build/Release/_deps/imgui-src/backends",
+          "${workspaceFolder}/build/Release/_deps/glm-src"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      },
+      "defines": [
+        "NOMINMAX",
+        "HELLO_TRIANGLE_SHADER_DIR=\"${workspaceFolder}/build/Debug/shaders\""
+      ],
+      "compilerPath": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+      "windowsSdkVersion": "10.0.26100.0",
+      "intelliSenseMode": "windows-msvc-x64",
+      "cppStandard": "c++20"
+    }
+  ]
+}
