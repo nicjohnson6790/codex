@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cstring>
 #include <immintrin.h>
 #include <intrin.h>
 #include <limits>
@@ -10,6 +11,64 @@
 namespace
 {
 constexpr std::uint64_t kInvalidScopeIndex = std::numeric_limits<std::size_t>::max();
+
+bool isExcludedCpuScope(const CapturedScope& scope)
+{
+    return scope.name != nullptr &&
+        std::strcmp(scope.name, "SDLRenderer::AcquireSwapchain") == 0;
+}
+
+template <typename Predicate>
+std::uint64_t mergedScopeCycles(
+    const std::vector<CapturedScope>& scopes,
+    const CapturedFrame& frame,
+    Predicate&& predicate)
+{
+    if (frame.scopeEndIndex <= frame.scopeBeginIndex || frame.scopeEndIndex > scopes.size())
+    {
+        return 0;
+    }
+
+    std::uint64_t mergedCycles = 0;
+    std::uint64_t rangeStart = 0;
+    std::uint64_t rangeStop = 0;
+    bool hasRange = false;
+
+    for (std::size_t scopeIndex = frame.scopeBeginIndex; scopeIndex < frame.scopeEndIndex; ++scopeIndex)
+    {
+        const CapturedScope& scope = scopes[scopeIndex];
+        if (scope.stop <= scope.start || !predicate(scope))
+        {
+            continue;
+        }
+
+        if (!hasRange)
+        {
+            rangeStart = scope.start;
+            rangeStop = scope.stop;
+            hasRange = true;
+            continue;
+        }
+
+        if (scope.start <= rangeStop)
+        {
+            rangeStop = std::max(rangeStop, scope.stop);
+        }
+        else
+        {
+            mergedCycles += (rangeStop - rangeStart);
+            rangeStart = scope.start;
+            rangeStop = scope.stop;
+        }
+    }
+
+    if (hasRange)
+    {
+        mergedCycles += (rangeStop - rangeStart);
+    }
+
+    return mergedCycles;
+}
 }
 
 PerformanceCapture::ScopedEvent::ScopedEvent(const char* name)
@@ -123,50 +182,15 @@ std::uint64_t PerformanceCapture::frameCycles(const CapturedFrame& frame) const
 
 std::uint64_t PerformanceCapture::cpuCycles(const CapturedFrame& frame) const
 {
-    if (frame.scopeEndIndex <= frame.scopeBeginIndex || frame.scopeEndIndex > m_scopes.size())
-    {
-        return 0;
-    }
-
-    std::uint64_t coveredCycles = 0;
-    std::uint64_t rangeStart = 0;
-    std::uint64_t rangeStop = 0;
-    bool hasRange = false;
-
-    for (std::size_t scopeIndex = frame.scopeBeginIndex; scopeIndex < frame.scopeEndIndex; ++scopeIndex)
-    {
-        const CapturedScope& scope = m_scopes[scopeIndex];
-        if (scope.stop <= scope.start)
-        {
-            continue;
-        }
-
-        if (!hasRange)
-        {
-            rangeStart = scope.start;
-            rangeStop = scope.stop;
-            hasRange = true;
-            continue;
-        }
-
-        if (scope.start <= rangeStop)
-        {
-            rangeStop = std::max(rangeStop, scope.stop);
-        }
-        else
-        {
-            coveredCycles += (rangeStop - rangeStart);
-            rangeStart = scope.start;
-            rangeStop = scope.stop;
-        }
-    }
-
-    if (hasRange)
-    {
-        coveredCycles += (rangeStop - rangeStart);
-    }
-
-    return coveredCycles;
+    const std::uint64_t coveredCycles = mergedScopeCycles(
+        m_scopes,
+        frame,
+        [](const CapturedScope&) { return true; });
+    const std::uint64_t excludedCycles = mergedScopeCycles(
+        m_scopes,
+        frame,
+        [](const CapturedScope& scope) { return isExcludedCpuScope(scope); });
+    return excludedCycles >= coveredCycles ? 0 : (coveredCycles - excludedCycles);
 }
 
 std::size_t PerformanceCapture::beginScope(const char* name)

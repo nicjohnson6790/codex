@@ -146,6 +146,16 @@ float compactedFractionForTimestamp(
 
     return static_cast<float>(elapsedCycles) / static_cast<float>(compactedCycles);
 }
+
+float percentageOrZero(float numerator, float denominator)
+{
+    if (denominator <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    return (numerator / denominator) * 100.0f;
+}
 }
 
 void PerfPanel::draw(bool& viewportPaused)
@@ -163,27 +173,57 @@ void PerfPanel::draw(bool& viewportPaused)
 
     std::vector<float> frameSamples;
     std::vector<float> cpuSamples;
+    std::vector<std::uint64_t> frameCycleSamples;
+    std::vector<std::uint64_t> cpuCycleSamples;
     frameSamples.reserve(frames.size());
     cpuSamples.reserve(frames.size());
+    frameCycleSamples.reserve(frames.size());
+    cpuCycleSamples.reserve(frames.size());
     for (const CapturedFrame& frame : frames)
     {
-        frameSamples.push_back(performanceCapture.cyclesToMilliseconds(performanceCapture.frameCycles(frame)));
-        cpuSamples.push_back(performanceCapture.cyclesToMilliseconds(performanceCapture.cpuCycles(frame)));
+        const std::uint64_t frameCycles = performanceCapture.frameCycles(frame);
+        const std::uint64_t cpuCycles = performanceCapture.cpuCycles(frame);
+        frameCycleSamples.push_back(frameCycles);
+        cpuCycleSamples.push_back(cpuCycles);
+        frameSamples.push_back(performanceCapture.cyclesToMilliseconds(frameCycles));
+        cpuSamples.push_back(performanceCapture.cyclesToMilliseconds(cpuCycles));
     }
 
     const float latestMs = frameSamples.back();
     const float latestCpuMs = cpuSamples.back();
+    const std::uint64_t latestCpuCycles = cpuCycleSamples.back();
     const float averageMs = std::accumulate(frameSamples.begin(), frameSamples.end(), 0.0f) / static_cast<float>(frameSamples.size());
     const float averageCpuMs = std::accumulate(cpuSamples.begin(), cpuSamples.end(), 0.0f) / static_cast<float>(cpuSamples.size());
     const float maxMs = *std::max_element(frameSamples.begin(), frameSamples.end());
     const float maxCpuMs = *std::max_element(cpuSamples.begin(), cpuSamples.end());
+    const std::uint64_t maxCpuCycles = *std::max_element(cpuCycleSamples.begin(), cpuCycleSamples.end());
+    const double averageCpuCycles = static_cast<double>(std::accumulate(
+        cpuCycleSamples.begin(),
+        cpuCycleSamples.end(),
+        std::uint64_t{0})) / static_cast<double>(cpuCycleSamples.size());
     const float averageFps = averageMs > 0.0f ? (1000.0f / averageMs) : 0.0f;
     const float graphMaxMs = std::max(33.3f, maxMs * 1.1f);
+    const float latestCpuPercent = percentageOrZero(latestCpuMs, latestMs);
+    const float averageCpuPercent = percentageOrZero(averageCpuMs, averageMs);
+    const float peakCpuPercent = percentageOrZero(maxCpuMs, maxMs);
 
     ImGui::Text("Window: last %.1f seconds", AppConfig::Perf::kHistorySeconds);
-    ImGui::Text("Latest: %.2f ms frame / %.2f ms CPU", latestMs, latestCpuMs);
-    ImGui::Text("Average: %.2f ms frame / %.2f ms CPU (%.1f FPS)", averageMs, averageCpuMs, averageFps);
-    ImGui::Text("Peak: %.2f ms frame / %.2f ms CPU", maxMs, maxCpuMs);
+    ImGui::Text("Latest CPU used: %.2f / %.2f ms (%.2f%%, %llu cycles)",
+        latestCpuMs,
+        latestMs,
+        latestCpuPercent,
+        static_cast<unsigned long long>(latestCpuCycles));
+    ImGui::Text("Average CPU used: %.2f / %.2f ms (%.2f%%, %.0f cycles, %.1f FPS)",
+        averageCpuMs,
+        averageMs,
+        averageCpuPercent,
+        averageCpuCycles,
+        averageFps);
+    ImGui::Text("Peak CPU used: %.2f / %.2f ms (%.2f%%, %llu cycles)",
+        maxCpuMs,
+        maxMs,
+        peakCpuPercent,
+        static_cast<unsigned long long>(maxCpuCycles));
     ImGui::Text("Capture: %s", viewportPaused ? "paused" : "live");
     if (ImGui::Button(viewportPaused ? "Resume Viewport + Capture" : "Pause Viewport + Capture"))
     {
@@ -288,8 +328,10 @@ void PerfPanel::draw(bool& viewportPaused)
     ImGui::TextUnformatted("Frame time");
 
     const CapturedFrame& selectedFrame = frames[m_selectedFrame];
+    const std::uint64_t selectedCpuCycles = performanceCapture.cpuCycles(selectedFrame);
     const float selectedFrameMs = performanceCapture.cyclesToMilliseconds(performanceCapture.frameCycles(selectedFrame));
-    const float selectedCpuMs = performanceCapture.cyclesToMilliseconds(performanceCapture.cpuCycles(selectedFrame));
+    const float selectedCpuMs = performanceCapture.cyclesToMilliseconds(selectedCpuCycles);
+    const float selectedCpuPercent = percentageOrZero(selectedCpuMs, selectedFrameMs);
     const bool zoomAppliesToSelectedFrame = m_flameGraphZoomActive && m_flameGraphZoomFrame == m_selectedFrame;
     const std::uint64_t flameRangeStart = zoomAppliesToSelectedFrame ? m_flameGraphZoomStart : selectedFrame.start;
     const std::uint64_t flameRangeStop = zoomAppliesToSelectedFrame ? m_flameGraphZoomStop : selectedFrame.stop;
@@ -297,7 +339,12 @@ void PerfPanel::draw(bool& viewportPaused)
 
     ImGui::Spacing();
     ImGui::SeparatorText("Selected Frame");
-    ImGui::Text("Frame %zu: %.2f ms frame / %.2f ms CPU", m_selectedFrame, selectedFrameMs, selectedCpuMs);
+    ImGui::Text("Frame %zu CPU used: %.2f / %.2f ms (%.2f%%, %llu cycles)",
+        m_selectedFrame,
+        selectedCpuMs,
+        selectedFrameMs,
+        selectedCpuPercent,
+        static_cast<unsigned long long>(selectedCpuCycles));
     if (zoomAppliesToSelectedFrame)
     {
         ImGui::Text("Zoom: %s", m_flameGraphZoomLabel.c_str());

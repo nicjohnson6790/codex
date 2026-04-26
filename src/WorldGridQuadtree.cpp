@@ -12,6 +12,20 @@ namespace
 {
 constexpr double kVisibilityBoundsHalfHeight = 10000.0;
 
+void initializeBaseNode(
+    QuadtreeNode& node,
+    std::int64_t gridX,
+    std::int64_t gridY)
+{
+    node.nodeId = {
+        .gridX = gridX,
+        .gridY = gridY,
+        .subdivisionPath = 0,
+    };
+    node.children.fill(QuadtreeNode::NullNodeIndex);
+    node.flags = QuadtreeNode::IsUsedMask | QuadtreeNode::IsLeafMask;
+}
+
 glm::dvec3 nodeCenterAtZeroHeight(const Position& minCorner, const Position& maxCorner)
 {
     const glm::dvec3 minWorld = minCorner.worldPosition();
@@ -308,35 +322,119 @@ void WorldGridQuadtree::reset()
 
 void WorldGridQuadtree::refreshBaseNodes(const Position& cameraPosition)
 {
+    const std::int64_t targetBaseGridX = cameraPosition.gridX();
+    const std::int64_t targetBaseGridY = cameraPosition.gridY();
+
     if (m_hasBaseGrid &&
-        m_baseGridX == cameraPosition.gridX() &&
-        m_baseGridY == cameraPosition.gridY())
+        m_baseGridX == targetBaseGridX &&
+        m_baseGridY == targetBaseGridY)
     {
         return;
     }
 
-    reset();
-    m_baseGridX = cameraPosition.gridX();
-    m_baseGridY = cameraPosition.gridY();
-    m_hasBaseGrid = true;
+    if (!m_hasBaseGrid)
+    {
+        reset();
+        m_baseGridX = targetBaseGridX;
+        m_baseGridY = targetBaseGridY;
+        m_hasBaseGrid = true;
+
+        std::size_t baseNodeArrayIndex = 0;
+        for (int gridOffsetY = -AppConfig::Quadtree::kNeighborRadius; gridOffsetY <= AppConfig::Quadtree::kNeighborRadius; ++gridOffsetY)
+        {
+            for (int gridOffsetX = -AppConfig::Quadtree::kNeighborRadius; gridOffsetX <= AppConfig::Quadtree::kNeighborRadius; ++gridOffsetX)
+            {
+                const std::uint16_t nodeIndex = allocateNode();
+                if (nodeIndex == QuadtreeNode::NullNodeIndex)
+                {
+                    return;
+                }
+
+                QuadtreeNode& node = m_nodes[nodeIndex];
+                initializeBaseNode(
+                    node,
+                    targetBaseGridX + static_cast<std::int64_t>(gridOffsetX),
+                    targetBaseGridY + static_cast<std::int64_t>(gridOffsetY));
+                m_baseNodes[baseNodeArrayIndex++] = nodeIndex;
+            }
+        }
+        return;
+    }
+
+    const auto oldBaseNodes = m_baseNodes;
+    std::array<bool, kBaseNodeCount> reusedOldBaseNodes{};
+    std::array<std::uint16_t, kBaseNodeCount> newBaseNodes{};
+    newBaseNodes.fill(QuadtreeNode::NullNodeIndex);
 
     std::size_t baseNodeArrayIndex = 0;
     for (int gridOffsetY = -AppConfig::Quadtree::kNeighborRadius; gridOffsetY <= AppConfig::Quadtree::kNeighborRadius; ++gridOffsetY)
     {
         for (int gridOffsetX = -AppConfig::Quadtree::kNeighborRadius; gridOffsetX <= AppConfig::Quadtree::kNeighborRadius; ++gridOffsetX)
         {
-            const std::uint16_t nodeIndex = allocateNode();
-            QuadtreeNode& node = m_nodes[nodeIndex];
-            node.nodeId = {
-                .gridX = cameraPosition.gridX() + static_cast<std::int64_t>(gridOffsetX),
-                .gridY = cameraPosition.gridY() + static_cast<std::int64_t>(gridOffsetY),
-                .subdivisionPath = 0,
-            };
-            node.children.fill(QuadtreeNode::NullNodeIndex);
-            node.flags = QuadtreeNode::IsUsedMask | QuadtreeNode::IsLeafMask;
-            m_baseNodes[baseNodeArrayIndex++] = nodeIndex;
+            const std::int64_t targetGridX = targetBaseGridX + static_cast<std::int64_t>(gridOffsetX);
+            const std::int64_t targetGridY = targetBaseGridY + static_cast<std::int64_t>(gridOffsetY);
+
+            for (std::size_t oldIndex = 0; oldIndex < oldBaseNodes.size(); ++oldIndex)
+            {
+                const std::uint16_t candidateNodeIndex = oldBaseNodes[oldIndex];
+                if (candidateNodeIndex == QuadtreeNode::NullNodeIndex || reusedOldBaseNodes[oldIndex])
+                {
+                    continue;
+                }
+
+                const QuadtreeNode& candidateNode = m_nodes[candidateNodeIndex];
+                if (candidateNode.nodeId.gridX == targetGridX &&
+                    candidateNode.nodeId.gridY == targetGridY &&
+                    candidateNode.nodeId.subdivisionPath == 0)
+                {
+                    newBaseNodes[baseNodeArrayIndex] = candidateNodeIndex;
+                    reusedOldBaseNodes[oldIndex] = true;
+                    break;
+                }
+            }
+
+            ++baseNodeArrayIndex;
         }
     }
+
+    for (std::size_t oldIndex = 0; oldIndex < oldBaseNodes.size(); ++oldIndex)
+    {
+        const std::uint16_t nodeIndex = oldBaseNodes[oldIndex];
+        if (nodeIndex != QuadtreeNode::NullNodeIndex && !reusedOldBaseNodes[oldIndex])
+        {
+            freeSubtree(nodeIndex);
+        }
+    }
+
+    baseNodeArrayIndex = 0;
+    for (int gridOffsetY = -AppConfig::Quadtree::kNeighborRadius; gridOffsetY <= AppConfig::Quadtree::kNeighborRadius; ++gridOffsetY)
+    {
+        for (int gridOffsetX = -AppConfig::Quadtree::kNeighborRadius; gridOffsetX <= AppConfig::Quadtree::kNeighborRadius; ++gridOffsetX)
+        {
+            if (newBaseNodes[baseNodeArrayIndex] == QuadtreeNode::NullNodeIndex)
+            {
+                const std::uint16_t nodeIndex = allocateNode();
+                if (nodeIndex == QuadtreeNode::NullNodeIndex)
+                {
+                    return;
+                }
+
+                QuadtreeNode& node = m_nodes[nodeIndex];
+                initializeBaseNode(
+                    node,
+                    targetBaseGridX + static_cast<std::int64_t>(gridOffsetX),
+                    targetBaseGridY + static_cast<std::int64_t>(gridOffsetY));
+                newBaseNodes[baseNodeArrayIndex] = nodeIndex;
+            }
+
+            ++baseNodeArrayIndex;
+        }
+    }
+
+    m_baseNodes = newBaseNodes;
+    m_baseGridX = targetBaseGridX;
+    m_baseGridY = targetBaseGridY;
+    m_hasBaseGrid = true;
 }
 
 std::uint16_t WorldGridQuadtree::allocateNode()
