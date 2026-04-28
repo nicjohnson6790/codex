@@ -315,7 +315,9 @@ void App::updateSceneForFrame()
 
     if (m_panels.showQuadtreeBorders())
     {
-        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitDebugDraws");
+        HELLO_PROFILE_SCOPE_GROUPS(
+            "App::UpdateSceneForFrame::EmitDebugDraws",
+            ProfileScopeGroup::TreeUpdate);
         m_worldGridQuadtree.emitDebugDraws(renderEngines);
     }
 }

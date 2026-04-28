@@ -81,6 +81,7 @@ void QuadtreeMeshRenderer::initialize(
 
     SDL_GPUBufferCreateInfo heightmapInfo{};
     heightmapInfo.usage =
+        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
         SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ |
         SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
     heightmapInfo.size = static_cast<Uint32>(sizeof(float) * kHeightmapSliceFloatCount * AppConfig::Terrain::kHeightmapSliceCapacity);
@@ -88,6 +89,24 @@ void QuadtreeMeshRenderer::initialize(
     if (m_heightmapBuffer == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh heightmap buffer.");
+    }
+
+    SDL_GPUBufferCreateInfo heightmapGenerationInfo{};
+    heightmapGenerationInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    heightmapGenerationInfo.size = static_cast<Uint32>(sizeof(HeightmapGenerationUniforms) * m_pendingHeightmapGenerations.size());
+    m_heightmapGenerationBuffer = SDL_CreateGPUBuffer(m_device, &heightmapGenerationInfo);
+    if (m_heightmapGenerationBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree mesh generation buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo heightmapGenerationTransferInfo{};
+    heightmapGenerationTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    heightmapGenerationTransferInfo.size = heightmapGenerationInfo.size;
+    m_heightmapGenerationTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &heightmapGenerationTransferInfo);
+    if (m_heightmapGenerationTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree mesh generation transfer buffer.");
     }
 
     SDL_GPUBufferCreateInfo extentsInfo{};
@@ -146,6 +165,16 @@ void QuadtreeMeshRenderer::shutdown()
     {
         SDL_ReleaseGPUBuffer(m_device, m_heightmapExtentsBuffer);
         m_heightmapExtentsBuffer = nullptr;
+    }
+    if (m_heightmapGenerationTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_heightmapGenerationTransferBuffer);
+        m_heightmapGenerationTransferBuffer = nullptr;
+    }
+    if (m_heightmapGenerationBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_heightmapGenerationBuffer);
+        m_heightmapGenerationBuffer = nullptr;
     }
     if (m_heightmapComputePipeline != nullptr)
     {
@@ -351,6 +380,20 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
 
     if (m_pendingHeightmapGenerationCount > 0)
     {
+        void* mappedGenerationUniforms = SDL_MapGPUTransferBuffer(m_device, m_heightmapGenerationTransferBuffer, true);
+        std::memcpy(
+            mappedGenerationUniforms,
+            m_pendingHeightmapGenerations.data(),
+            sizeof(HeightmapGenerationUniforms) * m_pendingHeightmapGenerationCount);
+        SDL_UnmapGPUTransferBuffer(m_device, m_heightmapGenerationTransferBuffer);
+
+        SDL_GPUTransferBufferLocation generationSource{};
+        generationSource.transfer_buffer = m_heightmapGenerationTransferBuffer;
+        SDL_GPUBufferRegion generationDestination{};
+        generationDestination.buffer = m_heightmapGenerationBuffer;
+        generationDestination.size = static_cast<Uint32>(sizeof(HeightmapGenerationUniforms) * m_pendingHeightmapGenerationCount);
+        SDL_UploadToGPUBuffer(copyPass, &generationSource, &generationDestination, false);
+
         GpuHeightmapExtents* mappedExtents = static_cast<GpuHeightmapExtents*>(
             SDL_MapGPUTransferBuffer(m_device, m_heightmapExtentsInitTransferBuffer, true));
         for (std::uint16_t index = 0; index < m_pendingHeightmapGenerationCount; ++index)
@@ -439,8 +482,8 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
 
     SDL_BindGPUComputePipeline(computePass, m_heightmapComputePipeline);
 
-    SDL_GPUBuffer* storageBuffers[]{ m_heightmapBuffer, m_heightmapExtentsBuffer };
-    SDL_BindGPUComputeStorageBuffers(computePass, 0, storageBuffers, 2);
+    SDL_GPUBuffer* readonlyStorageBuffers[]{ m_heightmapGenerationBuffer };
+    SDL_BindGPUComputeStorageBuffers(computePass, 0, readonlyStorageBuffers, 1);
 
     const std::uint32_t groupCountX =
         (AppConfig::Terrain::kHeightmapResolution + kHeightmapComputeThreadCountX - 1) / kHeightmapComputeThreadCountX;
@@ -449,12 +492,11 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
 
     for (std::uint16_t index = 0; index < m_pendingHeightmapGenerationCount; ++index)
     {
-        const HeightmapGenerationUniforms& uniforms = m_pendingHeightmapGenerations[index];
         m_lastDispatchedLeafIds[index] = m_pendingGenerationLeafIds[index];
-        m_lastDispatchedSlices[index] = static_cast<std::uint16_t>(uniforms.dispatchParams.x);
-        SDL_PushGPUComputeUniformData(commandBuffer, 0, &uniforms, static_cast<Uint32>(sizeof(uniforms)));
-        SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, 1);
+        m_lastDispatchedSlices[index] = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].dispatchParams.x);
     }
+
+    SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, m_pendingHeightmapGenerationCount);
 
     SDL_EndGPUComputePass(computePass);
     m_lastDispatchedGenerationCount = m_pendingHeightmapGenerationCount;
@@ -659,8 +701,9 @@ void QuadtreeMeshRenderer::createHeightmapComputePipeline(const std::filesystem:
     pipelineInfo.code = bytes.data();
     pipelineInfo.entrypoint = "main";
     pipelineInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    pipelineInfo.num_readonly_storage_buffers = 1;
     pipelineInfo.num_readwrite_storage_buffers = 2;
-    pipelineInfo.num_uniform_buffers = 1;
+    pipelineInfo.num_uniform_buffers = 0;
     pipelineInfo.threadcount_x = kHeightmapComputeThreadCountX;
     pipelineInfo.threadcount_y = kHeightmapComputeThreadCountY;
     pipelineInfo.threadcount_z = kHeightmapComputeThreadCountZ;

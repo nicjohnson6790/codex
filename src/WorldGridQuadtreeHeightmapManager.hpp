@@ -5,6 +5,7 @@
 #include "WorldGridQuadtreeTypes.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 class QuadtreeMeshRenderer;
@@ -47,7 +48,29 @@ public:
     [[nodiscard]] std::uint16_t queuedCount() const { return m_queueCount; }
 
 private:
+    static constexpr std::uint16_t kLookupBucketCount = 256;
+    static constexpr std::uint16_t kLookupBucketEntryCount = 8;
+    static constexpr std::uint16_t kLookupOverflowCapacity = 504;
+
+    struct LookupBucketEntry
+    {
+        std::uint16_t residentIndex = kCapacity;
+    };
+
+    struct LookupOverflowEntry
+    {
+        WorldGridQuadtreeLeafId leafId{};
+        std::uint16_t residentIndex = kCapacity;
+        std::uint8_t bucketIndex = 0;
+        bool used = false;
+    };
+
     [[nodiscard]] std::uint16_t findResidentIndex(const WorldGridQuadtreeLeafId& leafId) const;
+    void insertResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex);
+    void removeResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex);
+    [[nodiscard]] static std::uint64_t mix64(std::uint64_t x);
+    [[nodiscard]] static std::uint64_t hashLeafId(const WorldGridQuadtreeLeafId& leafId);
+    [[nodiscard]] static std::uint8_t bucketIndexForLeafId(const WorldGridQuadtreeLeafId& leafId);
     [[nodiscard]] bool queueContains(const WorldGridQuadtreeLeafId& leafId) const;
     bool enqueueLeaf(const WorldGridQuadtreeLeafId& leafId);
     [[nodiscard]] bool dequeueLeaf(WorldGridQuadtreeLeafId& leafId);
@@ -60,6 +83,10 @@ private:
 
     std::array<ResidentMapEntry, kCapacity> m_residentMap{};
     std::uint16_t m_residentCount = 0;
+    std::array<std::array<LookupBucketEntry, kLookupBucketEntryCount>, kLookupBucketCount> m_lookupBuckets{};
+    std::array<bool, kLookupBucketCount> m_lookupBucketHasOverflow{};
+    std::array<LookupOverflowEntry, kLookupOverflowCapacity> m_lookupOverflowEntries{};
+    std::uint16_t m_lookupOverflowCount = 0;
 
     std::array<HeightmapExtents, kCapacity> m_knownExtents{};
     std::array<bool, kCapacity> m_knownExtentsValid{};

@@ -164,6 +164,8 @@ private:
     SDL_GPUTransferBuffer *m_indirectTransferBuffer = nullptr;
 
     // GPU heightmap slice storage written directly by the compute shader.
+    SDL_GPUBuffer* m_heightmapGenerationBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_heightmapGenerationTransferBuffer = nullptr;
     SDL_GPUBuffer *m_heightmapBuffer = nullptr;
     SDL_GPUBuffer* m_heightmapExtentsBuffer = nullptr;
     SDL_GPUTransferBuffer* m_heightmapExtentsInitTransferBuffer = nullptr;

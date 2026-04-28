@@ -35,34 +35,23 @@ struct CycleRange
 
 bool isCollapsedWaitScope(const CapturedScope& scope)
 {
-    return scope.name != nullptr &&
-        std::strcmp(scope.name, "SDLRenderer::AcquireSwapchain") == 0;
+    return (scope.groups & ProfileScopeGroup::Wait) != ProfileScopeGroup::None;
 }
 
-std::vector<CycleRange> buildMergedRanges(
-    const std::vector<CapturedScope>& scopes,
-    const std::vector<FlameGraphEntry>& flameEntries,
-    std::uint64_t rangeStart,
-    std::uint64_t rangeStop
-)
+bool isImguiRelatedCompactScope(const CapturedScope& scope)
 {
-    std::vector<CycleRange> ranges;
-    ranges.reserve(flameEntries.size());
+    constexpr ProfileScopeGroup kCompactGroups =
+        ProfileScopeGroup::ImGui |
+        ProfileScopeGroup::Renderer |
+        ProfileScopeGroup::TreeUpdate;
+    return (scope.groups & kCompactGroups) != ProfileScopeGroup::None;
+}
 
-    for (const FlameGraphEntry& entry : flameEntries)
+std::vector<CycleRange> mergeRanges(std::vector<CycleRange> ranges)
+{
+    if (ranges.empty())
     {
-        const CapturedScope& scope = scopes[entry.scopeIndex];
-        if (isCollapsedWaitScope(scope))
-        {
-            continue;
-        }
-
-        const std::uint64_t start = std::max(scope.start, rangeStart);
-        const std::uint64_t stop = std::min(scope.stop, rangeStop);
-        if (stop > start)
-        {
-            ranges.push_back({ start, stop });
-        }
+        return ranges;
     }
 
     std::sort(ranges.begin(), ranges.end(), [](const CycleRange& left, const CycleRange& right) {
@@ -86,23 +75,44 @@ std::vector<CycleRange> buildMergedRanges(
     return mergedRanges;
 }
 
-std::vector<FlameGraphEntry> buildLeafEntries(const std::vector<FlameGraphEntry>& flameEntries)
+std::vector<CycleRange> buildVisibleRanges(
+    std::uint64_t rangeStart,
+    std::uint64_t rangeStop,
+    const std::vector<CycleRange>& collapsedRanges)
 {
-    std::vector<FlameGraphEntry> leafEntries;
-    leafEntries.reserve(flameEntries.size());
-
-    for (std::size_t index = 0; index < flameEntries.size(); ++index)
+    if (rangeStop <= rangeStart)
     {
-        const bool hasChild =
-            (index + 1) < flameEntries.size() &&
-            flameEntries[index + 1].depth > flameEntries[index].depth;
-        if (!hasChild)
+        return {};
+    }
+
+    if (collapsedRanges.empty())
+    {
+        return { { rangeStart, rangeStop } };
+    }
+
+    std::vector<CycleRange> visibleRanges;
+    visibleRanges.reserve(collapsedRanges.size() + 1);
+
+    std::uint64_t cursor = rangeStart;
+    for (const CycleRange& collapsedRange : collapsedRanges)
+    {
+        if (collapsedRange.start > cursor)
         {
-            leafEntries.push_back(flameEntries[index]);
+            visibleRanges.push_back({ cursor, collapsedRange.start });
+        }
+        cursor = std::max(cursor, collapsedRange.stop);
+        if (cursor >= rangeStop)
+        {
+            break;
         }
     }
 
-    return leafEntries;
+    if (cursor < rangeStop)
+    {
+        visibleRanges.push_back({ cursor, rangeStop });
+    }
+
+    return visibleRanges;
 }
 
 std::uint64_t totalRangeCycles(const std::vector<CycleRange>& ranges)
@@ -160,7 +170,7 @@ float percentageOrZero(float numerator, float denominator)
 
 void PerfPanel::draw(bool& viewportPaused)
 {
-    HELLO_PROFILE_SCOPE("PerfPanel::Draw");
+    HELLO_PROFILE_SCOPE_GROUPS("PerfPanel::Draw", ProfileScopeGroup::ImGui);
     PerformanceCapture& performanceCapture = PerformanceCapture::instance();
     const std::deque<CapturedFrame>& frames = performanceCapture.frames();
     if (frames.empty())
@@ -208,18 +218,21 @@ void PerfPanel::draw(bool& viewportPaused)
     const float peakCpuPercent = percentageOrZero(maxCpuMs, maxMs);
 
     ImGui::Text("Window: last %.1f seconds", AppConfig::Perf::kHistorySeconds);
-    ImGui::Text("Latest CPU used: %.2f / %.2f ms (%.2f%%, %llu cycles)",
+    ImGui::TextUnformatted("Latest CPU used");
+    ImGui::Text("%.2f / %.2f ms (%.2f%%, %llu cycles)",
         latestCpuMs,
         latestMs,
         latestCpuPercent,
         static_cast<unsigned long long>(latestCpuCycles));
-    ImGui::Text("Average CPU used: %.2f / %.2f ms (%.2f%%, %.0f cycles, %.1f FPS)",
+    ImGui::TextUnformatted("Average CPU used");
+    ImGui::Text("%.2f / %.2f ms (%.2f%%, %.0f cycles, %.1f FPS)",
         averageCpuMs,
         averageMs,
         averageCpuPercent,
         averageCpuCycles,
         averageFps);
-    ImGui::Text("Peak CPU used: %.2f / %.2f ms (%.2f%%, %llu cycles)",
+    ImGui::TextUnformatted("Peak CPU used");
+    ImGui::Text("%.2f / %.2f ms (%.2f%%, %llu cycles)",
         maxCpuMs,
         maxMs,
         peakCpuPercent,
@@ -242,6 +255,7 @@ void PerfPanel::draw(bool& viewportPaused)
     ImGui::SameLine();
     ImGui::TextUnformatted("Click a bar to freeze that frame and inspect its flame graph.");
     ImGui::Checkbox("Compact CPU timeline", &m_compactFlameGraph);
+    ImGui::Checkbox("Compact ImGui-related blocks", &m_compactImguiRelatedBlocks);
     ImGui::Separator();
 
     const ImVec2 graphSize(-1.0f, AppConfig::Perf::kGraphHeight);
@@ -339,8 +353,8 @@ void PerfPanel::draw(bool& viewportPaused)
 
     ImGui::Spacing();
     ImGui::SeparatorText("Selected Frame");
-    ImGui::Text("Frame %zu CPU used: %.2f / %.2f ms (%.2f%%, %llu cycles)",
-        m_selectedFrame,
+    ImGui::Text("Frame %zu CPU used", m_selectedFrame);
+    ImGui::Text("%.2f / %.2f ms (%.2f%%, %llu cycles)",
         selectedCpuMs,
         selectedFrameMs,
         selectedCpuPercent,
@@ -363,8 +377,18 @@ void PerfPanel::draw(bool& viewportPaused)
     const std::vector<CapturedScope>& scopes = performanceCapture.scopes();
     std::vector<FlameGraphEntry> flameEntries;
     flameEntries.reserve(selectedFrame.scopeEndIndex - selectedFrame.scopeBeginIndex);
+    std::vector<CycleRange> collapsedRanges;
+    collapsedRanges.reserve(selectedFrame.scopeEndIndex - selectedFrame.scopeBeginIndex);
 
-    std::vector<std::uint64_t> stackStops;
+    struct ScopeStackEntry
+    {
+        std::uint64_t stop = 0;
+        bool visible = false;
+        bool hidesSubtree = false;
+    };
+
+    std::vector<ScopeStackEntry> stack;
+    int visibleDepth = 0;
     int maxDepth = 0;
     for (std::size_t scopeIndex = selectedFrame.scopeBeginIndex; scopeIndex < selectedFrame.scopeEndIndex; ++scopeIndex)
     {
@@ -374,26 +398,63 @@ void PerfPanel::draw(bool& viewportPaused)
             continue;
         }
 
-        while (!stackStops.empty() && scope.start >= stackStops.back())
+        while (!stack.empty() && scope.start >= stack.back().stop)
         {
-            stackStops.pop_back();
+            if (stack.back().visible)
+            {
+                --visibleDepth;
+            }
+            stack.pop_back();
         }
 
-        flameEntries.push_back({
-            .scopeIndex = scopeIndex,
-            .depth = static_cast<int>(stackStops.size()),
+        const bool hiddenByAncestor = !stack.empty() && stack.back().hidesSubtree;
+        const bool collapseThisScope =
+            (m_compactFlameGraph && isCollapsedWaitScope(scope)) ||
+            (m_compactImguiRelatedBlocks && isImguiRelatedCompactScope(scope));
+        const bool hideThisScope = hiddenByAncestor || collapseThisScope;
+
+        if (collapseThisScope && !hiddenByAncestor)
+        {
+            collapsedRanges.push_back({
+                std::max(scope.start, flameRangeStart),
+                std::min(scope.stop, flameRangeStop),
+            });
+        }
+
+        if (!hideThisScope)
+        {
+            flameEntries.push_back({
+                .scopeIndex = scopeIndex,
+                .depth = visibleDepth,
+            });
+            ++visibleDepth;
+            maxDepth = std::max(maxDepth, visibleDepth);
+        }
+
+        stack.push_back({
+            .stop = scope.stop,
+            .visible = !hideThisScope,
+            .hidesSubtree = hiddenByAncestor || collapseThisScope,
         });
-        stackStops.push_back(scope.stop);
-        maxDepth = std::max(maxDepth, static_cast<int>(stackStops.size()));
     }
+
+    const std::vector<CycleRange> visibleRanges = buildVisibleRanges(
+        flameRangeStart,
+        flameRangeStop,
+        mergeRanges(std::move(collapsedRanges)));
+    const std::uint64_t compactedCycles = std::max<std::uint64_t>(totalRangeCycles(visibleRanges), 1);
 
     std::vector<FlameGraphEntry> displayedEntries;
     displayedEntries.reserve(flameEntries.size());
-    if (m_compactFlameGraph)
+    if (m_compactFlameGraph || m_compactImguiRelatedBlocks)
     {
         for (const FlameGraphEntry& entry : flameEntries)
         {
-            if (!isCollapsedWaitScope(scopes[entry.scopeIndex]))
+            const CapturedScope& scope = scopes[entry.scopeIndex];
+            const bool scopeHasVisiblePixels =
+                compactedFractionForTimestamp(scope.stop, visibleRanges, compactedCycles) >
+                compactedFractionForTimestamp(scope.start, visibleRanges, compactedCycles);
+            if (scopeHasVisiblePixels)
             {
                 displayedEntries.push_back(entry);
             }
@@ -403,12 +464,6 @@ void PerfPanel::draw(bool& viewportPaused)
     {
         displayedEntries = flameEntries;
     }
-
-    const std::vector<FlameGraphEntry> activeEntries = m_compactFlameGraph
-        ? buildLeafEntries(displayedEntries)
-        : displayedEntries;
-    const std::vector<CycleRange> mergedRanges = buildMergedRanges(scopes, activeEntries, flameRangeStart, flameRangeStop);
-    const std::uint64_t compactedCycles = std::max<std::uint64_t>(totalRangeCycles(mergedRanges), 1);
 
     const float flameHeight = std::max(
         AppConfig::Perf::kFlameGraphMinHeight,
@@ -432,11 +487,12 @@ void PerfPanel::draw(bool& viewportPaused)
     for (const FlameGraphEntry& entry : displayedEntries)
     {
         const CapturedScope& scope = scopes[entry.scopeIndex];
-        const float x0Fraction = m_compactFlameGraph
-            ? compactedFractionForTimestamp(scope.start, mergedRanges, compactedCycles)
+        const bool useCompactedTimeline = m_compactFlameGraph || m_compactImguiRelatedBlocks;
+        const float x0Fraction = useCompactedTimeline
+            ? compactedFractionForTimestamp(scope.start, visibleRanges, compactedCycles)
             : (static_cast<float>(scope.start - flameRangeStart) / static_cast<float>(flameRangeCycles));
-        const float x1Fraction = m_compactFlameGraph
-            ? compactedFractionForTimestamp(scope.stop, mergedRanges, compactedCycles)
+        const float x1Fraction = useCompactedTimeline
+            ? compactedFractionForTimestamp(scope.stop, visibleRanges, compactedCycles)
             : (static_cast<float>(scope.stop - flameRangeStart) / static_cast<float>(flameRangeCycles));
         const float x0 = flamePos.x + (flameArea.x * x0Fraction);
         const float x1 = flamePos.x + (flameArea.x * x1Fraction);

@@ -14,8 +14,7 @@ constexpr std::uint64_t kInvalidScopeIndex = std::numeric_limits<std::size_t>::m
 
 bool isExcludedCpuScope(const CapturedScope& scope)
 {
-    return scope.name != nullptr &&
-        std::strcmp(scope.name, "SDLRenderer::AcquireSwapchain") == 0;
+    return (scope.groups & ProfileScopeGroup::Wait) != ProfileScopeGroup::None;
 }
 
 template <typename Predicate>
@@ -71,9 +70,9 @@ std::uint64_t mergedScopeCycles(
 }
 }
 
-PerformanceCapture::ScopedEvent::ScopedEvent(const char* name)
+PerformanceCapture::ScopedEvent::ScopedEvent(const char* name, ProfileScopeGroup groups)
 {
-    m_scopeIndex = PerformanceCapture::instance().beginScope(name);
+    m_scopeIndex = PerformanceCapture::instance().beginScope(name, groups);
 }
 
 PerformanceCapture::ScopedEvent::~ScopedEvent()
@@ -193,7 +192,7 @@ std::uint64_t PerformanceCapture::cpuCycles(const CapturedFrame& frame) const
     return excludedCycles >= coveredCycles ? 0 : (coveredCycles - excludedCycles);
 }
 
-std::size_t PerformanceCapture::beginScope(const char* name)
+std::size_t PerformanceCapture::beginScope(const char* name, ProfileScopeGroup groups)
 {
     if (!canCaptureScope())
     {
@@ -204,6 +203,7 @@ std::size_t PerformanceCapture::beginScope(const char* name)
         .start = readTimestamp(),
         .stop = 0,
         .name = name,
+        .groups = groups,
     });
     return m_scopes.size() - 1;
 }

@@ -10,7 +10,7 @@
 
 void AppPanels::draw(Context& context)
 {
-    HELLO_PROFILE_SCOPE("AppPanels::Draw");
+    HELLO_PROFILE_SCOPE_GROUPS("AppPanels::Draw", ProfileScopeGroup::ImGui);
     drawDockSpace();
     drawInfoPane(context);
     drawViewportPane(context);

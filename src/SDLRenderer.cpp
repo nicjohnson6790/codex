@@ -125,8 +125,6 @@ void SDLRenderer::renderFrame(
 {
     HELLO_PROFILE_SCOPE("SDLRenderer::RenderFrame");
 
-    recreateViewportTargetsIfNeeded();
-
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
     if (commandBuffer == nullptr)
     {
@@ -161,7 +159,9 @@ void SDLRenderer::renderFrame(
 
     if (drawData != nullptr)
     {
-        HELLO_PROFILE_SCOPE("SDLRenderer::PrepareImGui");
+        HELLO_PROFILE_SCOPE_GROUPS(
+            "SDLRenderer::PrepareImGui",
+            ProfileScopeGroup::ImGui | ProfileScopeGroup::Renderer);
         ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commandBuffer);
     }
 
@@ -217,7 +217,9 @@ void SDLRenderer::renderFrame(
     Uint32 swapchainWidth = 0;
     Uint32 swapchainHeight = 0;
     {
-        HELLO_PROFILE_SCOPE("SDLRenderer::AcquireSwapchain");
+        HELLO_PROFILE_SCOPE_GROUPS(
+            "SDLRenderer::AcquireSwapchain",
+            ProfileScopeGroup::Wait);
         if (!SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_window, &swapchainTexture, &swapchainWidth, &swapchainHeight))
         {
             throwSdlError("Failed to acquire SDL GPU swapchain texture.");
@@ -226,7 +228,9 @@ void SDLRenderer::renderFrame(
 
     if (swapchainTexture != nullptr && drawData != nullptr)
     {
-        HELLO_PROFILE_SCOPE("SDLRenderer::RenderImGui");
+        HELLO_PROFILE_SCOPE_GROUPS(
+            "SDLRenderer::RenderImGui",
+            ProfileScopeGroup::ImGui | ProfileScopeGroup::Renderer);
 
         SDL_GPUColorTargetInfo colorTargetInfo{};
         colorTargetInfo.texture = swapchainTexture;
@@ -259,6 +263,10 @@ void SDLRenderer::renderFrame(
     {
         throwSdlError("Failed to submit SDL GPU command buffer.");
     }
+
+    // ImGui draw data for this frame may still reference the previous viewport texture,
+    // so defer resizing until after the command buffer using it has been submitted.
+    recreateViewportTargetsIfNeeded();
 }
 
 void SDLRenderer::createViewportTargets()

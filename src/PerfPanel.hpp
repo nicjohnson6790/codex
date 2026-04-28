@@ -12,6 +12,7 @@ public:
 private:
     std::size_t m_selectedFrame = 0;
     bool m_compactFlameGraph = true;
+    bool m_compactImguiRelatedBlocks = true;
     bool m_flameGraphZoomActive = false;
     std::size_t m_flameGraphZoomFrame = 0;
     std::uint64_t m_flameGraphZoomStart = 0;
