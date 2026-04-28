@@ -226,6 +226,10 @@ void AppPanels::drawControlsTab(Context& context)
         LightingSystem::SunLight& sun = context.lightingSystem.sun();
         ImGui::SliderFloat("Azimuth", &sun.azimuthDegrees, -180.0f, 180.0f, "%.1f deg");
         ImGui::SliderFloat("Elevation", &sun.elevationDegrees, 1.0f, 89.0f, "%.1f deg");
+        ImGui::SliderFloat("Time of day", &sun.timeOfDayHours, 0.0f, 24.0f, "%.2f h");
+        ImGui::InputFloat("Day length (s)", &sun.dayLengthSeconds, 1.0f, 10.0f, "%.1f");
+        sun.dayLengthSeconds = std::max(sun.dayLengthSeconds, 0.1f);
+        ImGui::InputFloat("Time factor", &sun.timeFactor, 0.1f, 1.0f, "%.2f");
         ImGui::ColorEdit3("Color", &sun.color.x);
         ImGui::SliderFloat("Intensity", &sun.intensity, 0.0f, 4.0f, "%.2f");
     }

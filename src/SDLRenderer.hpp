@@ -14,6 +14,7 @@
 class LightingSystem;
 class LineRenderer;
 class QuadtreeMeshRenderer;
+class SkyboxRenderer;
 class TriangleRenderer;
 
 class SDLRenderer
@@ -39,6 +40,7 @@ public:
         TriangleRenderer& triangleRenderer,
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
         LineRenderer& lineRenderer,
+        SkyboxRenderer& skyboxRenderer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
         ImDrawData* drawData,

@@ -12,10 +12,11 @@ Core pieces:
 - `TriangleRenderer`: simple instanced triangle rendering
 - `LineRenderer`: immediate-style debug line rendering
 - `QuadtreeMeshRenderer`: terrain draw path, compute heightmap generation, and async extents readback
+- `SkyboxRenderer`: fullscreen skybox pass using a cubemap and inverse view-projection ray reconstruction
 - `WorldGridQuadtree`: quadtree update, draw selection, subdivision/collapse, and debug draw emission
 - `WorldGridQuadtreeHeightmapManager`: heightmap residency, LRU replacement, and compute dispatch queueing
 - `CameraManager` + `FreeFlightCameraController`: camera storage and free-flight controls
-- `LightingSystem`: global sun direction, color, and intensity
+- `LightingSystem`: global sun direction, color, intensity, and time-of-day cycle controls
 - `PerformanceCapture` + `PerfPanel`: frame timing and flame graph UI
 
 ## Current Terrain Pipeline
@@ -35,7 +36,9 @@ The renderer then:
 2. initializes per-slice extents sentinels
 3. dispatches compute jobs for queued terrain slices
 4. queues an async extents download
-5. renders the terrain, triangles, debug lines, and ImGui
+5. renders the terrain, triangles, and debug lines into the offscreen viewport
+6. renders the skybox as a fullscreen quad using the cubemap and the current time-of-day rotation
+7. renders ImGui
 
 ## Features
 
@@ -47,6 +50,8 @@ The renderer then:
 - Quadtree terrain rendering with runtime residency and subdivision
 - `259 x 259` heightmap slices with halo samples and a reusable terrain patch mesh
 - GPU compute terrain generation with async GPU extents readback
+- Skybox cubemap rendering from `resources/skybox`
+- Time-of-day controls that rotate both the sun and skybox around a shared orbit axis
 - Runtime terrain tuning:
   - base height
   - base wavelength
@@ -59,6 +64,7 @@ The renderer then:
   - compute dispatches per frame
 - Quadtree debug bounds using real extents when known, falling back to a flat square when not
 - Gouraud terrain shading with a tunable global sun light
+- Automatic day/night progression with configurable day length and time factor
 - Built-in frame graph and CPU flame graph
 
 ## Project Layout
@@ -67,6 +73,7 @@ The renderer then:
 - `src/AppPanels.*`: UI layout and editor panels
 - `src/SDLRenderer.*`: SDL GPU setup and frame submission
 - `src/QuadtreeMeshRenderer.*`: terrain draw path and compute integration
+- `src/SkyboxRenderer.*`: cubemap loading and fullscreen skybox rendering
 - `src/WorldGridQuadtree.*`: quadtree state and traversal
 - `src/WorldGridQuadtreeHeightmapManager.*`: heightmap LRU and compute queue management
 - `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug box rendering
@@ -76,6 +83,7 @@ The renderer then:
 - `src/CameraManager.*`: camera storage and projection building
 - `src/FreeFlightCameraController.*`: free-flight controls
 - `src/LightingSystem.*`: sun-light state
+- `resources/skybox/*.png`: cubemap faces for the skybox
 - `src/PerformanceCapture.*`: timing capture
 - `src/PerfPanel.*`: performance UI
 - `src/Position.hpp`: large-world grid/local position type
@@ -84,6 +92,7 @@ The renderer then:
 - `shaders/triangle.*`: triangle shaders
 - `shaders/line.*`: line shaders
 - `shaders/quadtree_mesh.*`: terrain graphics shaders
+- `shaders/skybox.*`: skybox fullscreen shaders
 - `shaders/heightmap_generate.comp`: terrain compute shader
 
 ## Dependencies
@@ -96,6 +105,7 @@ The renderer then:
 Fetched dependencies:
 
 - SDL `release-3.4.0`
+- SDL_image `release-3.2.4`
 - Dear ImGui `v1.92.5-docking`
 - GLM `1.0.1`
 
@@ -126,19 +136,19 @@ tools\build.cmd
 Release:
 
 ```powershell
-.\build\Release\hello_triangle.exe
+.\build\Release\terrain_sandbox.exe
 ```
 
 Debug:
 
 ```powershell
-.\build\Debug\hello_triangle.exe
+.\build\Debug\terrain_sandbox.exe
 ```
 
 Startup flags:
 
 ```powershell
-.\build\Debug\hello_triangle.exe --verbose-startup --quit-after-first-frame
+.\build\Debug\terrain_sandbox.exe --verbose-startup --quit-after-first-frame
 ```
 
 - `--verbose-startup`: print startup progress
@@ -147,7 +157,9 @@ Startup flags:
 ## Notes
 
 - The rendering API is SDL GPU, with shaders compiled by `glslc`.
+- Skybox faces are loaded through SDL_image and uploaded into an SDL GPU cubemap texture.
 - World positions use large horizontal grid cells plus local coordinates for stable camera-relative rendering.
 - Terrain extents are produced on the GPU and read back asynchronously, so newly generated slices may briefly fall back to conservative bounds until their readback completes.
 - The quadtree processes all allocated nodes during update; draw selection is separate from subdivision/collapse decisions.
+- The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction so it can later grow into atmospheric rendering.
 - Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.

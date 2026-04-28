@@ -11,6 +11,7 @@
 #include "RenderEngines.hpp"
 #include "SDLRenderer.hpp"
 #include "SceneTypes.hpp"
+#include "SkyboxRenderer.hpp"
 #include "TriangleRenderer.hpp"
 #include "WorldGridQuadtree.hpp"
 
@@ -51,6 +52,7 @@ private:
     TriangleRenderer m_triangleRenderer;
     LineRenderer m_lineRenderer;
     QuadtreeMeshRenderer m_quadtreeMeshRenderer;
+    SkyboxRenderer m_skyboxRenderer;
     GamepadInput m_gamepadInput;
     CameraManager m_cameraManager;
     FreeFlightCameraController m_cameraController;

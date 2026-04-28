@@ -29,7 +29,8 @@ protected:
         const std::filesystem::path& path,
         SDL_GPUShaderStage stage,
         std::uint32_t uniformBufferCount,
-        std::uint32_t storageBufferCount = 0
+        std::uint32_t storageBufferCount = 0,
+        std::uint32_t samplerCount = 0
     ) const;
 
     [[nodiscard]] std::vector<std::uint8_t> readShaderCode(const std::filesystem::path& path) const;

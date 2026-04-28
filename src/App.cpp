@@ -8,6 +8,7 @@
 #include <imgui_impl_sdlgpu3.h>
 #include <algorithm>
 #include <filesystem>
+#include <glm/matrix.hpp>
 #include <glm/vec3.hpp>
 #include <iostream>
 #include <stdexcept>
@@ -58,6 +59,11 @@ void App::run()
             }
         }
 
+        if (!m_panels.viewportPaused())
+        {
+            m_lightingSystem.advanceTime(deltaTimeSeconds);
+        }
+
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
@@ -73,11 +79,13 @@ void App::run()
         }
 
         ImGui::Render();
+        const glm::mat4 viewProjection = m_cameraManager.buildActiveViewProjectionMatrix(m_panels.viewportExtent());
         m_renderer.renderFrame(
             m_triangleRenderer,
             m_quadtreeMeshRenderer,
             m_lineRenderer,
-            m_cameraManager.buildActiveViewProjectionMatrix(m_panels.viewportExtent()),
+            m_skyboxRenderer,
+            viewProjection,
             m_lightingSystem,
             ImGui::GetDrawData(),
             !m_panels.viewportPaused()
@@ -112,7 +120,7 @@ void App::initialize()
 
     logStartup("create window");
     m_window = SDL_CreateWindow(
-        "SDL3 GPU ImGui Triangle",
+        "Terrain Sandbox",
         1440,
         900,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
@@ -137,7 +145,7 @@ void App::initialize()
     logStartup("init SDL GPU renderer");
     m_renderer.initialize(m_window);
 
-    const std::filesystem::path shaderDirectory = HELLO_TRIANGLE_SHADER_DIR;
+    const std::filesystem::path shaderDirectory = TERRAIN_SANDBOX_SHADER_DIR;
     logStartup("init triangle renderer");
     m_triangleRenderer.initialize(
         m_renderer.device(),
@@ -158,6 +166,14 @@ void App::initialize()
         m_renderer.swapchainFormat(),
         m_renderer.viewportDepthFormat(),
         shaderDirectory
+    );
+    logStartup("init skybox renderer");
+    m_skyboxRenderer.initialize(
+        m_renderer.device(),
+        m_renderer.swapchainFormat(),
+        m_renderer.viewportDepthFormat(),
+        shaderDirectory,
+        std::filesystem::path(TERRAIN_SANDBOX_RESOURCE_DIR)
     );
 
     logStartup("create ImGui context");
@@ -200,6 +216,7 @@ void App::shutdown()
     PerformanceCapture::instance().shutdown();
     m_gamepadInput.shutdown();
     m_quadtreeMeshRenderer.shutdown();
+    m_skyboxRenderer.shutdown();
     m_lineRenderer.shutdown();
     m_triangleRenderer.shutdown();
     m_renderer.shutdown();

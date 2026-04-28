@@ -36,7 +36,8 @@ SDL_GPUShader* EngineRendererBase::createShader(
     const std::filesystem::path& path,
     SDL_GPUShaderStage stage,
     std::uint32_t uniformBufferCount,
-    std::uint32_t storageBufferCount
+    std::uint32_t storageBufferCount,
+    std::uint32_t samplerCount
 ) const
 {
     const std::vector<std::uint8_t> bytes = readShaderCode(path);
@@ -47,6 +48,7 @@ SDL_GPUShader* EngineRendererBase::createShader(
     shaderInfo.entrypoint = "main";
     shaderInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
     shaderInfo.stage = stage;
+    shaderInfo.num_samplers = samplerCount;
     shaderInfo.num_storage_buffers = storageBufferCount;
     shaderInfo.num_uniform_buffers = uniformBufferCount;
 

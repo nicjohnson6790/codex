@@ -5,12 +5,14 @@
 #include "LineRenderer.hpp"
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
+#include "SkyboxRenderer.hpp"
 #include "TriangleRenderer.hpp"
 
 #include <imgui_impl_sdlgpu3.h>
 
 #include <algorithm>
 #include <array>
+#include <glm/matrix.hpp>
 #include <stdexcept>
 
 namespace
@@ -117,6 +119,7 @@ void SDLRenderer::renderFrame(
     TriangleRenderer& triangleRenderer,
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
     LineRenderer& lineRenderer,
+    SkyboxRenderer& skyboxRenderer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
     ImDrawData* drawData,
@@ -210,6 +213,7 @@ void SDLRenderer::renderFrame(
         quadtreeMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem);
         triangleRenderer.render(renderPass, commandBuffer, viewProjection);
         lineRenderer.render(renderPass, commandBuffer, viewProjection);
+        skyboxRenderer.render(renderPass, commandBuffer, glm::inverse(viewProjection), lightingSystem);
         SDL_EndGPURenderPass(renderPass);
     }
 
