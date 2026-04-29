@@ -14,6 +14,7 @@
 class LightingSystem;
 class LineRenderer;
 class QuadtreeMeshRenderer;
+class QuadtreeWaterMeshRenderer;
 class SkyboxRenderer;
 class TriangleRenderer;
 
@@ -34,17 +35,21 @@ public:
         const Position& cameraPosition,
         TriangleRenderer& triangleRenderer,
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
+        QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer);
     void setViewportSize(Extent2D extent);
     void renderFrame(
         TriangleRenderer& triangleRenderer,
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
+        QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer,
         SkyboxRenderer& skyboxRenderer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
         ImDrawData* drawData,
-        bool renderViewport
+        bool renderViewport,
+        float timeSeconds,
+        std::uint64_t frameIndex
     );
 
     [[nodiscard]] ImTextureID viewportTextureId() const;

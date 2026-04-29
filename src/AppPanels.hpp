@@ -6,6 +6,8 @@
 #include "RenderTypes.hpp"
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
+#include "QuadtreeWaterMeshRenderer.hpp"
+#include "WorldGridQuadtreeWaterManager.hpp"
 #include "WorldGridQuadtree.hpp"
 
 #include <imgui.h>
@@ -27,6 +29,8 @@ public:
         std::string_view gamepadName;
         LightingSystem& lightingSystem;
         SkyboxRenderer& skyboxRenderer;
+        QuadtreeWaterMeshRenderer& waterMeshRenderer;
+        WorldGridQuadtreeWaterManager& waterManager;
         WorldGridQuadtree& worldGridQuadtree;
         ImTextureID viewportTextureId = 0;
     };
@@ -43,6 +47,7 @@ private:
     void drawInfoPane(Context& context);
     void drawControlsTab(Context& context);
     void drawTerrainTab(Context& context);
+    void drawWaterTab(Context& context);
     void drawDebugTab(Context& context);
     void drawViewportPane(Context& context);
 

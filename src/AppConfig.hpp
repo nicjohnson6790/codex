@@ -3,6 +3,7 @@
 #include <SDL3/SDL_gpu.h>
 #include <glm/vec3.hpp>
 
+#include <array>
 #include <cstdint>
 
 namespace AppConfig
@@ -98,6 +99,51 @@ inline constexpr double kBlendLowThreshold = 1.00;
 inline constexpr double kBlendHighThreshold = 1.15;
 inline constexpr double kBlendLowTransitionWidth = 0.15;
 inline constexpr double kBlendHighTransitionWidth = 0.13;
+}
+
+namespace Water
+{
+inline constexpr bool kEnabled = true;
+inline constexpr std::uint32_t kCascadeResolution = 256;
+inline constexpr std::uint32_t kMaxCascadeCount = 8;
+inline constexpr std::uint32_t kDefaultCascadeCount = 6;
+inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascadeSizesMeters{
+    64,
+    256,
+    1024,
+    4096,
+    16384,
+    65536,
+};
+
+inline constexpr float kDefaultWaterLevel = 250.0f;
+inline constexpr float kDefaultWindDirectionRadians = 0.0f;
+inline constexpr float kDefaultWindSpeed = 18.0f;
+inline constexpr float kDefaultAmplitude = 1.0f;
+inline constexpr float kDefaultChoppiness = 1.0f;
+
+inline constexpr std::uint32_t kMeshLodCount = 5;
+inline constexpr std::array<std::uint32_t, kMeshLodCount> kDefaultMeshLodVertexResolutions{
+    129,
+    65,
+    33,
+    17,
+    9,
+};
+
+inline constexpr std::uint32_t kMaxWaterInstances = 4096;
+inline constexpr std::uint32_t kMaxWaterInstancesPerLod = 2048;
+
+inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint0 = 0;
+inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint1 = 1;
+inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint2 = 2;
+inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint3 = 3;
+inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint4 = 4;
+
+inline constexpr float kDefaultLod0MaxDistanceMeters = 300.0f;
+inline constexpr float kDefaultLod1MaxDistanceMeters = 1200.0f;
+inline constexpr float kDefaultLod2MaxDistanceMeters = 5000.0f;
+inline constexpr float kDefaultLod3MaxDistanceMeters = 20000.0f;
 }
 
 namespace Renderer

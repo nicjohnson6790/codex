@@ -113,6 +113,12 @@ void AppPanels::drawInfoPane(Context& context)
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("Water"))
+        {
+            drawWaterTab(context);
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Debug"))
         {
             drawDebugTab(context);
@@ -415,7 +421,113 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::Text("Resident slices: %u", context.worldGridQuadtree.residentCount());
     ImGui::Text("Queued leaves: %u", context.worldGridQuadtree.queuedCount());
     ImGui::Spacing();
+    ImGui::TextUnformatted("Water");
+    ImGui::Separator();
+    ImGui::Text("Queued water instances: %u", context.waterManager.queuedCount());
+    for (std::uint32_t lod = 0; lod < AppConfig::Water::kMeshLodCount; ++lod)
+    {
+        ImGui::Text(
+            "Water LOD %u instances: %u",
+            lod,
+            context.waterMeshRenderer.instanceCountForLod(lod));
+    }
+    ImGui::Spacing();
     ImGui::TextWrapped("The quadtree is rebuilt around the active camera and includes the current grid cell plus the eight surrounding cells.");
+}
+
+void AppPanels::drawWaterTab(Context& context)
+{
+    HELLO_PROFILE_SCOPE("AppPanels::DrawWaterTab");
+
+    WaterSettings& settings = context.waterManager.settings();
+    ImGui::Checkbox("Enabled", &settings.enabled);
+    ImGui::InputFloat("Water level", &settings.waterLevel, 1.0f, 10.0f, "%.2f");
+    ImGui::InputFloat("Global amplitude", &settings.globalAmplitude, 0.05f, 0.25f, "%.2f");
+    ImGui::InputFloat("Global choppiness", &settings.globalChoppiness, 0.05f, 0.25f, "%.2f");
+
+    int cascadeCount = static_cast<int>(settings.cascadeCount);
+    ImGui::SliderInt("Cascade count", &cascadeCount, 0, static_cast<int>(AppConfig::Water::kMaxCascadeCount));
+    settings.cascadeCount = static_cast<std::uint32_t>(std::max(cascadeCount, 0));
+
+    if (ImGui::CollapsingHeader("Water Cascades", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        for (std::uint32_t index = 0; index < settings.cascadeCount; ++index)
+        {
+            WaterCascadeSettings& cascade = settings.cascades[index];
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::SeparatorText(("Cascade " + std::to_string(index)).c_str());
+            ImGui::InputFloat("World size (m)", &cascade.worldSizeMeters, 1.0f, 10.0f, "%.1f");
+            ImGui::InputFloat("Amplitude", &cascade.amplitude, 0.05f, 0.25f, "%.2f");
+            ImGui::InputFloat("Wind speed", &cascade.windSpeed, 0.5f, 2.0f, "%.2f");
+            ImGui::InputFloat("Wind direction", &cascade.windDirectionRadians, 0.05f, 0.2f, "%.2f");
+            ImGui::InputFloat("Choppiness", &cascade.choppiness, 0.05f, 0.25f, "%.2f");
+            int updateModulo = static_cast<int>(cascade.updateModulo);
+            ImGui::SliderInt("Update modulo", &updateModulo, 1, 8);
+            cascade.updateModulo = static_cast<std::uint32_t>(std::max(updateModulo, 1));
+            ImGui::PopID();
+        }
+    }
+
+    bool rebuildRequested = false;
+    if (ImGui::CollapsingHeader("Water Mesh LODs", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        for (std::uint32_t lod = 0; lod < AppConfig::Water::kMeshLodCount; ++lod)
+        {
+            WaterMeshLodSettings& meshLod = settings.meshLods[lod];
+            ImGui::PushID(static_cast<int>(lod));
+            ImGui::SeparatorText(("Mesh LOD " + std::to_string(lod)).c_str());
+            ImGui::Checkbox("Enabled", &meshLod.enabled);
+            int vertexResolution = static_cast<int>(meshLod.vertexResolution);
+            if (ImGui::InputInt("Vertex resolution", &vertexResolution, 2, 8))
+            {
+                meshLod.vertexResolution = static_cast<std::uint32_t>(std::max(vertexResolution, 2));
+            }
+            ImGui::InputFloat("Max distance (m)", &meshLod.maxDistanceMeters, 10.0f, 100.0f, "%.1f");
+            ImGui::InputFloat("Max leaf size (m)", &settings.lodPolicy.maxLeafSizeForMeshLod[lod], 10.0f, 100.0f, "%.1f");
+            ImGui::Text("Renderer instances: %u", context.waterMeshRenderer.instanceCountForLod(lod));
+            ImGui::PopID();
+        }
+
+        if (ImGui::Button("Apply/Rebuild Water Meshes"))
+        {
+            rebuildRequested = true;
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Water LOD Policy", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Use distance override", &settings.lodPolicy.useDistanceOverride);
+        ImGui::Checkbox("Use leaf-size override", &settings.lodPolicy.useLeafSizeOverride);
+
+        for (std::uint32_t hint = 0; hint < 5; ++hint)
+        {
+            int waterMeshLod = static_cast<int>(settings.lodPolicy.meshLodForQuadtreeHint[hint]);
+            if (ImGui::SliderInt(
+                ("Hint " + std::to_string(hint) + " -> Water LOD").c_str(),
+                &waterMeshLod,
+                0,
+                static_cast<int>(AppConfig::Water::kMeshLodCount - 1)))
+            {
+                settings.lodPolicy.meshLodForQuadtreeHint[hint] = static_cast<std::uint8_t>(waterMeshLod);
+            }
+        }
+
+        for (std::uint32_t lod = 0; lod < AppConfig::Water::kMeshLodCount; ++lod)
+        {
+            ImGui::InputFloat(
+                ("Distance cutoff LOD " + std::to_string(lod)).c_str(),
+                &settings.lodPolicy.maxDistanceForMeshLod[lod],
+                10.0f,
+                100.0f,
+                "%.1f");
+        }
+    }
+
+    if (rebuildRequested)
+    {
+        context.waterMeshRenderer.setSettings(settings);
+        context.waterMeshRenderer.rebuildMeshLods();
+    }
 }
 
 void AppPanels::drawViewportPane(Context& context)

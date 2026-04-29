@@ -2,6 +2,7 @@
 
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
+#include "WorldGridQuadtreeWaterManager.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -302,6 +303,42 @@ void WorldGridQuadtree::emitDebugDraws(RenderEngines& renderEngines) const
                 node.minHeight,
                 node.maxHeight);
         }
+    }
+}
+
+void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManager) const
+{
+    HELLO_PROFILE_SCOPE("WorldGridQuadtree::EmitWaterDraws");
+
+    for (const QuadtreeNode& node : m_nodes)
+    {
+        if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask) ||
+            !nodeHasFlag(node, QuadtreeNode::ShouldDrawMask))
+        {
+            continue;
+        }
+
+        if (!nodeHasFlag(node, QuadtreeNode::IsLeafMask) &&
+            (nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) &&
+             nodeHasFlag(node, QuadtreeNode::IsUploadingMask)))
+        {
+            continue;
+        }
+
+        if (!nodeHasFlag(node, QuadtreeNode::IsLeafMask) &&
+            !nodeHasFlag(node, QuadtreeNode::IsSubdividingMask))
+        {
+            continue;
+        }
+
+        const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
+        (void)maxCorner;
+        const std::uint8_t quadtreeLodHint = std::min<std::uint8_t>(worldGridQuadtreeLeafScalePow(node.nodeId), 4u);
+        waterManager.requestLeaf(
+            node.nodeId,
+            minCorner,
+            worldGridQuadtreeLeafSize(node.nodeId),
+            quadtreeLodHint);
     }
 }
 

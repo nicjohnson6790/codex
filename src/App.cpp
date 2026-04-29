@@ -8,6 +8,7 @@
 #include <imgui_impl_sdlgpu3.h>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <glm/matrix.hpp>
 #include <glm/vec3.hpp>
 #include <iostream>
@@ -21,6 +22,14 @@ App::App(const Options& options)
 
 void App::logStartup(std::string_view message) const
 {
+    {
+        std::ofstream logFile("launch.log", std::ios::app);
+        if (logFile)
+        {
+            logFile << "[startup] " << message << '\n';
+        }
+    }
+
     if (!m_options.verboseStartupLogging)
     {
         return;
@@ -63,6 +72,7 @@ void App::run()
         {
             m_lightingSystem.advanceTime(deltaTimeSeconds);
         }
+        m_elapsedTimeSeconds += deltaTimeSeconds;
 
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -83,13 +93,17 @@ void App::run()
         m_renderer.renderFrame(
             m_triangleRenderer,
             m_quadtreeMeshRenderer,
+            m_waterMeshRenderer,
             m_lineRenderer,
             m_skyboxRenderer,
             viewProjection,
             m_lightingSystem,
             ImGui::GetDrawData(),
-            !m_panels.viewportPaused()
+            !m_panels.viewportPaused(),
+            m_elapsedTimeSeconds,
+            m_frameIndex
         );
+        ++m_frameIndex;
 
         performanceCapture.endFrame();
 
@@ -130,20 +144,26 @@ void App::initialize()
         throw std::runtime_error(SDL_GetError());
     }
 
+    logStartup("window created");
     logStartup("query SDL GPU drivers");
     m_gpuDrivers = querySdlGpuDrivers();
+    logStartup("queried SDL GPU drivers");
     logStartup("init gamepad input");
     m_gamepadInput.initialize();
+    logStartup("gamepad input initialized");
     logStartup("init performance capture");
     PerformanceCapture::instance().initialize(AppConfig::Perf::kHistorySeconds);
+    logStartup("performance capture initialized");
     logStartup("create default camera");
     m_cameraManager.createCamera(
         "Camera 1",
         Position(0, 0, { 0.0, 0.0, 2.8 })
     );
+    logStartup("default camera created");
 
     logStartup("init SDL GPU renderer");
     m_renderer.initialize(m_window);
+    logStartup("SDL GPU renderer initialized");
 
     const std::filesystem::path shaderDirectory = TERRAIN_SANDBOX_SHADER_DIR;
     logStartup("init triangle renderer");
@@ -167,6 +187,16 @@ void App::initialize()
         m_renderer.viewportDepthFormat(),
         shaderDirectory
     );
+    if constexpr (AppConfig::Water::kEnabled)
+    {
+        logStartup("init water mesh renderer");
+        m_waterMeshRenderer.initialize(
+            m_renderer.device(),
+            m_renderer.swapchainFormat(),
+            m_renderer.viewportDepthFormat(),
+            shaderDirectory
+        );
+    }
     logStartup("init skybox renderer");
     m_skyboxRenderer.initialize(
         m_renderer.device(),
@@ -216,6 +246,10 @@ void App::shutdown()
     PerformanceCapture::instance().shutdown();
     m_gamepadInput.shutdown();
     m_quadtreeMeshRenderer.shutdown();
+    if constexpr (AppConfig::Water::kEnabled)
+    {
+        m_waterMeshRenderer.shutdown();
+    }
     m_skyboxRenderer.shutdown();
     m_lineRenderer.shutdown();
     m_triangleRenderer.shutdown();
@@ -256,6 +290,8 @@ void App::buildUi()
         .gamepadName = m_gamepadInput.gamepadName(),
         .lightingSystem = m_lightingSystem,
         .skyboxRenderer = m_skyboxRenderer,
+        .waterMeshRenderer = m_waterMeshRenderer,
+        .waterManager = m_waterManager,
         .worldGridQuadtree = m_worldGridQuadtree,
         .viewportTextureId = m_renderer.viewportTextureId(),
     };
@@ -277,10 +313,20 @@ void App::updateSceneForFrame()
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncRenderState");
         const Position& cameraPosition = m_cameraManager.activeCameraPosition();
         m_renderer.setViewportSize(viewportExtent);
-        m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_lineRenderer);
+        m_renderer.setActiveCamera(
+            cameraPosition,
+            m_triangleRenderer,
+            m_quadtreeMeshRenderer,
+            m_waterMeshRenderer,
+            m_lineRenderer);
         m_quadtreeMeshRenderer.setTerrainHeightParams(
             static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
             static_cast<float>(terrainNoiseMaxAmplitude(m_worldGridQuadtree.terrainSettings())));
+        if constexpr (AppConfig::Water::kEnabled)
+        {
+            m_waterManager.beginFrame();
+            m_waterManager.setActiveCamera(cameraPosition);
+        }
     }
 
     {
@@ -329,6 +375,15 @@ void App::updateSceneForFrame()
     {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitTerrainDraws");
         m_worldGridQuadtree.emitMeshDraws(renderEngines);
+    }
+
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitWaterDraws");
+        if constexpr (AppConfig::Water::kEnabled)
+        {
+            m_worldGridQuadtree.emitWaterDraws(m_waterManager);
+            m_waterManager.flushToRenderer(m_waterMeshRenderer);
+        }
     }
 
     if (m_panels.showQuadtreeBorders())

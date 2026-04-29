@@ -8,12 +8,14 @@
 #include "LightingSystem.hpp"
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
+#include "QuadtreeWaterMeshRenderer.hpp"
 #include "RenderEngines.hpp"
 #include "SDLRenderer.hpp"
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
 #include "TriangleRenderer.hpp"
 #include "WorldGridQuadtree.hpp"
+#include "WorldGridQuadtreeWaterManager.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -52,12 +54,14 @@ private:
     TriangleRenderer m_triangleRenderer;
     LineRenderer m_lineRenderer;
     QuadtreeMeshRenderer m_quadtreeMeshRenderer;
+    QuadtreeWaterMeshRenderer m_waterMeshRenderer;
     SkyboxRenderer m_skyboxRenderer;
     GamepadInput m_gamepadInput;
     CameraManager m_cameraManager;
     FreeFlightCameraController m_cameraController;
     AppPanels m_panels;
     WorldGridQuadtree m_worldGridQuadtree;
+    WorldGridQuadtreeWaterManager m_waterManager;
     LightingSystem m_lightingSystem;
 
     std::vector<TriangleInstance> m_instances{
@@ -69,4 +73,6 @@ private:
     Options m_options{};
     bool m_firstFramePresented = false;
     std::uint64_t m_lastFrameTsc = 0;
+    std::uint64_t m_frameIndex = 0;
+    float m_elapsedTimeSeconds = 0.0f;
 };

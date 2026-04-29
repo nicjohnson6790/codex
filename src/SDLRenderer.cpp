@@ -5,6 +5,7 @@
 #include "LineRenderer.hpp"
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
+#include "QuadtreeWaterMeshRenderer.hpp"
 #include "SkyboxRenderer.hpp"
 #include "TriangleRenderer.hpp"
 
@@ -96,11 +97,16 @@ void SDLRenderer::setActiveCamera(
     const Position& cameraPosition,
     TriangleRenderer& triangleRenderer,
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
+    QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer)
 {
     m_activeCameraPosition = cameraPosition;
     triangleRenderer.setActiveCamera(cameraPosition);
     quadtreeMeshRenderer.setActiveCamera(cameraPosition);
+    if constexpr (AppConfig::Water::kEnabled)
+    {
+        waterMeshRenderer.setActiveCamera(cameraPosition);
+    }
     lineRenderer.setActiveCamera(cameraPosition);
 }
 
@@ -118,12 +124,15 @@ ImTextureID SDLRenderer::viewportTextureId() const
 void SDLRenderer::renderFrame(
     TriangleRenderer& triangleRenderer,
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
+    QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer,
     SkyboxRenderer& skyboxRenderer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
     ImDrawData* drawData,
-    bool renderViewport
+    bool renderViewport,
+    float timeSeconds,
+    std::uint64_t frameIndex
 )
 {
     HELLO_PROFILE_SCOPE("SDLRenderer::RenderFrame");
@@ -143,11 +152,19 @@ void SDLRenderer::renderFrame(
         }
         triangleRenderer.upload(copyPass);
         quadtreeMeshRenderer.upload(copyPass);
+        if constexpr (AppConfig::Water::kEnabled)
+        {
+            waterMeshRenderer.upload(copyPass);
+        }
         lineRenderer.upload(copyPass);
         SDL_EndGPUCopyPass(copyPass);
     }
 
     quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
+    if constexpr (AppConfig::Water::kEnabled)
+    {
+        waterMeshRenderer.dispatchWaterSimulation(commandBuffer, timeSeconds, frameIndex);
+    }
 
     {
         HELLO_PROFILE_SCOPE("SDLRenderer::DownloadTerrainExtents");
@@ -211,6 +228,10 @@ void SDLRenderer::renderFrame(
         SDL_SetGPUScissor(renderPass, &scissor);
 
         quadtreeMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem);
+        if constexpr (AppConfig::Water::kEnabled)
+        {
+            waterMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem, timeSeconds);
+        }
         triangleRenderer.render(renderPass, commandBuffer, viewProjection);
         lineRenderer.render(renderPass, commandBuffer, viewProjection);
         SDL_EndGPURenderPass(renderPass);

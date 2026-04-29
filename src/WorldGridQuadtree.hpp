@@ -13,6 +13,7 @@
 
 class RenderEngines;
 class QuadtreeMeshRenderer;
+class WorldGridQuadtreeWaterManager;
 
 struct QuadtreeNode
 {
@@ -63,6 +64,7 @@ public:
     void updateTree(const CameraManager::Camera& activeCamera, Extent2D viewportExtent);
     void endHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer);
     void emitMeshDraws(RenderEngines& renderEngines);
+    void emitWaterDraws(WorldGridQuadtreeWaterManager& waterManager) const;
     void emitDebugDraws(RenderEngines& renderEngines) const;
     void clearTerrainCache();
     [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_heightmapManager.terrainSettings(); }

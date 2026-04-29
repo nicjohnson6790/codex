@@ -108,6 +108,8 @@ set(QUADTREE_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.frag.spv)
 set(HEIGHTMAP_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/heightmap_generate.comp.spv)
 set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
 set(SKYBOX_FRAG_SPV ${SHADER_OUTPUT_DIR}/skybox.frag.spv)
+set(WATER_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh.vert.spv)
+set(WATER_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/water_mesh.frag.spv)
 
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/triangle.vert ${TRIANGLE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/triangle.frag ${TRIANGLE_FRAG_SPV})
@@ -118,6 +120,8 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FR
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_GENERATE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV})
 
 add_custom_target(shaders ALL
     DEPENDS
@@ -130,6 +134,8 @@ add_custom_target(shaders ALL
         ${HEIGHTMAP_GENERATE_COMP_SPV}
         ${SKYBOX_VERT_SPV}
         ${SKYBOX_FRAG_SPV}
+        ${WATER_MESH_VERT_SPV}
+        ${WATER_MESH_FRAG_SPV}
 )
 
 add_executable(terrain_sandbox
@@ -146,12 +152,14 @@ add_executable(terrain_sandbox
     src/PerfPanel.cpp
     src/PerformanceCapture.cpp
     src/QuadtreeMeshRenderer.cpp
+    src/QuadtreeWaterMeshRenderer.cpp
     src/SDLRenderer.cpp
     src/SkyboxRenderer.cpp
     src/TriangleRenderer.cpp
     src/WorldGridQuadtree.cpp
     src/WorldGridQuadtreeDebugRenderer.cpp
     src/WorldGridQuadtreeHeightmapManager.cpp
+    src/WorldGridQuadtreeWaterManager.cpp
 )
 
 add_executable(quadtree_sanity

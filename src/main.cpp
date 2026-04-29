@@ -1,8 +1,10 @@
 #include "App.hpp"
 
+#include <fstream>
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <memory>
 
 int main(int argc, char** argv)
 {
@@ -26,12 +28,17 @@ int main(int argc, char** argv)
             }
         }
 
-        App app(options);
-        app.run();
+        std::unique_ptr<App> app = std::make_unique<App>(options);
+        app->run();
         return 0;
     }
     catch (const std::exception& exception)
     {
+        std::ofstream logFile("launch.log", std::ios::app);
+        if (logFile)
+        {
+            logFile << "[exception] " << exception.what() << '\n';
+        }
         std::cerr << exception.what() << '\n';
         return 1;
     }
