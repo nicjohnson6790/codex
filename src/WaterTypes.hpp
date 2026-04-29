@@ -62,6 +62,7 @@ struct WaterLodPolicySettings
 struct WaterSettings
 {
     bool enabled = true;
+    bool showLodTint = true;
     float waterLevel = 0.0f;
     float globalAmplitude = 1.0f;
     float globalChoppiness = 1.0f;

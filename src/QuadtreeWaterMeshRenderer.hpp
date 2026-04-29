@@ -24,6 +24,7 @@ public:
         glm::vec4 waterParams{ 0.0f };
         glm::vec4 sunDirectionIntensity{ 0.0f, 1.0f, 0.0f, 1.0f };
         glm::vec4 sunColorAmbient{ 1.0f, 1.0f, 1.0f, 0.2f };
+        glm::vec4 debugParams{ 0.0f };
     };
 
     QuadtreeWaterMeshRenderer() = default;

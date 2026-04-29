@@ -162,7 +162,12 @@ void QuadtreeWaterMeshRenderer::render(
 
     WaterUniforms uniforms{};
     uniforms.viewProjection = viewProjection;
-    uniforms.cameraAndTime = glm::vec4(0.0f, 0.0f, 0.0f, timeSeconds);
+    const glm::dvec3 cameraWorld = m_activeCameraPosition.worldPosition();
+    uniforms.cameraAndTime = glm::vec4(
+        static_cast<float>(cameraWorld.x),
+        static_cast<float>(cameraWorld.z),
+        static_cast<float>(cameraWorld.y),
+        timeSeconds);
     uniforms.waterParams = glm::vec4(
         m_settings.waterLevel,
         m_settings.globalAmplitude,
@@ -171,6 +176,7 @@ void QuadtreeWaterMeshRenderer::render(
     const glm::vec3 sunDirection = lightingSystem.sunDirection();
     uniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     uniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
+    uniforms.debugParams = glm::vec4(m_settings.showLodTint ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
     for (std::uint32_t lodIndex = 0; lodIndex < AppConfig::Water::kMeshLodCount; ++lodIndex)
@@ -305,8 +311,12 @@ void QuadtreeWaterMeshRenderer::createMeshLod(std::uint32_t lodIndex, std::uint3
         for (std::uint32_t x = 0; x < n; ++x)
         {
             Vertex vertex{};
-            vertex.localCoord[0] = static_cast<float>(x) / static_cast<float>(n - 1);
-            vertex.localCoord[1] = static_cast<float>(y) / static_cast<float>(n - 1);
+            const float inset = 1.0f / static_cast<float>(n - 1);
+            const float usableSpan = 1.0f - (inset * 2.0f);
+            const float normalizedX = static_cast<float>(x) / static_cast<float>(n - 1);
+            const float normalizedY = static_cast<float>(y) / static_cast<float>(n - 1);
+            vertex.localCoord[0] = inset + (normalizedX * usableSpan);
+            vertex.localCoord[1] = inset + (normalizedY * usableSpan);
             vertices.push_back(vertex);
         }
     }

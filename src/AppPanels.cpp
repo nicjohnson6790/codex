@@ -441,6 +441,7 @@ void AppPanels::drawWaterTab(Context& context)
 
     WaterSettings& settings = context.waterManager.settings();
     ImGui::Checkbox("Enabled", &settings.enabled);
+    ImGui::Checkbox("Show LOD tint", &settings.showLodTint);
     ImGui::InputFloat("Water level", &settings.waterLevel, 1.0f, 10.0f, "%.2f");
     ImGui::InputFloat("Global amplitude", &settings.globalAmplitude, 0.05f, 0.25f, "%.2f");
     ImGui::InputFloat("Global choppiness", &settings.globalChoppiness, 0.05f, 0.25f, "%.2f");

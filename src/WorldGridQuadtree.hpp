@@ -67,6 +67,7 @@ public:
     void emitWaterDraws(WorldGridQuadtreeWaterManager& waterManager) const;
     void emitDebugDraws(RenderEngines& renderEngines) const;
     void clearTerrainCache();
+    void setWaterVisibilityBounds(float waterMinHeight, float waterMaxHeight, bool enabled);
     [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_heightmapManager.terrainSettings(); }
     [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_heightmapManager.terrainSettings(); }
     [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_heightmapManager.computeDispatchBudget(); }
@@ -112,5 +113,8 @@ private:
     std::int64_t m_baseGridX = 0;
     std::int64_t m_baseGridY = 0;
     bool m_hasBaseGrid = false;
+    bool m_waterVisibilityBoundsEnabled = false;
+    float m_waterVisibilityMinHeight = 0.0f;
+    float m_waterVisibilityMaxHeight = 0.0f;
     Extent2D m_viewportExtent{ 16, 9 };
 };

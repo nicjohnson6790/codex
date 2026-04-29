@@ -286,6 +286,13 @@ void WorldGridQuadtree::clearTerrainCache()
     }
 }
 
+void WorldGridQuadtree::setWaterVisibilityBounds(float waterMinHeight, float waterMaxHeight, bool enabled)
+{
+    m_waterVisibilityBoundsEnabled = enabled;
+    m_waterVisibilityMinHeight = waterMinHeight;
+    m_waterVisibilityMaxHeight = waterMaxHeight;
+}
+
 void WorldGridQuadtree::emitDebugDraws(RenderEngines& renderEngines) const
 {
     HELLO_PROFILE_SCOPE("WorldGridQuadtree::EmitDebugDraws");
@@ -596,12 +603,17 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     }
 
     const double size = worldGridQuadtreeLeafSize(node.nodeId);
-    const double drawMinHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
+    double drawMinHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
         ? static_cast<double>(node.minHeight)
         : -kVisibilityBoundsHalfHeight;
-    const double drawMaxHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
+    double drawMaxHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
         ? static_cast<double>(node.maxHeight)
         : kVisibilityBoundsHalfHeight;
+    if (m_waterVisibilityBoundsEnabled)
+    {
+        drawMinHeight = std::min(drawMinHeight, static_cast<double>(m_waterVisibilityMinHeight));
+        drawMaxHeight = std::max(drawMaxHeight, static_cast<double>(m_waterVisibilityMaxHeight));
+    }
     const auto [drawMinCorner, drawMaxCorner] = worldGridQuadtreeLeafBounds(
         node.nodeId,
         drawMinHeight,
@@ -764,10 +776,17 @@ bool WorldGridQuadtree::shouldSubdivide(const QuadtreeNode& node, const Position
 
     if (nodeHasFlag(node, QuadtreeNode::HasExtentsMask))
     {
+        double minHeight = static_cast<double>(node.minHeight);
+        double maxHeight = static_cast<double>(node.maxHeight);
+        if (m_waterVisibilityBoundsEnabled)
+        {
+            minHeight = std::min(minHeight, static_cast<double>(m_waterVisibilityMinHeight));
+            maxHeight = std::max(maxHeight, static_cast<double>(m_waterVisibilityMaxHeight));
+        }
         const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(
             node.nodeId,
-            static_cast<double>(node.minHeight),
-            static_cast<double>(node.maxHeight));
+            minHeight,
+            maxHeight);
         const glm::dvec3 minWorld = minCorner.worldPosition();
         const glm::dvec3 maxWorld = maxCorner.worldPosition();
         return distanceSquaredToBounds(

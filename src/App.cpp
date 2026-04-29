@@ -326,6 +326,18 @@ void App::updateSceneForFrame()
         {
             m_waterManager.beginFrame();
             m_waterManager.setActiveCamera(cameraPosition);
+            const WaterSettings& waterSettings = m_waterManager.settings();
+            const float expectedWaveHeight =
+                (waterSettings.globalAmplitude * AppConfig::Water::kExpectedWaveHeight) +
+                AppConfig::Water::kVisibilityHeightPadding;
+            m_worldGridQuadtree.setWaterVisibilityBounds(
+                waterSettings.waterLevel - expectedWaveHeight,
+                waterSettings.waterLevel + expectedWaveHeight,
+                waterSettings.enabled);
+        }
+        else
+        {
+            m_worldGridQuadtree.setWaterVisibilityBounds(0.0f, 0.0f, false);
         }
     }
 

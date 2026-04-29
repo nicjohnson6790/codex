@@ -8,6 +8,7 @@ inline WaterSettings makeDefaultWaterSettings()
     WaterSettings settings{};
 
     settings.enabled = AppConfig::Water::kEnabled;
+    settings.showLodTint = true;
     settings.waterLevel = AppConfig::Water::kDefaultWaterLevel;
     settings.globalAmplitude = AppConfig::Water::kDefaultAmplitude;
     settings.globalChoppiness = AppConfig::Water::kDefaultChoppiness;
