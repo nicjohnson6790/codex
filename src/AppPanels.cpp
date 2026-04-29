@@ -300,32 +300,13 @@ void AppPanels::drawControlsTab(Context& context)
             ImGui::TreePop();
         }
 
-        atmosphere.atmosphereHeight = std::max(atmosphere.atmosphereHeight, 1000.0f);
-        atmosphere.atmosphereDistanceRange = std::max(atmosphere.atmosphereDistanceRange, 1000.0f);
-        atmosphere.mieG = std::clamp(atmosphere.mieG, 0.0f, 0.99f);
-        atmosphere.exposure = std::max(atmosphere.exposure, 0.01f);
-        atmosphere.alphaScale = std::max(atmosphere.alphaScale, 0.01f);
-        atmosphere.rayleighScaleHeight = std::max(atmosphere.rayleighScaleHeight, 1.0f);
-        atmosphere.mieScaleHeight = std::max(atmosphere.mieScaleHeight, 1.0f);
-        atmosphere.ozoneColumnHeight = std::max(atmosphere.ozoneColumnHeight, 1.0f);
-        atmosphere.ambientSkyScale = std::max(atmosphere.ambientSkyScale, 0.0f);
-        atmosphere.ambientBlueBias = std::clamp(atmosphere.ambientBlueBias, 0.0f, 1.0f);
-        atmosphere.ambientSolarInfluence = std::clamp(atmosphere.ambientSolarInfluence, 0.0f, 1.0f);
-        atmosphere.ambientTwilightInfluence = std::clamp(atmosphere.ambientTwilightInfluence, 0.0f, 1.0f);
-        atmosphere.rayleighTintScale = std::max(atmosphere.rayleighTintScale, 0.0f);
-        atmosphere.hazeStrength = std::max(atmosphere.hazeStrength, 0.0f);
-        atmosphere.pathFogDistance = std::max(atmosphere.pathFogDistance, 1.0f);
-        atmosphere.longRangeHazeDistance = std::max(atmosphere.longRangeHazeDistance, 1.0f);
-        atmosphere.aureolePower = std::max(atmosphere.aureolePower, 1.0f);
-        atmosphere.aureoleStrength = std::max(atmosphere.aureoleStrength, 0.0f);
-        atmosphere.sunDiskPower = std::max(atmosphere.sunDiskPower, 1.0f);
-        atmosphere.sunDiskStrength = std::max(atmosphere.sunDiskStrength, 0.0f);
-        atmosphere.sunGlowPower = std::max(atmosphere.sunGlowPower, 1.0f);
-        atmosphere.sunsetStrength = std::max(atmosphere.sunsetStrength, 0.0f);
-        atmosphere.sunsetSunwardBoost = std::max(atmosphere.sunsetSunwardBoost, 0.0f);
-        atmosphere.sunsetDistanceMin = std::max(atmosphere.sunsetDistanceMin, 0.0f);
-        atmosphere.sunsetDistanceMax = std::max(atmosphere.sunsetDistanceMax, 0.0f);
+        context.skyboxRenderer.sanitizeAtmosphereSettings();
 
+        if (ImGui::Button("Reset Atmosphere Defaults"))
+        {
+            context.skyboxRenderer.resetAtmosphereSettings();
+        }
+        ImGui::SameLine();
         if (ImGui::Button("Regenerate + Upload LUT"))
         {
             context.skyboxRenderer.regenerateAtmosphereLut();

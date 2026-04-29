@@ -95,6 +95,8 @@ public:
     [[nodiscard]] AtmosphereSettings& atmosphereSettings() { return m_atmosphereSettings; }
     [[nodiscard]] const AtmosphereSettings& atmosphereSettings() const { return m_atmosphereSettings; }
     void regenerateAtmosphereLut();
+    void resetAtmosphereSettings();
+    void sanitizeAtmosphereSettings();
 
 private:
     void createPipeline(const std::filesystem::path& shaderDirectory);

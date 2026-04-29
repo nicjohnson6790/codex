@@ -226,7 +226,42 @@ void SkyboxRenderer::render(
 
 void SkyboxRenderer::regenerateAtmosphereLut()
 {
+    sanitizeAtmosphereSettings();
     createAtmosphereLutTexture();
+}
+
+void SkyboxRenderer::resetAtmosphereSettings()
+{
+    m_atmosphereSettings = {};
+}
+
+void SkyboxRenderer::sanitizeAtmosphereSettings()
+{
+    m_atmosphereSettings.atmosphereHeight = std::max(m_atmosphereSettings.atmosphereHeight, 1000.0f);
+    m_atmosphereSettings.atmosphereDistanceRange = std::max(m_atmosphereSettings.atmosphereDistanceRange, 1000.0f);
+    m_atmosphereSettings.mieG = std::clamp(m_atmosphereSettings.mieG, 0.0f, 0.99f);
+    m_atmosphereSettings.exposure = std::max(m_atmosphereSettings.exposure, 0.01f);
+    m_atmosphereSettings.alphaScale = std::max(m_atmosphereSettings.alphaScale, 0.01f);
+    m_atmosphereSettings.rayleighScaleHeight = std::max(m_atmosphereSettings.rayleighScaleHeight, 1.0f);
+    m_atmosphereSettings.mieScaleHeight = std::max(m_atmosphereSettings.mieScaleHeight, 1.0f);
+    m_atmosphereSettings.ozoneColumnHeight = std::max(m_atmosphereSettings.ozoneColumnHeight, 1.0f);
+    m_atmosphereSettings.ambientSkyScale = std::max(m_atmosphereSettings.ambientSkyScale, 0.0f);
+    m_atmosphereSettings.ambientBlueBias = std::clamp(m_atmosphereSettings.ambientBlueBias, 0.0f, 1.0f);
+    m_atmosphereSettings.ambientSolarInfluence = std::clamp(m_atmosphereSettings.ambientSolarInfluence, 0.0f, 1.0f);
+    m_atmosphereSettings.ambientTwilightInfluence = std::clamp(m_atmosphereSettings.ambientTwilightInfluence, 0.0f, 1.0f);
+    m_atmosphereSettings.rayleighTintScale = std::max(m_atmosphereSettings.rayleighTintScale, 0.0f);
+    m_atmosphereSettings.hazeStrength = std::max(m_atmosphereSettings.hazeStrength, 0.0f);
+    m_atmosphereSettings.pathFogDistance = std::max(m_atmosphereSettings.pathFogDistance, 1.0f);
+    m_atmosphereSettings.longRangeHazeDistance = std::max(m_atmosphereSettings.longRangeHazeDistance, 1.0f);
+    m_atmosphereSettings.aureolePower = std::max(m_atmosphereSettings.aureolePower, 1.0f);
+    m_atmosphereSettings.aureoleStrength = std::max(m_atmosphereSettings.aureoleStrength, 0.0f);
+    m_atmosphereSettings.sunDiskPower = std::max(m_atmosphereSettings.sunDiskPower, 1.0f);
+    m_atmosphereSettings.sunDiskStrength = std::max(m_atmosphereSettings.sunDiskStrength, 0.0f);
+    m_atmosphereSettings.sunGlowPower = std::max(m_atmosphereSettings.sunGlowPower, 1.0f);
+    m_atmosphereSettings.sunsetStrength = std::max(m_atmosphereSettings.sunsetStrength, 0.0f);
+    m_atmosphereSettings.sunsetSunwardBoost = std::max(m_atmosphereSettings.sunsetSunwardBoost, 0.0f);
+    m_atmosphereSettings.sunsetDistanceMin = std::max(m_atmosphereSettings.sunsetDistanceMin, 0.0f);
+    m_atmosphereSettings.sunsetDistanceMax = std::max(m_atmosphereSettings.sunsetDistanceMax, 0.0f);
 }
 
 void SkyboxRenderer::createPipeline(const std::filesystem::path& shaderDirectory)
@@ -469,7 +504,10 @@ void SkyboxRenderer::createCubemapTexture(const std::filesystem::path& resourceD
 
 void SkyboxRenderer::createAtmosphereLutTexture()
 {
+    sanitizeAtmosphereSettings();
     const auto lutBytes = buildAtmosphereLut();
+    SDL_GPUTexture* previousTexture = m_atmosphereLutTexture;
+    SDL_GPUTexture* newTexture = nullptr;
 
     SDL_GPUTextureCreateInfo textureInfo{};
     textureInfo.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
@@ -480,8 +518,8 @@ void SkyboxRenderer::createAtmosphereLutTexture()
     textureInfo.layer_count_or_depth = kAtmosphereLutResolution;
     textureInfo.num_levels = 1;
     textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    m_atmosphereLutTexture = SDL_CreateGPUTexture(m_device, &textureInfo);
-    if (m_atmosphereLutTexture == nullptr)
+    newTexture = SDL_CreateGPUTexture(m_device, &textureInfo);
+    if (newTexture == nullptr)
     {
         throwSdlError("Failed to create atmosphere LUT texture.");
     }
@@ -514,7 +552,7 @@ void SkyboxRenderer::createAtmosphereLutTexture()
         source.rows_per_layer = kAtmosphereLutResolution;
 
         SDL_GPUTextureRegion destination{};
-        destination.texture = m_atmosphereLutTexture;
+        destination.texture = newTexture;
         destination.layer = layerIndex;
         destination.w = kAtmosphereLutResolution;
         destination.h = kAtmosphereLutResolution;
@@ -525,11 +563,17 @@ void SkyboxRenderer::createAtmosphereLutTexture()
     SDL_EndGPUCopyPass(copyPass);
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
+        SDL_ReleaseGPUTexture(m_device, newTexture);
         SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
         throwSdlError("Failed to upload atmosphere LUT texture.");
     }
 
     SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+    m_atmosphereLutTexture = newTexture;
+    if (previousTexture != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, previousTexture);
+    }
 }
 
 std::array<std::uint8_t, SkyboxRenderer::kAtmosphereLutResolution * SkyboxRenderer::kAtmosphereLutResolution * SkyboxRenderer::kAtmosphereLutResolution * 4> SkyboxRenderer::buildAtmosphereLut() const
