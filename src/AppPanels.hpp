@@ -5,6 +5,7 @@
 #include "PerfPanel.hpp"
 #include "RenderTypes.hpp"
 #include "SceneTypes.hpp"
+#include "SkyboxRenderer.hpp"
 #include "WorldGridQuadtree.hpp"
 
 #include <imgui.h>
@@ -25,6 +26,7 @@ public:
         const std::vector<std::string>& gpuDrivers;
         std::string_view gamepadName;
         LightingSystem& lightingSystem;
+        SkyboxRenderer& skyboxRenderer;
         WorldGridQuadtree& worldGridQuadtree;
         ImTextureID viewportTextureId = 0;
     };

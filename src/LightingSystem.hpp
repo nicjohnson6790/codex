@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AppConfig.hpp"
+
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
@@ -8,13 +10,13 @@ class LightingSystem
 public:
     struct SunLight
     {
-        float azimuthDegrees = 40.0f;
-        float elevationDegrees = 52.0f;
-        float timeOfDayHours = 10.0f;
-        float dayLengthSeconds = 120.0f;
-        float timeFactor = 1.0f;
-        glm::vec3 color{ 1.0f, 0.97f, 0.92f };
-        float intensity = 1.35f;
+        float azimuthDegrees = AppConfig::Light::kSunAzimuthDegrees;
+        float elevationDegrees = AppConfig::Light::kSunElevationDegrees;
+        float timeOfDayHours = AppConfig::Light::kTimeOfDayHours;
+        float dayLengthSeconds = AppConfig::Light::kDayLengthSeconds;
+        float timeFactor = AppConfig::Light::kTimeFactor;
+        glm::vec3 color{ AppConfig::Light::kSunColor };
+        float intensity = AppConfig::Light::kSunIntensity;
     };
 
     [[nodiscard]] const SunLight& sun() const { return m_sun; }

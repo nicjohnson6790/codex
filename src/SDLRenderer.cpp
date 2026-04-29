@@ -174,7 +174,7 @@ void SDLRenderer::renderFrame(
 
         SDL_GPUColorTargetInfo colorTargetInfo{};
         colorTargetInfo.texture = m_viewportColorTexture;
-        colorTargetInfo.clear_color = SDL_FColor{ 0.08f, 0.09f, 0.12f, 1.0f };
+        colorTargetInfo.clear_color = SDL_FColor{ 0.0f, 0.0f, 0.0f, 1.0f };
         colorTargetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
         colorTargetInfo.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -213,8 +213,37 @@ void SDLRenderer::renderFrame(
         quadtreeMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem);
         triangleRenderer.render(renderPass, commandBuffer, viewProjection);
         lineRenderer.render(renderPass, commandBuffer, viewProjection);
-        skyboxRenderer.render(renderPass, commandBuffer, glm::inverse(viewProjection), lightingSystem);
         SDL_EndGPURenderPass(renderPass);
+
+        SDL_GPUColorTargetInfo skyColorTargetInfo{};
+        skyColorTargetInfo.texture = m_viewportColorTexture;
+        skyColorTargetInfo.load_op = SDL_GPU_LOADOP_LOAD;
+        skyColorTargetInfo.store_op = SDL_GPU_STOREOP_STORE;
+
+        SDL_GPURenderPass* skyRenderPass = SDL_BeginGPURenderPass(commandBuffer, &skyColorTargetInfo, 1, nullptr);
+        if (skyRenderPass == nullptr)
+        {
+            throwSdlError("Failed to begin SDL GPU sky composite pass.");
+        }
+
+        SDL_GPUViewport skyViewport{};
+        skyViewport.x = 0.0f;
+        skyViewport.y = 0.0f;
+        skyViewport.w = static_cast<float>(m_viewportExtent.width);
+        skyViewport.h = static_cast<float>(m_viewportExtent.height);
+        skyViewport.min_depth = 0.0f;
+        skyViewport.max_depth = 1.0f;
+        SDL_SetGPUViewport(skyRenderPass, &skyViewport);
+        SDL_SetGPUScissor(skyRenderPass, &scissor);
+
+        skyboxRenderer.render(
+            skyRenderPass,
+            commandBuffer,
+            glm::inverse(viewProjection),
+            m_viewportDepthTexture,
+            static_cast<float>(m_activeCameraPosition.localPosition().y),
+            lightingSystem);
+        SDL_EndGPURenderPass(skyRenderPass);
     }
 
     SDL_GPUTexture* swapchainTexture = nullptr;
@@ -296,7 +325,7 @@ void SDLRenderer::createViewportTargets()
     SDL_GPUTextureCreateInfo depthInfo{};
     depthInfo.type = SDL_GPU_TEXTURETYPE_2D;
     depthInfo.format = m_viewportDepthFormat;
-    depthInfo.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    depthInfo.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
     depthInfo.width = m_viewportExtent.width;
     depthInfo.height = m_viewportExtent.height;
     depthInfo.layer_count_or_depth = 1;
@@ -353,7 +382,7 @@ SDL_GPUTextureFormat SDLRenderer::chooseViewportDepthFormat() const
             m_device,
             format,
             SDL_GPU_TEXTURETYPE_2D,
-            SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+            SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER))
         {
             return format;
         }

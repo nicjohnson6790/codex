@@ -136,6 +136,14 @@ void AppPanels::drawControlsTab(Context& context)
         static_cast<int>(context.gamepadName.size()),
         context.gamepadName.data());
 
+    ImGui::Spacing();
+    ImGui::TextUnformatted("SDL GPU Drivers");
+    ImGui::Separator();
+    for (const std::string& driver : context.gpuDrivers)
+    {
+        ImGui::BulletText("%s", driver.c_str());
+    }
+
     const CameraManager::Camera& activeCamera = context.cameraManager.activeCamera();
     if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -169,14 +177,6 @@ void AppPanels::drawControlsTab(Context& context)
         ImGui::BulletText("Triggers: move up / down");
         ImGui::BulletText("LB / RB: roll");
         ImGui::BulletText("Press right stick: align camera up to world up");
-    }
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted("SDL GPU Drivers");
-    ImGui::Separator();
-    for (const std::string& driver : context.gpuDrivers)
-    {
-        ImGui::BulletText("%s", driver.c_str());
     }
 
     if (ImGui::CollapsingHeader("Triangle Instances", ImGuiTreeNodeFlags_DefaultOpen))
@@ -232,6 +232,104 @@ void AppPanels::drawControlsTab(Context& context)
         ImGui::InputFloat("Time factor", &sun.timeFactor, 0.1f, 1.0f, "%.2f");
         ImGui::ColorEdit3("Color", &sun.color.x);
         ImGui::SliderFloat("Intensity", &sun.intensity, 0.0f, 4.0f, "%.2f");
+    }
+
+    if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        SkyboxRenderer::AtmosphereSettings& atmosphere = context.skyboxRenderer.atmosphereSettings();
+
+        ImGui::InputFloat("Atmosphere height (m)", &atmosphere.atmosphereHeight, 1000.0f, 10000.0f, "%.0f");
+        ImGui::InputFloat("Distance range (m)", &atmosphere.atmosphereDistanceRange, 10000.0f, 100000.0f, "%.0f");
+        ImGui::InputFloat("Exposure", &atmosphere.exposure, 0.1f, 0.5f, "%.2f");
+        ImGui::InputFloat("Alpha scale", &atmosphere.alphaScale, 0.05f, 0.2f, "%.2f");
+
+        if (ImGui::TreeNode("Scattering"))
+        {
+            ImGui::InputFloat("Rayleigh R", &atmosphere.rayleighScatterR, 0.1e-6f, 1.0e-6f, "%.6e");
+            ImGui::InputFloat("Rayleigh G", &atmosphere.rayleighScatterG, 0.1e-6f, 1.0e-6f, "%.6e");
+            ImGui::InputFloat("Rayleigh B", &atmosphere.rayleighScatterB, 0.1e-6f, 1.0e-6f, "%.6e");
+            ImGui::InputFloat("Mie scatter", &atmosphere.mieScatter, 0.1e-6f, 1.0e-6f, "%.6e");
+            ImGui::InputFloat("Mie extinction", &atmosphere.mieExtinction, 0.1e-6f, 1.0e-6f, "%.6e");
+            ImGui::InputFloat("Mie g", &atmosphere.mieG, 0.01f, 0.05f, "%.2f");
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Absorption"))
+        {
+            ImGui::InputFloat("Ozone R", &atmosphere.ozoneAbsorptionR, 0.01e-6f, 0.1e-6f, "%.6e");
+            ImGui::InputFloat("Ozone G", &atmosphere.ozoneAbsorptionG, 0.01e-6f, 0.1e-6f, "%.6e");
+            ImGui::InputFloat("Ozone B", &atmosphere.ozoneAbsorptionB, 0.01e-6f, 0.1e-6f, "%.6e");
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Scale Heights"))
+        {
+            ImGui::InputFloat("Rayleigh scale H", &atmosphere.rayleighScaleHeight, 100.0f, 1000.0f, "%.0f");
+            ImGui::InputFloat("Mie scale H", &atmosphere.mieScaleHeight, 50.0f, 250.0f, "%.0f");
+            ImGui::InputFloat("Ozone column H", &atmosphere.ozoneColumnHeight, 500.0f, 2500.0f, "%.0f");
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Ambient And Haze"))
+        {
+            ImGui::InputFloat("Ambient sky scale", &atmosphere.ambientSkyScale, 0.05f, 0.2f, "%.2f");
+            ImGui::InputFloat("Ambient blue bias", &atmosphere.ambientBlueBias, 0.01f, 0.05f, "%.2f");
+            ImGui::InputFloat("Ambient solar infl.", &atmosphere.ambientSolarInfluence, 0.01f, 0.05f, "%.2f");
+            ImGui::InputFloat("Ambient twilight infl.", &atmosphere.ambientTwilightInfluence, 0.01f, 0.05f, "%.2f");
+            ImGui::ColorEdit3("Ambient blue tint", &atmosphere.ambientBlueTintR);
+            ImGui::InputFloat("Rayleigh tint scale", &atmosphere.rayleighTintScale, 0.05f, 0.2f, "%.2f");
+            ImGui::ColorEdit3("Haze color", &atmosphere.hazeColorR);
+            ImGui::InputFloat("Haze strength", &atmosphere.hazeStrength, 0.01f, 0.05f, "%.2f");
+            ImGui::InputFloat("Path fog distance", &atmosphere.pathFogDistance, 1000.0f, 10000.0f, "%.0f");
+            ImGui::InputFloat("Long haze distance", &atmosphere.longRangeHazeDistance, 1000.0f, 10000.0f, "%.0f");
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Sun Shape And Sunset"))
+        {
+            ImGui::InputFloat("Aureole power", &atmosphere.aureolePower, 1.0f, 8.0f, "%.0f");
+            ImGui::InputFloat("Aureole strength", &atmosphere.aureoleStrength, 0.05f, 0.2f, "%.2f");
+            ImGui::InputFloat("Sun disk power", &atmosphere.sunDiskPower, 16.0f, 128.0f, "%.0f");
+            ImGui::InputFloat("Sun disk strength", &atmosphere.sunDiskStrength, 0.5f, 2.0f, "%.2f");
+            ImGui::InputFloat("Sun glow power", &atmosphere.sunGlowPower, 1.0f, 4.0f, "%.0f");
+            ImGui::ColorEdit3("Sunset tint", &atmosphere.sunsetTintR);
+            ImGui::InputFloat("Sunset strength", &atmosphere.sunsetStrength, 0.01f, 0.05f, "%.2f");
+            ImGui::InputFloat("Sunset sunward boost", &atmosphere.sunsetSunwardBoost, 0.05f, 0.2f, "%.2f");
+            ImGui::InputFloat("Sunset dist min", &atmosphere.sunsetDistanceMin, 0.01f, 0.05f, "%.2f");
+            ImGui::InputFloat("Sunset dist max", &atmosphere.sunsetDistanceMax, 0.05f, 0.2f, "%.2f");
+            ImGui::TreePop();
+        }
+
+        atmosphere.atmosphereHeight = std::max(atmosphere.atmosphereHeight, 1000.0f);
+        atmosphere.atmosphereDistanceRange = std::max(atmosphere.atmosphereDistanceRange, 1000.0f);
+        atmosphere.mieG = std::clamp(atmosphere.mieG, 0.0f, 0.99f);
+        atmosphere.exposure = std::max(atmosphere.exposure, 0.01f);
+        atmosphere.alphaScale = std::max(atmosphere.alphaScale, 0.01f);
+        atmosphere.rayleighScaleHeight = std::max(atmosphere.rayleighScaleHeight, 1.0f);
+        atmosphere.mieScaleHeight = std::max(atmosphere.mieScaleHeight, 1.0f);
+        atmosphere.ozoneColumnHeight = std::max(atmosphere.ozoneColumnHeight, 1.0f);
+        atmosphere.ambientSkyScale = std::max(atmosphere.ambientSkyScale, 0.0f);
+        atmosphere.ambientBlueBias = std::clamp(atmosphere.ambientBlueBias, 0.0f, 1.0f);
+        atmosphere.ambientSolarInfluence = std::clamp(atmosphere.ambientSolarInfluence, 0.0f, 1.0f);
+        atmosphere.ambientTwilightInfluence = std::clamp(atmosphere.ambientTwilightInfluence, 0.0f, 1.0f);
+        atmosphere.rayleighTintScale = std::max(atmosphere.rayleighTintScale, 0.0f);
+        atmosphere.hazeStrength = std::max(atmosphere.hazeStrength, 0.0f);
+        atmosphere.pathFogDistance = std::max(atmosphere.pathFogDistance, 1.0f);
+        atmosphere.longRangeHazeDistance = std::max(atmosphere.longRangeHazeDistance, 1.0f);
+        atmosphere.aureolePower = std::max(atmosphere.aureolePower, 1.0f);
+        atmosphere.aureoleStrength = std::max(atmosphere.aureoleStrength, 0.0f);
+        atmosphere.sunDiskPower = std::max(atmosphere.sunDiskPower, 1.0f);
+        atmosphere.sunDiskStrength = std::max(atmosphere.sunDiskStrength, 0.0f);
+        atmosphere.sunGlowPower = std::max(atmosphere.sunGlowPower, 1.0f);
+        atmosphere.sunsetStrength = std::max(atmosphere.sunsetStrength, 0.0f);
+        atmosphere.sunsetSunwardBoost = std::max(atmosphere.sunsetSunwardBoost, 0.0f);
+        atmosphere.sunsetDistanceMin = std::max(atmosphere.sunsetDistanceMin, 0.0f);
+        atmosphere.sunsetDistanceMax = std::max(atmosphere.sunsetDistanceMax, 0.0f);
+
+        if (ImGui::Button("Regenerate + Upload LUT"))
+        {
+            context.skyboxRenderer.regenerateAtmosphereLut();
+        }
     }
 }
 

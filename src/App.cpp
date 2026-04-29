@@ -255,6 +255,7 @@ void App::buildUi()
         .gpuDrivers = m_gpuDrivers,
         .gamepadName = m_gamepadInput.gamepadName(),
         .lightingSystem = m_lightingSystem,
+        .skyboxRenderer = m_skyboxRenderer,
         .worldGridQuadtree = m_worldGridQuadtree,
         .viewportTextureId = m_renderer.viewportTextureId(),
     };
