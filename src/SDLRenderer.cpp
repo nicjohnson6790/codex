@@ -163,6 +163,7 @@ void SDLRenderer::renderFrame(
     quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
     if constexpr (AppConfig::Water::kEnabled)
     {
+        HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::DispatchWaterCompute", ProfileScopeGroup::Renderer);
         waterMeshRenderer.dispatchWaterSimulation(commandBuffer, timeSeconds, frameIndex);
     }
 
@@ -230,6 +231,7 @@ void SDLRenderer::renderFrame(
         quadtreeMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem);
         if constexpr (AppConfig::Water::kEnabled)
         {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderWater", ProfileScopeGroup::Renderer);
             waterMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem, timeSeconds);
         }
         triangleRenderer.render(renderPass, commandBuffer, viewProjection);

@@ -25,6 +25,8 @@ public:
         glm::vec4 sunDirectionIntensity{ 0.0f, 1.0f, 0.0f, 1.0f };
         glm::vec4 sunColorAmbient{ 1.0f, 1.0f, 1.0f, 0.2f };
         glm::vec4 debugParams{ 0.0f };
+        glm::vec4 cascadeWorldSizesA{ 0.0f };
+        glm::vec4 cascadeWorldSizesB{ 0.0f };
     };
 
     QuadtreeWaterMeshRenderer() = default;
@@ -43,14 +45,13 @@ public:
     void clear();
     void setActiveCamera(const Position& cameraPosition);
     void setSettings(const WaterSettings& settings);
-    void rebuildMeshLods();
+    void rebuildMesh();
 
     void addLeaf(
         const WorldGridQuadtreeLeafId& leafId,
         const Position& leafOrigin,
         double leafSizeMeters,
         std::uint8_t quadtreeLodHint,
-        std::uint8_t waterMeshLod,
         std::uint32_t bandMask);
 
     void upload(SDL_GPUCopyPass* copyPass);
@@ -65,7 +66,7 @@ public:
         const LightingSystem& lightingSystem,
         float timeSeconds) const;
 
-    [[nodiscard]] std::uint32_t instanceCountForLod(std::uint32_t lodIndex) const;
+    [[nodiscard]] std::uint32_t instanceCount() const;
     [[nodiscard]] std::uint32_t totalInstanceCount() const;
 
 private:
@@ -81,7 +82,7 @@ private:
         glm::vec4 leafParams{ 0.0f };
     };
 
-    struct MeshLodResources
+    struct MeshResources
     {
         SDL_GPUBuffer* vertexBuffer = nullptr;
         SDL_GPUTransferBuffer* vertexTransferBuffer = nullptr;
@@ -91,30 +92,70 @@ private:
         std::uint32_t indexCount = 0;
     };
 
-    struct InstanceLodResources
+    struct InstanceResources
     {
         SDL_GPUBuffer* instanceBuffer = nullptr;
         SDL_GPUTransferBuffer* instanceTransferBuffer = nullptr;
-        std::array<InstanceData, AppConfig::Water::kMaxWaterInstancesPerLod> instances{};
+        std::array<InstanceData, AppConfig::Water::kMaxWaterInstances> instances{};
         std::uint32_t instanceCount = 0;
+    };
+
+    struct WaterSimulationUniforms
+    {
+        glm::uvec4 dispatchParams{ 0u };
+        glm::vec4 timeAndGlobal{ 0.0f };
+        glm::vec4 cascadeWorldSizesA{ 0.0f };
+        glm::vec4 cascadeWorldSizesB{ 0.0f };
+        glm::vec4 cascadeAmplitudesA{ 0.0f };
+        glm::vec4 cascadeAmplitudesB{ 0.0f };
+        glm::vec4 cascadeWindDirXA{ 0.0f };
+        glm::vec4 cascadeWindDirXB{ 0.0f };
+        glm::vec4 cascadeWindDirZA{ 0.0f };
+        glm::vec4 cascadeWindDirZB{ 0.0f };
+        glm::vec4 cascadeChoppinessA{ 0.0f };
+        glm::vec4 cascadeChoppinessB{ 0.0f };
     };
 
     static_assert(sizeof(InstanceData) % 16 == 0);
 
     [[nodiscard]] static std::uint32_t packMetadata(
         std::uint8_t quadtreeLodHint,
-        std::uint8_t waterMeshLod,
         std::uint32_t bandMask);
 
     void createPipeline(const std::filesystem::path& shaderDirectory);
-    void createMeshLods();
-    void createMeshLod(std::uint32_t lodIndex, std::uint32_t vertexResolution);
-    void destroyMeshLods();
-    void createInstanceBuffers();
-    void destroyInstanceBuffers();
+    void createWaterComputePipelines(const std::filesystem::path& shaderDirectory);
+    void createMesh();
+    void createMeshGeometry(std::uint32_t vertexResolution);
+    void destroyMesh();
+    void createInstanceBuffer();
+    void destroyInstanceBuffer();
+    void createWaterTextures();
+    void destroyWaterTextures();
+    void createWaterSampler();
+    void destroyWaterSampler();
+    [[nodiscard]] WaterUniforms buildWaterUniforms(
+        const glm::mat4& viewProjection,
+        const LightingSystem& lightingSystem,
+        float timeSeconds) const;
+    [[nodiscard]] WaterSimulationUniforms buildSimulationUniforms(
+        float timeSeconds,
+        std::uint32_t cascadeIndex,
+        std::uint32_t stageIndex,
+        std::uint32_t stageAxis) const;
+    void dispatchSpectrumUpdate(SDL_GPUCommandBuffer* commandBuffer, const WaterSimulationUniforms& uniforms);
+    void dispatchFftStages(SDL_GPUCommandBuffer* commandBuffer, float timeSeconds);
+    void dispatchBuildMaps(SDL_GPUCommandBuffer* commandBuffer, const WaterSimulationUniforms& uniforms);
 
     SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
-    std::array<MeshLodResources, AppConfig::Water::kMeshLodCount> m_meshLods{};
-    std::array<InstanceLodResources, AppConfig::Water::kMeshLodCount> m_instanceLods{};
+    SDL_GPUComputePipeline* m_spectrumUpdatePipeline = nullptr;
+    SDL_GPUComputePipeline* m_fftStagePipeline = nullptr;
+    SDL_GPUComputePipeline* m_buildMapsPipeline = nullptr;
+    MeshResources m_mesh{};
+    InstanceResources m_instances{};
+    SDL_GPUTexture* m_spectrumPing = nullptr;
+    SDL_GPUTexture* m_spectrumPong = nullptr;
+    SDL_GPUTexture* m_displacementTexture = nullptr;
+    SDL_GPUTexture* m_slopeTexture = nullptr;
+    SDL_GPUSampler* m_waterSampler = nullptr;
     WaterSettings m_settings{};
 };

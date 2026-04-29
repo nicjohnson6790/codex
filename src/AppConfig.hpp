@@ -124,28 +124,8 @@ inline constexpr float kDefaultChoppiness = 1.0f;
 inline constexpr float kExpectedWaveHeight = 8.0f;
 inline constexpr float kVisibilityHeightPadding = 2.0f;
 
-inline constexpr std::uint32_t kMeshLodCount = 5;
-inline constexpr std::array<std::uint32_t, kMeshLodCount> kDefaultMeshLodVertexResolutions{
-    129,
-    65,
-    33,
-    17,
-    9,
-};
-
+inline constexpr std::uint32_t kMeshVertexResolution = 129;
 inline constexpr std::uint32_t kMaxWaterInstances = 4096;
-inline constexpr std::uint32_t kMaxWaterInstancesPerLod = 2048;
-
-inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint0 = 0;
-inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint1 = 1;
-inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint2 = 2;
-inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint3 = 3;
-inline constexpr std::uint8_t kDefaultWaterMeshLodForQuadtreeHint4 = 4;
-
-inline constexpr float kDefaultLod0MaxDistanceMeters = 300.0f;
-inline constexpr float kDefaultLod1MaxDistanceMeters = 1200.0f;
-inline constexpr float kDefaultLod2MaxDistanceMeters = 5000.0f;
-inline constexpr float kDefaultLod3MaxDistanceMeters = 20000.0f;
 }
 
 namespace Renderer

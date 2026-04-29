@@ -1,0 +1,67 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(rgba16f, set=1, binding=0) uniform image2D spectrumPingTexture;
+
+layout(set=2, binding=0) uniform WaterSimulationUniforms
+{
+    uvec4 dispatchParams;
+    vec4 timeAndGlobal;
+    vec4 cascadeWorldSizesA;
+    vec4 cascadeWorldSizesB;
+    vec4 cascadeAmplitudesA;
+    vec4 cascadeAmplitudesB;
+    vec4 cascadeWindDirXA;
+    vec4 cascadeWindDirXB;
+    vec4 cascadeWindDirZA;
+    vec4 cascadeWindDirZB;
+    vec4 cascadeChoppinessA;
+    vec4 cascadeChoppinessB;
+} simulation;
+
+float cascadeValue(vec4 a, vec4 b, uint cascadeIndex)
+{
+    if (cascadeIndex < 4u)
+    {
+        return a[cascadeIndex];
+    }
+
+    return b[cascadeIndex - 4u];
+}
+
+void main()
+{
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    uint resolution = simulation.dispatchParams.x;
+    uint cascadeIndex = simulation.dispatchParams.y;
+    if (gid.x >= resolution || gid.y >= resolution)
+    {
+        return;
+    }
+
+    vec2 uv = (vec2(gid) + 0.5) / float(resolution);
+    float timeSeconds = simulation.timeAndGlobal.x;
+    float globalAmplitude = max(simulation.timeAndGlobal.y, 0.0);
+    float worldSize = max(cascadeValue(simulation.cascadeWorldSizesA, simulation.cascadeWorldSizesB, cascadeIndex), 1.0);
+    float amplitude = max(cascadeValue(simulation.cascadeAmplitudesA, simulation.cascadeAmplitudesB, cascadeIndex), 0.0);
+    float windDirX = cascadeValue(simulation.cascadeWindDirXA, simulation.cascadeWindDirXB, cascadeIndex);
+    float windDirZ = cascadeValue(simulation.cascadeWindDirZA, simulation.cascadeWindDirZB, cascadeIndex);
+    float choppiness = max(cascadeValue(simulation.cascadeChoppinessA, simulation.cascadeChoppinessB, cascadeIndex), 0.0);
+
+    vec2 waveDirection = normalize(vec2(windDirX, windDirZ) + vec2(0.0001, 0.0));
+    float scale = max(worldSize / 64.0, 1.0);
+    float phaseA = dot(waveDirection, (uv - 0.5) * scale) * 6.28318530718 + (timeSeconds * (0.45 + (0.11 * float(cascadeIndex))));
+    float phaseB = dot(vec2(-waveDirection.y, waveDirection.x), (uv - 0.5) * scale * 1.7) * 6.28318530718 +
+        (timeSeconds * (0.82 + (0.07 * float(cascadeIndex))));
+    float energy = amplitude * globalAmplitude;
+
+    imageStore(
+        spectrumPingTexture,
+        ivec2(gid),
+        vec4(
+            sin(phaseA) * energy,
+            cos(phaseA) * energy,
+            sin(phaseB) * energy * (0.55 + (0.25 * choppiness)),
+            cos(phaseB) * energy));
+}

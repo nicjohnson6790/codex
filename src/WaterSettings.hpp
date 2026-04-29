@@ -24,45 +24,5 @@ inline WaterSettings makeDefaultWaterSettings()
         settings.cascades[i].updateModulo = 1;
     }
 
-    for (std::uint32_t i = 0; i < AppConfig::Water::kMeshLodCount; ++i)
-    {
-        settings.meshLods[i].vertexResolution = AppConfig::Water::kDefaultMeshLodVertexResolutions[i];
-        settings.meshLods[i].enabled = true;
-    }
-
-    settings.meshLods[0].maxDistanceMeters = AppConfig::Water::kDefaultLod0MaxDistanceMeters;
-    settings.meshLods[1].maxDistanceMeters = AppConfig::Water::kDefaultLod1MaxDistanceMeters;
-    settings.meshLods[2].maxDistanceMeters = AppConfig::Water::kDefaultLod2MaxDistanceMeters;
-    settings.meshLods[3].maxDistanceMeters = AppConfig::Water::kDefaultLod3MaxDistanceMeters;
-    settings.meshLods[4].maxDistanceMeters = 3.402823466e+38f;
-
-    settings.lodPolicy.meshLodForQuadtreeHint = {
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint0,
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint1,
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint2,
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint3,
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint4,
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint4,
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint4,
-        AppConfig::Water::kDefaultWaterMeshLodForQuadtreeHint4,
-    };
-
-    settings.lodPolicy.useDistanceOverride = true;
-    settings.lodPolicy.useLeafSizeOverride = true;
-    settings.lodPolicy.maxLeafSizeForMeshLod = {
-        256.0f,
-        1024.0f,
-        4096.0f,
-        16384.0f,
-        3.402823466e+38f,
-    };
-    settings.lodPolicy.maxDistanceForMeshLod = {
-        AppConfig::Water::kDefaultLod0MaxDistanceMeters,
-        AppConfig::Water::kDefaultLod1MaxDistanceMeters,
-        AppConfig::Water::kDefaultLod2MaxDistanceMeters,
-        AppConfig::Water::kDefaultLod3MaxDistanceMeters,
-        3.402823466e+38f,
-    };
-
     return settings;
 }

@@ -1,0 +1,44 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set=0, binding=0) uniform sampler2DArray inputSpectrumTexture;
+layout(rgba16f, set=1, binding=0) uniform image2D outputSpectrumTexture;
+
+layout(set=2, binding=0) uniform WaterSimulationUniforms
+{
+    uvec4 dispatchParams;
+    vec4 timeAndGlobal;
+    vec4 cascadeWorldSizesA;
+    vec4 cascadeWorldSizesB;
+    vec4 cascadeAmplitudesA;
+    vec4 cascadeAmplitudesB;
+    vec4 cascadeWindDirXA;
+    vec4 cascadeWindDirXB;
+    vec4 cascadeWindDirZA;
+    vec4 cascadeWindDirZB;
+    vec4 cascadeChoppinessA;
+    vec4 cascadeChoppinessB;
+} simulation;
+
+void main()
+{
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    uint resolution = simulation.dispatchParams.x;
+    uint cascadeIndex = simulation.dispatchParams.y;
+    if (gid.x >= resolution || gid.y >= resolution)
+    {
+        return;
+    }
+
+    vec4 value = texelFetch(inputSpectrumTexture, ivec3(gid, cascadeIndex), 0);
+    float stagePhase = (float(simulation.dispatchParams.z) + 1.0) * 0.12;
+    float axisPhase = float(simulation.dispatchParams.w) * 0.35;
+    float cosine = cos(stagePhase + axisPhase);
+    float sine = sin(stagePhase + axisPhase);
+    mat2 rotation = mat2(cosine, -sine, sine, cosine);
+    value.xy = rotation * value.xy;
+    value.zw = mix(value.zw, value.wz, 0.08 + (0.01 * float(simulation.dispatchParams.z)));
+
+    imageStore(outputSpectrumTexture, ivec2(gid), value);
+}

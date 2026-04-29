@@ -40,11 +40,7 @@ bool isCollapsedWaitScope(const CapturedScope& scope)
 
 bool isImguiRelatedCompactScope(const CapturedScope& scope)
 {
-    constexpr ProfileScopeGroup kCompactGroups =
-        ProfileScopeGroup::ImGui |
-        ProfileScopeGroup::Renderer |
-        ProfileScopeGroup::TreeUpdate;
-    return (scope.groups & kCompactGroups) != ProfileScopeGroup::None;
+    return (scope.groups & ProfileScopeGroup::ImGui) != ProfileScopeGroup::None;
 }
 
 std::vector<CycleRange> mergeRanges(std::vector<CycleRange> ranges)

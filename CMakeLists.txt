@@ -110,6 +110,9 @@ set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
 set(SKYBOX_FRAG_SPV ${SHADER_OUTPUT_DIR}/skybox.frag.spv)
 set(WATER_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh.vert.spv)
 set(WATER_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/water_mesh.frag.spv)
+set(WATER_SPECTRUM_UPDATE_COMP_SPV ${SHADER_OUTPUT_DIR}/water_spectrum_update.comp.spv)
+set(WATER_FFT_STAGE_COMP_SPV ${SHADER_OUTPUT_DIR}/water_fft_stage.comp.spv)
+set(WATER_BUILD_MAPS_COMP_SPV ${SHADER_OUTPUT_DIR}/water_build_maps.comp.spv)
 
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/triangle.vert ${TRIANGLE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/triangle.frag ${TRIANGLE_FRAG_SPV})
@@ -122,6 +125,9 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_spectrum_update.comp ${WATER_SPECTRUM_UPDATE_COMP_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_fft_stage.comp ${WATER_FFT_STAGE_COMP_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_build_maps.comp ${WATER_BUILD_MAPS_COMP_SPV})
 
 add_custom_target(shaders ALL
     DEPENDS
@@ -136,6 +142,9 @@ add_custom_target(shaders ALL
         ${SKYBOX_FRAG_SPV}
         ${WATER_MESH_VERT_SPV}
         ${WATER_MESH_FRAG_SPV}
+        ${WATER_SPECTRUM_UPDATE_COMP_SPV}
+        ${WATER_FFT_STAGE_COMP_SPV}
+        ${WATER_BUILD_MAPS_COMP_SPV}
 )
 
 add_executable(terrain_sandbox
