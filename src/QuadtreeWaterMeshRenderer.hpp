@@ -112,6 +112,8 @@ private:
         glm::vec4 cascadeWindDirXB{ 0.0f };
         glm::vec4 cascadeWindDirZA{ 0.0f };
         glm::vec4 cascadeWindDirZB{ 0.0f };
+        glm::vec4 cascadeWindSpeedsA{ 0.0f };
+        glm::vec4 cascadeWindSpeedsB{ 0.0f };
         glm::vec4 cascadeChoppinessA{ 0.0f };
         glm::vec4 cascadeChoppinessB{ 0.0f };
     };
@@ -154,6 +156,8 @@ private:
     InstanceResources m_instances{};
     SDL_GPUTexture* m_spectrumPing = nullptr;
     SDL_GPUTexture* m_spectrumPong = nullptr;
+    SDL_GPUTexture* m_slopeSpectrumPing = nullptr;
+    SDL_GPUTexture* m_slopeSpectrumPong = nullptr;
     SDL_GPUTexture* m_displacementTexture = nullptr;
     SDL_GPUTexture* m_slopeTexture = nullptr;
     SDL_GPUSampler* m_waterSampler = nullptr;

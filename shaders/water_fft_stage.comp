@@ -17,28 +17,67 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeWindDirXB;
     vec4 cascadeWindDirZA;
     vec4 cascadeWindDirZB;
+    vec4 cascadeWindSpeedsA;
+    vec4 cascadeWindSpeedsB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
 } simulation;
+
+const float kTau = 6.28318530718;
+
+vec2 complexMultiply(vec2 a, vec2 b)
+{
+    return vec2(
+        a.x * b.x - a.y * b.y,
+        a.x * b.y + a.y * b.x);
+}
 
 void main()
 {
     uvec2 gid = gl_GlobalInvocationID.xy;
     uint resolution = simulation.dispatchParams.x;
     uint cascadeIndex = simulation.dispatchParams.y;
+    uint stageIndex = simulation.dispatchParams.z;
+    uint axis = simulation.dispatchParams.w;
     if (gid.x >= resolution || gid.y >= resolution)
     {
         return;
     }
 
-    vec4 value = texelFetch(inputSpectrumTexture, ivec3(gid, cascadeIndex), 0);
-    float stagePhase = (float(simulation.dispatchParams.z) + 1.0) * 0.12;
-    float axisPhase = float(simulation.dispatchParams.w) * 0.35;
-    float cosine = cos(stagePhase + axisPhase);
-    float sine = sin(stagePhase + axisPhase);
-    mat2 rotation = mat2(cosine, -sine, sine, cosine);
-    value.xy = rotation * value.xy;
-    value.zw = mix(value.zw, value.wz, 0.08 + (0.01 * float(simulation.dispatchParams.z)));
+    uint p = 1u << stageIndex;
+    uint blockSize = 2u * p;
+    uint outputIndex = axis == 0u ? gid.x : gid.y;
+    uint lineIndex = axis == 0u ? gid.y : gid.x;
+    uint blockIndex = outputIndex / blockSize;
+    uint blockOffset = outputIndex % blockSize;
+    bool upperHalf = blockOffset >= p;
+    uint j = blockOffset % p;
+    uint inputBase = blockIndex * blockSize + j;
 
-    imageStore(outputSpectrumTexture, ivec2(gid), value);
+    ivec3 coordA;
+    ivec3 coordB;
+    ivec2 outCoord = ivec2(gid);
+    if (axis == 0u)
+    {
+        coordA = ivec3(int(inputBase), int(lineIndex), int(cascadeIndex));
+        coordB = ivec3(int(inputBase + p), int(lineIndex), int(cascadeIndex));
+    }
+    else
+    {
+        coordA = ivec3(int(lineIndex), int(inputBase), int(cascadeIndex));
+        coordB = ivec3(int(lineIndex), int(inputBase + p), int(cascadeIndex));
+    }
+
+    vec4 a = texelFetch(inputSpectrumTexture, coordA, 0);
+    vec4 b = texelFetch(inputSpectrumTexture, coordB, 0);
+
+    float angle = kTau * (float(j) / float(blockSize));
+    vec2 twiddle = vec2(cos(angle), sin(angle));
+    vec2 bHeight = complexMultiply(b.xy, twiddle);
+    vec2 bChop = complexMultiply(b.zw, twiddle);
+
+    vec2 outHeight = upperHalf ? (a.xy - bHeight) : (a.xy + bHeight);
+    vec2 outChop = upperHalf ? (a.zw - bChop) : (a.zw + bChop);
+
+    imageStore(outputSpectrumTexture, outCoord, vec4(outHeight, outChop));
 }

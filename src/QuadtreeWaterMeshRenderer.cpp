@@ -166,6 +166,8 @@ void QuadtreeWaterMeshRenderer::dispatchWaterSimulation(
         m_buildMapsPipeline == nullptr ||
         m_spectrumPing == nullptr ||
         m_spectrumPong == nullptr ||
+        m_slopeSpectrumPing == nullptr ||
+        m_slopeSpectrumPong == nullptr ||
         m_displacementTexture == nullptr ||
         m_slopeTexture == nullptr ||
         m_waterSampler == nullptr)
@@ -340,9 +342,9 @@ void QuadtreeWaterMeshRenderer::createWaterComputePipelines(const std::filesyste
         return pipeline;
     };
 
-    m_spectrumUpdatePipeline = createComputePipeline(shaderDirectory / "water_spectrum_update.comp.spv", 0, 0, 1);
+    m_spectrumUpdatePipeline = createComputePipeline(shaderDirectory / "water_spectrum_update.comp.spv", 0, 0, 2);
     m_fftStagePipeline = createComputePipeline(shaderDirectory / "water_fft_stage.comp.spv", 1, 0, 1);
-    m_buildMapsPipeline = createComputePipeline(shaderDirectory / "water_build_maps.comp.spv", 1, 0, 2);
+    m_buildMapsPipeline = createComputePipeline(shaderDirectory / "water_build_maps.comp.spv", 2, 0, 2);
 }
 
 void QuadtreeWaterMeshRenderer::createMesh()
@@ -537,6 +539,18 @@ void QuadtreeWaterMeshRenderer::createWaterTextures()
         throwSdlError("Failed to create water spectrum pong texture.");
     }
 
+    m_slopeSpectrumPing = SDL_CreateGPUTexture(m_device, &textureInfo);
+    if (m_slopeSpectrumPing == nullptr)
+    {
+        throwSdlError("Failed to create water slope spectrum ping texture.");
+    }
+
+    m_slopeSpectrumPong = SDL_CreateGPUTexture(m_device, &textureInfo);
+    if (m_slopeSpectrumPong == nullptr)
+    {
+        throwSdlError("Failed to create water slope spectrum pong texture.");
+    }
+
     textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
     m_displacementTexture = SDL_CreateGPUTexture(m_device, &textureInfo);
     if (m_displacementTexture == nullptr)
@@ -557,6 +571,16 @@ void QuadtreeWaterMeshRenderer::destroyWaterTextures()
     {
         SDL_ReleaseGPUTexture(m_device, m_slopeTexture);
         m_slopeTexture = nullptr;
+    }
+    if (m_slopeSpectrumPong != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_slopeSpectrumPong);
+        m_slopeSpectrumPong = nullptr;
+    }
+    if (m_slopeSpectrumPing != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_slopeSpectrumPing);
+        m_slopeSpectrumPing = nullptr;
     }
     if (m_displacementTexture != nullptr)
     {
@@ -668,6 +692,7 @@ QuadtreeWaterMeshRenderer::WaterSimulationUniforms QuadtreeWaterMeshRenderer::bu
         const float amplitude = std::max(cascade.amplitude, 0.0f);
         const float windDirX = std::cos(cascade.windDirectionRadians);
         const float windDirZ = std::sin(cascade.windDirectionRadians);
+        const float windSpeed = std::max(cascade.windSpeed, 0.0f);
         const float choppiness = std::max(cascade.choppiness, 0.0f);
 
         if (cascadeIndex < 4u)
@@ -676,6 +701,7 @@ QuadtreeWaterMeshRenderer::WaterSimulationUniforms QuadtreeWaterMeshRenderer::bu
             (&uniforms.cascadeAmplitudesA.x)[cascadeIndex] = amplitude;
             (&uniforms.cascadeWindDirXA.x)[cascadeIndex] = windDirX;
             (&uniforms.cascadeWindDirZA.x)[cascadeIndex] = windDirZ;
+            (&uniforms.cascadeWindSpeedsA.x)[cascadeIndex] = windSpeed;
             (&uniforms.cascadeChoppinessA.x)[cascadeIndex] = choppiness;
         }
         else
@@ -685,6 +711,7 @@ QuadtreeWaterMeshRenderer::WaterSimulationUniforms QuadtreeWaterMeshRenderer::bu
             (&uniforms.cascadeAmplitudesB.x)[localIndex] = amplitude;
             (&uniforms.cascadeWindDirXB.x)[localIndex] = windDirX;
             (&uniforms.cascadeWindDirZB.x)[localIndex] = windDirZ;
+            (&uniforms.cascadeWindSpeedsB.x)[localIndex] = windSpeed;
             (&uniforms.cascadeChoppinessB.x)[localIndex] = choppiness;
         }
     }
@@ -708,13 +735,17 @@ void QuadtreeWaterMeshRenderer::dispatchSpectrumUpdate(
         uniforms.dispatchParams.y = cascadeIndex;
         SDL_PushGPUComputeUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
-        SDL_GPUStorageTextureReadWriteBinding storageBinding{};
-        storageBinding.texture = m_spectrumPing;
-        storageBinding.mip_level = 0;
-        storageBinding.layer = cascadeIndex;
-        storageBinding.cycle = false;
+        SDL_GPUStorageTextureReadWriteBinding storageBindings[2]{};
+        storageBindings[0].texture = m_spectrumPing;
+        storageBindings[0].mip_level = 0;
+        storageBindings[0].layer = cascadeIndex;
+        storageBindings[0].cycle = false;
+        storageBindings[1].texture = m_slopeSpectrumPing;
+        storageBindings[1].mip_level = 0;
+        storageBindings[1].layer = cascadeIndex;
+        storageBindings[1].cycle = false;
 
-        SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, &storageBinding, 1, nullptr, 0);
+        SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, storageBindings, 2, nullptr, 0);
         if (computePass == nullptr)
         {
             throwSdlError("Failed to begin water spectrum update compute pass.");
@@ -739,30 +770,38 @@ void QuadtreeWaterMeshRenderer::dispatchFftStages(SDL_GPUCommandBuffer* commandB
         for (std::uint32_t stageIndex = 0; stageIndex < kFftStageCount; ++stageIndex)
         {
             const bool evenStage = ((axis * kFftStageCount) + stageIndex) % 2u == 0u;
-            SDL_GPUTexture* inputTexture = evenStage ? m_spectrumPing : m_spectrumPong;
-            SDL_GPUTexture* outputTexture = evenStage ? m_spectrumPong : m_spectrumPing;
             for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(m_settings.cascadeCount, AppConfig::Water::kMaxCascadeCount); ++cascadeIndex)
             {
                 const WaterSimulationUniforms uniforms = buildSimulationUniforms(timeSeconds, cascadeIndex, stageIndex, axis);
-                SDL_PushGPUComputeUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
-
-                SDL_GPUStorageTextureReadWriteBinding storageBinding{};
-                storageBinding.texture = outputTexture;
-                storageBinding.mip_level = 0;
-                storageBinding.layer = cascadeIndex;
-                storageBinding.cycle = false;
-
-                SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, &storageBinding, 1, nullptr, 0);
-                if (computePass == nullptr)
+                const auto dispatchStream = [&, cascadeIndex, uniforms](SDL_GPUTexture* inputTexture, SDL_GPUTexture* outputTexture)
                 {
-                    throwSdlError("Failed to begin water FFT compute pass.");
-                }
+                    SDL_PushGPUComputeUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
-                SDL_BindGPUComputePipeline(computePass, m_fftStagePipeline);
-                const SDL_GPUTextureSamplerBinding samplerBinding{ inputTexture, m_waterSampler };
-                SDL_BindGPUComputeSamplers(computePass, 0, &samplerBinding, 1);
-                SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, 1);
-                SDL_EndGPUComputePass(computePass);
+                    SDL_GPUStorageTextureReadWriteBinding storageBinding{};
+                    storageBinding.texture = outputTexture;
+                    storageBinding.mip_level = 0;
+                    storageBinding.layer = cascadeIndex;
+                    storageBinding.cycle = false;
+
+                    SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, &storageBinding, 1, nullptr, 0);
+                    if (computePass == nullptr)
+                    {
+                        throwSdlError("Failed to begin water FFT compute pass.");
+                    }
+
+                    SDL_BindGPUComputePipeline(computePass, m_fftStagePipeline);
+                    const SDL_GPUTextureSamplerBinding samplerBinding{ inputTexture, m_waterSampler };
+                    SDL_BindGPUComputeSamplers(computePass, 0, &samplerBinding, 1);
+                    SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, 1);
+                    SDL_EndGPUComputePass(computePass);
+                };
+
+                dispatchStream(
+                    evenStage ? m_spectrumPing : m_spectrumPong,
+                    evenStage ? m_spectrumPong : m_spectrumPing);
+                dispatchStream(
+                    evenStage ? m_slopeSpectrumPing : m_slopeSpectrumPong,
+                    evenStage ? m_slopeSpectrumPong : m_slopeSpectrumPing);
             }
         }
     }
@@ -801,8 +840,11 @@ void QuadtreeWaterMeshRenderer::dispatchBuildMaps(
         }
 
         SDL_BindGPUComputePipeline(computePass, m_buildMapsPipeline);
-        const SDL_GPUTextureSamplerBinding samplerBinding{ m_spectrumPing, m_waterSampler };
-        SDL_BindGPUComputeSamplers(computePass, 0, &samplerBinding, 1);
+        const SDL_GPUTextureSamplerBinding samplerBindings[2]{
+            { m_spectrumPing, m_waterSampler },
+            { m_slopeSpectrumPing, m_waterSampler },
+        };
+        SDL_BindGPUComputeSamplers(computePass, 0, samplerBindings, 2);
         SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, 1);
         SDL_EndGPUComputePass(computePass);
     }

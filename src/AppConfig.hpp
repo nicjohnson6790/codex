@@ -118,9 +118,9 @@ inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascade
 
 inline constexpr float kDefaultWaterLevel = 250.0f;
 inline constexpr float kDefaultWindDirectionRadians = 0.0f;
-inline constexpr float kDefaultWindSpeed = 18.0f;
-inline constexpr float kDefaultAmplitude = 1.0f;
-inline constexpr float kDefaultChoppiness = 1.0f;
+inline constexpr float kDefaultWindSpeed = 22.0f;
+inline constexpr float kDefaultAmplitude = 1.35f;
+inline constexpr float kDefaultChoppiness = 1.2f;
 inline constexpr float kExpectedWaveHeight = 8.0f;
 inline constexpr float kVisibilityHeightPadding = 2.0f;
 

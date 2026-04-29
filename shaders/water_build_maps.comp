@@ -2,7 +2,8 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set=0, binding=0) uniform sampler2DArray inputSpectrumTexture;
+layout(set=0, binding=0) uniform sampler2DArray displacementSpectrumTexture;
+layout(set=0, binding=1) uniform sampler2DArray slopeSpectrumTexture;
 layout(rgba16f, set=1, binding=0) uniform image2D displacementTexture;
 layout(rgba16f, set=1, binding=1) uniform image2D slopeTexture;
 
@@ -18,18 +19,34 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeWindDirXB;
     vec4 cascadeWindDirZA;
     vec4 cascadeWindDirZB;
+    vec4 cascadeWindSpeedsA;
+    vec4 cascadeWindSpeedsB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
 } simulation;
 
 float cascadeValue(vec4 a, vec4 b, uint cascadeIndex)
 {
-    if (cascadeIndex < 4u)
-    {
-        return a[cascadeIndex];
-    }
+    return cascadeIndex < 4u ? a[cascadeIndex] : b[cascadeIndex - 4u];
+}
 
-    return b[cascadeIndex - 4u];
+uint bitReverse8(uint value)
+{
+    value = ((value & 0x55u) << 1u) | ((value >> 1u) & 0x55u);
+    value = ((value & 0x33u) << 2u) | ((value >> 2u) & 0x33u);
+    value = ((value & 0x0Fu) << 4u) | ((value >> 4u) & 0x0Fu);
+    return value;
+}
+
+ivec3 remappedCoord(uvec2 coord, uint cascadeIndex)
+{
+    return ivec3(int(bitReverse8(coord.x)), int(bitReverse8(coord.y)), int(cascadeIndex));
+}
+
+vec4 permuteSpectrum(vec4 value, ivec2 coord)
+{
+    float signFlip = ((coord.x + coord.y) & 1) == 0 ? 1.0 : -1.0;
+    return value * signFlip;
 }
 
 void main()
@@ -43,34 +60,26 @@ void main()
     }
 
     ivec2 centerCoord = ivec2(gid);
-    ivec3 inputCenterCoord = ivec3(gid, cascadeIndex);
-    ivec3 rightCoord = ivec3((gid.x + 1u) % resolution, gid.y, cascadeIndex);
-    ivec3 upCoord = ivec3(gid.x, (gid.y + 1u) % resolution, cascadeIndex);
-
-    vec4 center = texelFetch(inputSpectrumTexture, inputCenterCoord, 0);
-    vec4 right = texelFetch(inputSpectrumTexture, rightCoord, 0);
-    vec4 up = texelFetch(inputSpectrumTexture, upCoord, 0);
-
-    float worldSize = max(cascadeValue(simulation.cascadeWorldSizesA, simulation.cascadeWorldSizesB, cascadeIndex), 1.0);
-    float amplitude = max(cascadeValue(simulation.cascadeAmplitudesA, simulation.cascadeAmplitudesB, cascadeIndex), 0.0) *
-        max(simulation.timeAndGlobal.y, 0.0);
+    ivec3 displacementCoord = remappedCoord(gid, cascadeIndex);
+    ivec3 slopeCoord = remappedCoord(gid, cascadeIndex);
     float choppiness = max(cascadeValue(simulation.cascadeChoppinessA, simulation.cascadeChoppinessB, cascadeIndex), 0.0) *
         max(simulation.timeAndGlobal.z, 0.0);
-    float horizontalScale = 0.18 + (0.10 * choppiness);
+    float normalization = 1.0 / float(resolution * resolution);
 
-    float heightCenter = (center.x + center.z) * amplitude;
-    float heightRight = (right.x + right.z) * amplitude;
-    float heightUp = (up.x + up.z) * amplitude;
+    vec4 displacementSpectrum = permuteSpectrum(texelFetch(displacementSpectrumTexture, displacementCoord, 0), centerCoord) * normalization;
+    vec4 slopeSpectrum = permuteSpectrum(texelFetch(slopeSpectrumTexture, slopeCoord, 0), centerCoord) * normalization;
 
+    float lambda = choppiness;
+    vec2 displacementXZ = displacementSpectrum.rg;
+    vec2 heightAndCross = displacementSpectrum.ba;
+    vec2 slopeXZ = slopeSpectrum.rg;
+    vec2 curvatureXZ = slopeSpectrum.ba;
     vec3 displacement = vec3(
-        center.x * amplitude * horizontalScale,
-        heightCenter,
-        center.y * amplitude * horizontalScale);
+        lambda * displacementXZ.x,
+        heightAndCross.x,
+        lambda * displacementXZ.y);
 
-    float texelWorldSize = worldSize / float(resolution);
-    vec2 slope = vec2(
-        (heightRight - heightCenter) / max(texelWorldSize, 0.001),
-        (heightUp - heightCenter) / max(texelWorldSize, 0.001));
+    vec2 slope = slopeXZ / (1.0 + abs(curvatureXZ * lambda));
 
     imageStore(displacementTexture, centerCoord, vec4(displacement, 1.0));
     imageStore(slopeTexture, centerCoord, vec4(slope, 0.0, 1.0));

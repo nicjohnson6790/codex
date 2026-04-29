@@ -2,7 +2,8 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(rgba16f, set=1, binding=0) uniform image2D spectrumPingTexture;
+layout(rgba16f, set=1, binding=0) uniform image2D displacementSpectrumTexture;
+layout(rgba16f, set=1, binding=1) uniform image2D slopeSpectrumTexture;
 
 layout(set=2, binding=0) uniform WaterSimulationUniforms
 {
@@ -16,18 +17,77 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeWindDirXB;
     vec4 cascadeWindDirZA;
     vec4 cascadeWindDirZB;
+    vec4 cascadeWindSpeedsA;
+    vec4 cascadeWindSpeedsB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
 } simulation;
 
+const float kPi = 3.14159265359;
+const float kTau = 6.28318530718;
+const float kGravity = 9.81;
+
 float cascadeValue(vec4 a, vec4 b, uint cascadeIndex)
 {
-    if (cascadeIndex < 4u)
+    return cascadeIndex < 4u ? a[cascadeIndex] : b[cascadeIndex - 4u];
+}
+
+uint hashUint(uvec3 v)
+{
+    uint h = v.x * 1664525u + 1013904223u;
+    h ^= v.y * 22695477u + 1u;
+    h ^= v.z * 1103515245u + 12345u;
+    h ^= h >> 16u;
+    h *= 2246822519u;
+    h ^= h >> 13u;
+    h *= 3266489917u;
+    h ^= h >> 16u;
+    return h;
+}
+
+float randomFloat(uvec3 seed)
+{
+    return float(hashUint(seed)) * (1.0 / 4294967295.0);
+}
+
+vec2 gaussianPair(uvec3 seed)
+{
+    float u1 = max(randomFloat(seed), 1.0e-6);
+    float u2 = randomFloat(seed ^ uvec3(0x9e3779b9u, 0x7f4a7c15u, 0x94d049bbu));
+    float radius = sqrt(-2.0 * log(u1));
+    float angle = kTau * u2;
+    return radius * vec2(cos(angle), sin(angle));
+}
+
+vec2 complexMultiply(vec2 a, vec2 b)
+{
+    return vec2(
+        a.x * b.x - a.y * b.y,
+        a.x * b.y + a.y * b.x);
+}
+
+float dispersion(float waveNumber)
+{
+    return sqrt(kGravity * waveNumber);
+}
+
+float phillipsSpectrum(vec2 k, vec2 windDir, float windSpeed, float amplitude)
+{
+    float kLength = length(k);
+    if (kLength < 1.0e-5)
     {
-        return a[cascadeIndex];
+        return 0.0;
     }
 
-    return b[cascadeIndex - 4u];
+    float k2 = kLength * kLength;
+    float k4 = k2 * k2;
+    float kDotWind = dot(normalize(k), windDir);
+    float L = max((windSpeed * windSpeed) / kGravity, 1.0);
+    float dampingLength = L * 0.001;
+    float directional = kDotWind * kDotWind;
+    float largeWaveDamp = exp(-1.0 / (k2 * L * L));
+    float smallWaveDamp = exp(-k2 * dampingLength * dampingLength);
+    return amplitude * directional * largeWaveDamp * smallWaveDamp / k4;
 }
 
 void main()
@@ -40,28 +100,73 @@ void main()
         return;
     }
 
-    vec2 uv = (vec2(gid) + 0.5) / float(resolution);
     float timeSeconds = simulation.timeAndGlobal.x;
     float globalAmplitude = max(simulation.timeAndGlobal.y, 0.0);
     float worldSize = max(cascadeValue(simulation.cascadeWorldSizesA, simulation.cascadeWorldSizesB, cascadeIndex), 1.0);
-    float amplitude = max(cascadeValue(simulation.cascadeAmplitudesA, simulation.cascadeAmplitudesB, cascadeIndex), 0.0);
+    float amplitude = max(cascadeValue(simulation.cascadeAmplitudesA, simulation.cascadeAmplitudesB, cascadeIndex), 0.0) * globalAmplitude;
     float windDirX = cascadeValue(simulation.cascadeWindDirXA, simulation.cascadeWindDirXB, cascadeIndex);
     float windDirZ = cascadeValue(simulation.cascadeWindDirZA, simulation.cascadeWindDirZB, cascadeIndex);
+    float windSpeed = max(cascadeValue(simulation.cascadeWindSpeedsA, simulation.cascadeWindSpeedsB, cascadeIndex), 0.0);
     float choppiness = max(cascadeValue(simulation.cascadeChoppinessA, simulation.cascadeChoppinessB, cascadeIndex), 0.0);
 
-    vec2 waveDirection = normalize(vec2(windDirX, windDirZ) + vec2(0.0001, 0.0));
-    float scale = max(worldSize / 64.0, 1.0);
-    float phaseA = dot(waveDirection, (uv - 0.5) * scale) * 6.28318530718 + (timeSeconds * (0.45 + (0.11 * float(cascadeIndex))));
-    float phaseB = dot(vec2(-waveDirection.y, waveDirection.x), (uv - 0.5) * scale * 1.7) * 6.28318530718 +
-        (timeSeconds * (0.82 + (0.07 * float(cascadeIndex))));
-    float energy = amplitude * globalAmplitude;
+    vec2 windDir = normalize(vec2(windDirX, windDirZ) + vec2(1.0e-5, 0.0));
+    vec2 centeredIndex = vec2(gid) - vec2(float(resolution) * 0.5);
+    vec2 k = centeredIndex * (kTau / worldSize);
+    vec2 negK = -k;
+    float waveNumber = length(k);
+    float spectrum = phillipsSpectrum(k, windDir, windSpeed, amplitude);
+    float mirrorSpectrum = phillipsSpectrum(negK, windDir, windSpeed, amplitude);
+
+    uvec2 mirrorGid = uvec2(
+        (resolution - gid.x) & (resolution - 1u),
+        (resolution - gid.y) & (resolution - 1u));
+
+    vec2 noiseHeight = gaussianPair(uvec3(gid, cascadeIndex));
+    vec2 noiseHeightMirror = gaussianPair(uvec3(mirrorGid, cascadeIndex));
+    float omega = dispersion(waveNumber);
+    float phase = omega * timeSeconds;
+    vec2 phaseForward = vec2(cos(phase), sin(phase));
+    vec2 phaseBackward = vec2(cos(phase), -sin(phase));
+    float spectrumScale = sqrt(max(spectrum, 0.0) * 0.5) * (1.0 + (choppiness * 0.2));
+    float mirrorSpectrumScale = sqrt(max(mirrorSpectrum, 0.0) * 0.5) * (1.0 + (choppiness * 0.2));
+
+    vec2 h0 = noiseHeight * spectrumScale;
+    vec2 h0Minus = noiseHeightMirror * mirrorSpectrumScale;
+
+    vec2 heightSpectrum =
+        complexMultiply(h0, phaseForward) +
+        complexMultiply(vec2(h0Minus.x, -h0Minus.y), phaseBackward);
+
+    float reciprocalWaveNumber = waveNumber < 1.0e-5 ? 1.0 : (1.0 / waveNumber);
+    vec2 ih = vec2(-heightSpectrum.y, heightSpectrum.x);
+    vec2 displacementX = ih * k.x * reciprocalWaveNumber;
+    vec2 displacementY = heightSpectrum;
+    vec2 displacementZ = ih * k.y * reciprocalWaveNumber;
+    vec2 displacementXdx = -heightSpectrum * k.x * k.x * reciprocalWaveNumber;
+    vec2 displacementYdx = ih * k.x;
+    vec2 displacementZdx = -heightSpectrum * k.x * k.y * reciprocalWaveNumber;
+    vec2 displacementYdz = ih * k.y;
+    vec2 displacementZdz = -heightSpectrum * k.y * k.y * reciprocalWaveNumber;
+
+    vec2 packedDisplacementXZ = vec2(
+        displacementX.x - displacementZ.y,
+        displacementX.y + displacementZ.x);
+    vec2 packedHeightAndCross = vec2(
+        displacementY.x - displacementZdx.y,
+        displacementY.y + displacementZdx.x);
+    vec2 packedSlopeXZ = vec2(
+        displacementYdx.x - displacementYdz.y,
+        displacementYdx.y + displacementYdz.x);
+    vec2 packedCurvatureXZ = vec2(
+        displacementXdx.x - displacementZdz.y,
+        displacementXdx.y + displacementZdz.x);
 
     imageStore(
-        spectrumPingTexture,
+        displacementSpectrumTexture,
         ivec2(gid),
-        vec4(
-            sin(phaseA) * energy,
-            cos(phaseA) * energy,
-            sin(phaseB) * energy * (0.55 + (0.25 * choppiness)),
-            cos(phaseB) * energy));
+        vec4(packedDisplacementXZ, packedHeightAndCross));
+    imageStore(
+        slopeSpectrumTexture,
+        ivec2(gid),
+        vec4(packedSlopeXZ, packedCurvatureXZ));
 }
