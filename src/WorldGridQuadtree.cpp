@@ -345,6 +345,8 @@ void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManag
             node.nodeId,
             minCorner,
             worldGridQuadtreeLeafSize(node.nodeId),
+            nodeHasFlag(node, QuadtreeNode::HasExtentsMask),
+            node.minHeight,
             quadtreeLodHint);
     }
 }

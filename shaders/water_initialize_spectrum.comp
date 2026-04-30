@@ -1,0 +1,294 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set=1, binding=0, std430) buffer InitialSpectrumBuffer
+{
+    vec4 initialSpectrumData[];
+} initialSpectrumBuffer;
+
+layout(set=2, binding=0) uniform WaterSimulationUniforms
+{
+    uvec4 dispatchParams;
+    vec4 timeAndGlobal;
+    vec4 cascadeWorldSizesA;
+    vec4 cascadeWorldSizesB;
+    vec4 cascadeAmplitudesA;
+    vec4 cascadeAmplitudesB;
+    vec4 cascadeWindDirXA;
+    vec4 cascadeWindDirXB;
+    vec4 cascadeWindDirZA;
+    vec4 cascadeWindDirZB;
+    vec4 cascadeWindSpeedsA;
+    vec4 cascadeWindSpeedsB;
+    vec4 cascadeFetchesA;
+    vec4 cascadeFetchesB;
+    vec4 cascadeSpreadBlendA;
+    vec4 cascadeSpreadBlendB;
+    vec4 cascadeSwellA;
+    vec4 cascadeSwellB;
+    vec4 cascadePeakEnhancementA;
+    vec4 cascadePeakEnhancementB;
+    vec4 cascadeShortWavesFadeA;
+    vec4 cascadeShortWavesFadeB;
+    vec4 cascadeChoppinessA;
+    vec4 cascadeChoppinessB;
+    vec4 simulationParams;
+} simulation;
+
+const float kPi = 3.14159265359;
+const float kTau = 6.28318530718;
+const float kGravity = 9.81;
+
+struct SpectrumParams
+{
+    float scale;
+    float angle;
+    float spreadBlend;
+    float swell;
+    float alpha;
+    float peakOmega;
+    float gammaValue;
+    float shortWavesFade;
+};
+
+float cascadeValue(vec4 a, vec4 b, uint cascadeIndex)
+{
+    return cascadeIndex < 4u ? a[cascadeIndex] : b[cascadeIndex - 4u];
+}
+
+uint spectrumIndex(uint resolution, uint cascadeIndex, uvec2 coord)
+{
+    return ((cascadeIndex * resolution + coord.y) * resolution) + coord.x;
+}
+
+uint hashUint(uvec3 v)
+{
+    uint h = v.x * 1664525u + 1013904223u;
+    h ^= v.y * 22695477u + 1u;
+    h ^= v.z * 1103515245u + 12345u;
+    h ^= h >> 16u;
+    h *= 2246822519u;
+    h ^= h >> 13u;
+    h *= 3266489917u;
+    h ^= h >> 16u;
+    return h;
+}
+
+float randomFloat(uvec3 seed)
+{
+    return float(hashUint(seed)) * (1.0 / 4294967295.0);
+}
+
+vec2 gaussianPair(uvec3 seed)
+{
+    float u1 = max(randomFloat(seed), 1.0e-6);
+    float u2 = randomFloat(seed ^ uvec3(0x9e3779b9u, 0x7f4a7c15u, 0x94d049bbu));
+    float radius = sqrt(-2.0 * log(u1));
+    float angle = kTau * u2;
+    return radius * vec2(cos(angle), sin(angle));
+}
+
+float normalizationFactor(float spreadPower)
+{
+    float s2 = spreadPower * spreadPower;
+    float s3 = s2 * spreadPower;
+    float s4 = s3 * spreadPower;
+    if (spreadPower < 5.0)
+    {
+        return -0.000564 * s4 + 0.00776 * s3 - 0.044 * s2 + 0.192 * spreadPower + 0.163;
+    }
+
+    return -4.80e-08 * s4 + 1.07e-05 * s3 - 9.53e-04 * s2 + 5.90e-02 * spreadPower + 3.93e-01;
+}
+
+float spreadPower(float omega, float peakOmega)
+{
+    if (omega > peakOmega)
+    {
+        return 9.77 * pow(abs(omega / peakOmega), -2.5);
+    }
+
+    return 6.97 * pow(abs(omega / peakOmega), 5.0);
+}
+
+float cosine2s(float theta, float s)
+{
+    return normalizationFactor(s) * pow(abs(cos(0.5 * theta)), 2.0 * s);
+}
+
+float directionSpectrum(float theta, float omega, SpectrumParams spectrum)
+{
+    float s = spreadPower(omega, spectrum.peakOmega) +
+        16.0 * tanh(min(omega / max(spectrum.peakOmega, 1.0e-5), 20.0)) * spectrum.swell * spectrum.swell;
+    return mix(
+        (2.0 / kPi) * cos(theta) * cos(theta),
+        cosine2s(theta - spectrum.angle, s),
+        spectrum.spreadBlend);
+}
+
+float dispersion(float waveNumber)
+{
+    float depth = max(simulation.simulationParams.x, 0.01);
+    return sqrt(kGravity * waveNumber * tanh(min(waveNumber * depth, 20.0)));
+}
+
+float dispersionDerivative(float waveNumber)
+{
+    float depth = max(simulation.simulationParams.x, 0.01);
+    float clamped = min(waveNumber * depth, 20.0);
+    float th = tanh(clamped);
+    float ch = cosh(clamped);
+    return kGravity * ((depth * waveNumber) / (ch * ch) + th) / max(dispersion(waveNumber) * 2.0, 1.0e-5);
+}
+
+float tmaCorrection(float omega)
+{
+    float depth = max(simulation.simulationParams.x, 0.01);
+    float omegaH = omega * sqrt(depth / kGravity);
+    if (omegaH <= 1.0)
+    {
+        return 0.5 * omegaH * omegaH;
+    }
+    if (omegaH < 2.0)
+    {
+        return 1.0 - 0.5 * (2.0 - omegaH) * (2.0 - omegaH);
+    }
+
+    return 1.0;
+}
+
+float jonswap(float omega, SpectrumParams spectrum)
+{
+    if (omega < 1.0e-5)
+    {
+        return 0.0;
+    }
+
+    float sigma = omega <= spectrum.peakOmega ? 0.07 : 0.09;
+    float r = exp(-(omega - spectrum.peakOmega) * (omega - spectrum.peakOmega) /
+        max(2.0 * sigma * sigma * spectrum.peakOmega * spectrum.peakOmega, 1.0e-5));
+    float oneOverOmega = 1.0 / omega;
+    float peakRatio = spectrum.peakOmega * oneOverOmega;
+    return
+        spectrum.scale *
+        tmaCorrection(omega) *
+        spectrum.alpha *
+        kGravity * kGravity *
+        pow(oneOverOmega, 5.0) *
+        exp(-1.25 * pow(peakRatio, 4.0)) *
+        pow(abs(spectrum.gammaValue), r);
+}
+
+float shortWavesFade(float kLength, SpectrumParams spectrum)
+{
+    return exp(-spectrum.shortWavesFade * spectrum.shortWavesFade * kLength * kLength);
+}
+
+float jonswapAlpha(float fetch, float windSpeed)
+{
+    return 0.076 * pow(kGravity * fetch / max(windSpeed * windSpeed, 1.0), -0.22);
+}
+
+float jonswapPeakFrequency(float fetch, float windSpeed)
+{
+    return 22.0 * pow(max((windSpeed * fetch) / (kGravity * kGravity), 1.0e-5), -0.33);
+}
+
+SpectrumParams buildSpectrum(
+    float scale,
+    float angle,
+    float windSpeed,
+    float fetch,
+    float spreadBlend,
+    float swell,
+    float peakEnhancement,
+    float shortWaveFade)
+{
+    SpectrumParams spectrum;
+    spectrum.scale = scale;
+    spectrum.angle = angle;
+    spectrum.spreadBlend = spreadBlend;
+    spectrum.swell = clamp(swell, 0.01, 1.0);
+    spectrum.alpha = jonswapAlpha(fetch, windSpeed);
+    spectrum.peakOmega = jonswapPeakFrequency(fetch, windSpeed);
+    spectrum.gammaValue = peakEnhancement;
+    spectrum.shortWavesFade = shortWaveFade;
+    return spectrum;
+}
+
+float initializeSpectrum(vec2 k, float omega, float dOmegadk, float deltaK, SpectrumParams spectrum)
+{
+    float kLength = length(k);
+    if (kLength < max(simulation.simulationParams.y, 0.0) ||
+        kLength > max(simulation.simulationParams.z, simulation.simulationParams.y))
+    {
+        return 0.0;
+    }
+
+    float kAngle = atan(k.y, k.x);
+    float energy =
+        jonswap(omega, spectrum) *
+        directionSpectrum(kAngle, omega, spectrum) *
+        shortWavesFade(kLength, spectrum);
+
+    return max(2.0 * energy * abs(dOmegadk) / max(kLength, 1.0e-5) * deltaK * deltaK, 0.0);
+}
+
+void main()
+{
+    uvec3 gid = gl_GlobalInvocationID.xyz;
+    uint resolution = simulation.dispatchParams.x;
+    uint cascadeCount = simulation.dispatchParams.y;
+    uint cascadeIndex = gid.z;
+    if (gid.x >= resolution || gid.y >= resolution || cascadeIndex >= cascadeCount)
+    {
+        return;
+    }
+
+    float globalAmplitude = max(simulation.timeAndGlobal.y, 0.0);
+    float worldSize = max(cascadeValue(simulation.cascadeWorldSizesA, simulation.cascadeWorldSizesB, cascadeIndex), 1.0);
+    float amplitude = max(cascadeValue(simulation.cascadeAmplitudesA, simulation.cascadeAmplitudesB, cascadeIndex), 0.0) * globalAmplitude;
+    float windDirX = cascadeValue(simulation.cascadeWindDirXA, simulation.cascadeWindDirXB, cascadeIndex);
+    float windDirZ = cascadeValue(simulation.cascadeWindDirZA, simulation.cascadeWindDirZB, cascadeIndex);
+    float windSpeed = max(cascadeValue(simulation.cascadeWindSpeedsA, simulation.cascadeWindSpeedsB, cascadeIndex), 0.0);
+    float fetch = max(cascadeValue(simulation.cascadeFetchesA, simulation.cascadeFetchesB, cascadeIndex), 1.0);
+    float spreadBlend = clamp(cascadeValue(simulation.cascadeSpreadBlendA, simulation.cascadeSpreadBlendB, cascadeIndex), 0.0, 1.0);
+    float swell = clamp(cascadeValue(simulation.cascadeSwellA, simulation.cascadeSwellB, cascadeIndex), 0.01, 1.0);
+    float peakEnhancement = max(cascadeValue(simulation.cascadePeakEnhancementA, simulation.cascadePeakEnhancementB, cascadeIndex), 1.0);
+    float shortWaveFade = max(cascadeValue(simulation.cascadeShortWavesFadeA, simulation.cascadeShortWavesFadeB, cascadeIndex), 0.0);
+
+    vec2 windDir = normalize(vec2(windDirX, windDirZ) + vec2(1.0e-5, 0.0));
+    float windAngle = atan(windDir.y, windDir.x);
+    float deltaK = kTau / worldSize;
+    vec2 centeredIndex = vec2(gid.xy) - vec2(float(resolution) * 0.5);
+    vec2 k = centeredIndex * deltaK;
+    vec2 negK = -k;
+
+    float omega = dispersion(length(k));
+    float mirrorOmega = dispersion(length(negK));
+    float dOmegadk = dispersionDerivative(length(k));
+    float mirrorDerivative = dispersionDerivative(length(negK));
+
+    SpectrumParams spectrum = buildSpectrum(
+        amplitude,
+        windAngle,
+        windSpeed,
+        fetch,
+        spreadBlend,
+        swell,
+        peakEnhancement,
+        shortWaveFade);
+
+    float spectrumEnergy = initializeSpectrum(k, omega, dOmegadk, deltaK, spectrum);
+    float mirrorEnergy = initializeSpectrum(negK, mirrorOmega, mirrorDerivative, deltaK, spectrum);
+
+    uvec2 mirrorGid = uvec2(
+        (resolution - gid.x) & (resolution - 1u),
+        (resolution - gid.y) & (resolution - 1u));
+
+    vec2 h0 = gaussianPair(uvec3(gid.xy, cascadeIndex)) * sqrt(max(spectrumEnergy, 0.0));
+    vec2 h0Minus = gaussianPair(uvec3(mirrorGid, cascadeIndex)) * sqrt(max(mirrorEnergy, 0.0));
+
+    initialSpectrumBuffer.initialSpectrumData[spectrumIndex(resolution, cascadeIndex, gid.xy)] = vec4(h0, h0Minus);
+}

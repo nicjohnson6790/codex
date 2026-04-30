@@ -1,10 +1,19 @@
 # SDL3 GPU + ImGui Terrain Sandbox
 
-This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, and a quadtree terrain renderer.
+This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, and shared-cascade FFT water.
 
 ## Overview
 
 The app renders into an offscreen viewport that is shown inside an ImGui layout. Terrain is managed as quadtree patches, with heightmaps cached in an LRU and rendered through a reusable indexed patch mesh. Heightmaps are generated on the GPU with a compute shader, and per-slice min/max extents are reduced on the GPU and read back asynchronously for culling, subdivision, and debug bounds.
+
+Water follows the same broad ownership split as terrain, but stays globally simulated:
+
+- `WorldGridQuadtree` decides which leaves are visible
+- `WorldGridQuadtreeWaterManager` decides which of those leaves should draw water
+- `QuadtreeWaterMeshRenderer` owns the reusable water mesh, FFT compute resources, and water draw path
+- `SDLRenderer` orchestrates the terrain and water compute/render order each frame
+
+The current water path uses four shared FFT cascades at `512 x 512`, with a single reusable `129 x 129` water mesh instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders.
 
 Core pieces:
 
@@ -12,6 +21,8 @@ Core pieces:
 - `TriangleRenderer`: simple instanced triangle rendering
 - `LineRenderer`: immediate-style debug line rendering
 - `QuadtreeMeshRenderer`: terrain draw path, compute heightmap generation, and async extents readback
+- `WorldGridQuadtreeWaterManager`: CPU-side water leaf selection and staging
+- `QuadtreeWaterMeshRenderer`: water draw path, FFT compute passes, and shared displacement/slope maps
 - `SkyboxRenderer`: fullscreen skybox pass using a cubemap and inverse view-projection ray reconstruction
 - `WorldGridQuadtree`: quadtree update, draw selection, subdivision/collapse, and debug draw emission
 - `WorldGridQuadtreeHeightmapManager`: heightmap residency, LRU replacement, and compute dispatch queueing
@@ -21,7 +32,7 @@ Core pieces:
 
 ## Current Terrain Pipeline
 
-Each frame, terrain work is split into three phases:
+Each frame, terrain and water work are split into a few clear phases:
 
 1. `beginHeightmapUpdate`
    Completed GPU extents readbacks are collected and folded back into the heightmap manager and any live quadtree nodes.
@@ -29,14 +40,20 @@ Each frame, terrain work is split into three phases:
    The quadtree updates from cached residency/extents state, decides subdivision/collapse, and marks nodes for drawing.
 3. `endHeightmapUpdate`
    Queued leaf requests are pushed from the heightmap manager into the compute generation path.
+4. `emitWaterDraws`
+   Visible quadtree leaves are offered to the water manager, which filters out dry leaves, including leaves whose terrain min height is more than a configurable cutoff above the water level.
 
 The renderer then:
 
 1. uploads draw-instance data
-2. initializes per-slice extents sentinels
-3. dispatches compute jobs for queued terrain slices
-4. queues an async extents download
-5. renders the terrain, triangles, and debug lines into the offscreen viewport
+2. dispatches compute jobs for queued terrain slices
+3. dispatches water simulation:
+   - optional one-time spectrum initialization when water settings change
+   - per-frame spectrum evolution from cached `h0`
+   - shared-memory FFT passes over SSBO working buffers
+   - displacement/slope map assembly into texture arrays
+4. queues an async terrain extents download
+5. renders terrain, water, triangles, and debug lines into the offscreen viewport
 6. renders the skybox as a fullscreen quad using the cubemap and the current time-of-day rotation
 7. renders ImGui
 
@@ -50,6 +67,10 @@ The renderer then:
 - Quadtree terrain rendering with runtime residency and subdivision
 - `259 x 259` heightmap slices with halo samples and a reusable terrain patch mesh
 - GPU compute terrain generation with async GPU extents readback
+- Shared-cascade FFT water with one reusable instanced water mesh
+- Four `512 x 512` water cascades sampled in world space across all visible water leaves
+- SSBO-backed FFT working set with shared-memory butterfly passes
+- Precomputed static water spectrum initialization, rebuilt only when water settings change
 - Skybox cubemap rendering from `resources/skybox`
 - Time-of-day controls that rotate both the sun and skybox around a shared orbit axis
 - Runtime terrain tuning:
@@ -66,6 +87,7 @@ The renderer then:
 - Gouraud terrain shading with a tunable global sun light
 - Automatic day/night progression with configurable day length and time factor
 - Built-in frame graph and CPU flame graph
+- Water tuning UI for level, amplitude, cutoffs, cascade parameters, and terrain-height water culling
 
 ## Project Layout
 
@@ -73,9 +95,11 @@ The renderer then:
 - `src/AppPanels.*`: UI layout and editor panels
 - `src/SDLRenderer.*`: SDL GPU setup and frame submission
 - `src/QuadtreeMeshRenderer.*`: terrain draw path and compute integration
+- `src/QuadtreeWaterMeshRenderer.*`: water draw path and FFT compute integration
 - `src/SkyboxRenderer.*`: cubemap loading and fullscreen skybox rendering
 - `src/WorldGridQuadtree.*`: quadtree state and traversal
 - `src/WorldGridQuadtreeHeightmapManager.*`: heightmap LRU and compute queue management
+- `src/WorldGridQuadtreeWaterManager.*`: water draw filtering and leaf staging
 - `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug box rendering
 - `src/HeightmapNoiseGenerator.*`: CPU reference terrain sampling and shared settings
 - `src/TriangleRenderer.*`: triangle rendering
@@ -94,6 +118,11 @@ The renderer then:
 - `shaders/quadtree_mesh.*`: terrain graphics shaders
 - `shaders/skybox.*`: skybox fullscreen shaders
 - `shaders/heightmap_generate.comp`: terrain compute shader
+- `shaders/water_mesh.*`: water graphics shaders
+- `shaders/water_initialize_spectrum.comp`: one-time static water spectrum initialization
+- `shaders/water_spectrum_update.comp`: per-frame spectrum evolution from cached initial spectrum
+- `shaders/water_fft_stage.comp`: shared-memory 1D FFT pass over water working buffers
+- `shaders/water_build_maps.comp`: displacement/slope texture assembly for the water draw path
 
 ## Dependencies
 
@@ -161,5 +190,7 @@ Startup flags:
 - World positions use large horizontal grid cells plus local coordinates for stable camera-relative rendering.
 - Terrain extents are produced on the GPU and read back asynchronously, so newly generated slices may briefly fall back to conservative bounds until their readback completes.
 - The quadtree processes all allocated nodes during update; draw selection is separate from subdivision/collapse decisions.
+- Water is sampled globally by world position; visible quadtree leaves become draw instances and do not own unique simulation state.
+- Water visibility currently uses both expanded quadtree bounds and a terrain-height gate, so leaves that are clearly dry can skip water entirely while still allowing low terrain under the water plane to remain visible.
 - The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction so it can later grow into atmospheric rendering.
 - Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.

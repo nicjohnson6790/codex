@@ -100,6 +100,15 @@ private:
         std::uint32_t instanceCount = 0;
     };
 
+    struct WorkingBufferResources
+    {
+        SDL_GPUBuffer* initialSpectrum = nullptr;
+        SDL_GPUBuffer* displacementSpectrumPing = nullptr;
+        SDL_GPUBuffer* displacementSpectrumPong = nullptr;
+        SDL_GPUBuffer* slopeSpectrumPing = nullptr;
+        SDL_GPUBuffer* slopeSpectrumPong = nullptr;
+    };
+
     struct WaterSimulationUniforms
     {
         glm::uvec4 dispatchParams{ 0u };
@@ -114,8 +123,19 @@ private:
         glm::vec4 cascadeWindDirZB{ 0.0f };
         glm::vec4 cascadeWindSpeedsA{ 0.0f };
         glm::vec4 cascadeWindSpeedsB{ 0.0f };
+        glm::vec4 cascadeFetchesA{ 0.0f };
+        glm::vec4 cascadeFetchesB{ 0.0f };
+        glm::vec4 cascadeSpreadBlendA{ 0.0f };
+        glm::vec4 cascadeSpreadBlendB{ 0.0f };
+        glm::vec4 cascadeSwellA{ 0.0f };
+        glm::vec4 cascadeSwellB{ 0.0f };
+        glm::vec4 cascadePeakEnhancementA{ 0.0f };
+        glm::vec4 cascadePeakEnhancementB{ 0.0f };
+        glm::vec4 cascadeShortWavesFadeA{ 0.0f };
+        glm::vec4 cascadeShortWavesFadeB{ 0.0f };
         glm::vec4 cascadeChoppinessA{ 0.0f };
         glm::vec4 cascadeChoppinessB{ 0.0f };
+        glm::vec4 simulationParams{ 0.0f };
     };
 
     static_assert(sizeof(InstanceData) % 16 == 0);
@@ -131,6 +151,8 @@ private:
     void destroyMesh();
     void createInstanceBuffer();
     void destroyInstanceBuffer();
+    void createWorkingBuffers();
+    void destroyWorkingBuffers();
     void createWaterTextures();
     void destroyWaterTextures();
     void createWaterSampler();
@@ -145,21 +167,21 @@ private:
         std::uint32_t stageIndex,
         std::uint32_t stageAxis) const;
     void dispatchSpectrumUpdate(SDL_GPUCommandBuffer* commandBuffer, const WaterSimulationUniforms& uniforms);
+    void dispatchInitializeSpectrum(SDL_GPUCommandBuffer* commandBuffer, const WaterSimulationUniforms& uniforms);
     void dispatchFftStages(SDL_GPUCommandBuffer* commandBuffer, float timeSeconds);
     void dispatchBuildMaps(SDL_GPUCommandBuffer* commandBuffer, const WaterSimulationUniforms& uniforms);
 
     SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
+    SDL_GPUComputePipeline* m_initializeSpectrumPipeline = nullptr;
     SDL_GPUComputePipeline* m_spectrumUpdatePipeline = nullptr;
     SDL_GPUComputePipeline* m_fftStagePipeline = nullptr;
     SDL_GPUComputePipeline* m_buildMapsPipeline = nullptr;
     MeshResources m_mesh{};
     InstanceResources m_instances{};
-    SDL_GPUTexture* m_spectrumPing = nullptr;
-    SDL_GPUTexture* m_spectrumPong = nullptr;
-    SDL_GPUTexture* m_slopeSpectrumPing = nullptr;
-    SDL_GPUTexture* m_slopeSpectrumPong = nullptr;
+    WorkingBufferResources m_workingBuffers{};
     SDL_GPUTexture* m_displacementTexture = nullptr;
     SDL_GPUTexture* m_slopeTexture = nullptr;
     SDL_GPUSampler* m_waterSampler = nullptr;
     WaterSettings m_settings{};
+    bool m_initialSpectrumDirty = true;
 };

@@ -443,6 +443,15 @@ void AppPanels::drawWaterTab(Context& context)
     ImGui::InputFloat("Water level", &settings.waterLevel, 1.0f, 10.0f, "%.2f");
     ImGui::InputFloat("Global amplitude", &settings.globalAmplitude, 0.05f, 0.25f, "%.2f");
     ImGui::InputFloat("Global choppiness", &settings.globalChoppiness, 0.05f, 0.25f, "%.2f");
+    ImGui::InputFloat("Depth (m)", &settings.depthMeters, 1.0f, 10.0f, "%.2f");
+    ImGui::InputFloat("Low cutoff", &settings.lowCutoff, 0.0001f, 0.001f, "%.4f");
+    ImGui::InputFloat("High cutoff", &settings.highCutoff, 0.1f, 1.0f, "%.2f");
+    ImGui::InputFloat(
+        "Dry terrain cutoff above water (m)",
+        &settings.maxTerrainMinHeightAboveWaterToDraw,
+        1.0f,
+        10.0f,
+        "%.2f");
 
     int cascadeCount = static_cast<int>(settings.cascadeCount);
     ImGui::SliderInt("Cascade count", &cascadeCount, 0, static_cast<int>(AppConfig::Water::kMaxCascadeCount));
@@ -459,6 +468,11 @@ void AppPanels::drawWaterTab(Context& context)
             ImGui::InputFloat("Amplitude", &cascade.amplitude, 0.05f, 0.25f, "%.2f");
             ImGui::InputFloat("Wind speed", &cascade.windSpeed, 0.5f, 2.0f, "%.2f");
             ImGui::InputFloat("Wind direction", &cascade.windDirectionRadians, 0.05f, 0.2f, "%.2f");
+            ImGui::InputFloat("Fetch (m)", &cascade.fetchMeters, 100.0f, 1000.0f, "%.1f");
+            ImGui::SliderFloat("Spread blend", &cascade.spreadBlend, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Swell", &cascade.swell, 0.01f, 1.0f, "%.2f");
+            ImGui::InputFloat("Peak enhancement", &cascade.peakEnhancement, 0.1f, 0.5f, "%.2f");
+            ImGui::InputFloat("Short waves fade", &cascade.shortWavesFade, 0.0001f, 0.0005f, "%.4f");
             ImGui::InputFloat("Choppiness", &cascade.choppiness, 0.05f, 0.25f, "%.2f");
             int updateModulo = static_cast<int>(cascade.updateModulo);
             ImGui::SliderInt("Update modulo", &updateModulo, 1, 8);

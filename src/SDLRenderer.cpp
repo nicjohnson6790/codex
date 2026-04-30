@@ -160,7 +160,10 @@ void SDLRenderer::renderFrame(
         SDL_EndGPUCopyPass(copyPass);
     }
 
-    quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
+    {
+        HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::DispatchTerrainCompute", ProfileScopeGroup::Renderer);
+        quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
+    }
     if constexpr (AppConfig::Water::kEnabled)
     {
         HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::DispatchWaterCompute", ProfileScopeGroup::Renderer);
@@ -228,14 +231,20 @@ void SDLRenderer::renderFrame(
         };
         SDL_SetGPUScissor(renderPass, &scissor);
 
-        quadtreeMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem);
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderTerrain", ProfileScopeGroup::Renderer);
+            quadtreeMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem);
+        }
         if constexpr (AppConfig::Water::kEnabled)
         {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderWater", ProfileScopeGroup::Renderer);
             waterMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem, timeSeconds);
         }
-        triangleRenderer.render(renderPass, commandBuffer, viewProjection);
-        lineRenderer.render(renderPass, commandBuffer, viewProjection);
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderDebugPrimitives", ProfileScopeGroup::Renderer);
+            triangleRenderer.render(renderPass, commandBuffer, viewProjection);
+            lineRenderer.render(renderPass, commandBuffer, viewProjection);
+        }
         SDL_EndGPURenderPass(renderPass);
 
         SDL_GPUColorTargetInfo skyColorTargetInfo{};
@@ -259,13 +268,16 @@ void SDLRenderer::renderFrame(
         SDL_SetGPUViewport(skyRenderPass, &skyViewport);
         SDL_SetGPUScissor(skyRenderPass, &scissor);
 
-        skyboxRenderer.render(
-            skyRenderPass,
-            commandBuffer,
-            glm::inverse(viewProjection),
-            m_viewportDepthTexture,
-            static_cast<float>(m_activeCameraPosition.localPosition().y),
-            lightingSystem);
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderSkybox", ProfileScopeGroup::Renderer);
+            skyboxRenderer.render(
+                skyRenderPass,
+                commandBuffer,
+                glm::inverse(viewProjection),
+                m_viewportDepthTexture,
+                static_cast<float>(m_activeCameraPosition.localPosition().y),
+                lightingSystem);
+        }
         SDL_EndGPURenderPass(skyRenderPass);
     }
 
@@ -313,6 +325,7 @@ void SDLRenderer::renderFrame(
         SDL_EndGPURenderPass(renderPass);
     }
 
+    HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::SubmitFrame", ProfileScopeGroup::Renderer);
     SDL_GPUFence* submittedFence = SDL_SubmitGPUCommandBufferAndAcquireFence(commandBuffer);
     quadtreeMeshRenderer.attachSubmittedFence(submittedFence);
     if (submittedFence == nullptr)

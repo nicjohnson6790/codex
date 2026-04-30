@@ -2,8 +2,15 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set=0, binding=0) uniform sampler2DArray displacementSpectrumTexture;
-layout(set=0, binding=1) uniform sampler2DArray slopeSpectrumTexture;
+layout(set=0, binding=0, std430) readonly buffer DisplacementSpectrumBuffer
+{
+    vec4 displacementSpectrumData[];
+} displacementSpectrumBuffer;
+
+layout(set=0, binding=1, std430) readonly buffer SlopeSpectrumBuffer
+{
+    vec4 slopeSpectrumData[];
+} slopeSpectrumBuffer;
 layout(rgba16f, set=1, binding=0) uniform image2D displacementTexture;
 layout(rgba16f, set=1, binding=1) uniform image2D slopeTexture;
 
@@ -21,26 +28,34 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeWindDirZB;
     vec4 cascadeWindSpeedsA;
     vec4 cascadeWindSpeedsB;
+    vec4 cascadeFetchesA;
+    vec4 cascadeFetchesB;
+    vec4 cascadeSpreadBlendA;
+    vec4 cascadeSpreadBlendB;
+    vec4 cascadeSwellA;
+    vec4 cascadeSwellB;
+    vec4 cascadePeakEnhancementA;
+    vec4 cascadePeakEnhancementB;
+    vec4 cascadeShortWavesFadeA;
+    vec4 cascadeShortWavesFadeB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
+    vec4 simulationParams;
 } simulation;
+
+const uint kTileSize = 16u;
+const uint kTileWithBorder = kTileSize + 2u;
+
+shared float heightTile[kTileWithBorder][kTileWithBorder];
 
 float cascadeValue(vec4 a, vec4 b, uint cascadeIndex)
 {
     return cascadeIndex < 4u ? a[cascadeIndex] : b[cascadeIndex - 4u];
 }
 
-uint bitReverse8(uint value)
+uint spectrumIndex(uint resolution, uint cascadeIndex, uvec2 coord)
 {
-    value = ((value & 0x55u) << 1u) | ((value >> 1u) & 0x55u);
-    value = ((value & 0x33u) << 2u) | ((value >> 2u) & 0x33u);
-    value = ((value & 0x0Fu) << 4u) | ((value >> 4u) & 0x0Fu);
-    return value;
-}
-
-ivec3 remappedCoord(uvec2 coord, uint cascadeIndex)
-{
-    return ivec3(int(bitReverse8(coord.x)), int(bitReverse8(coord.y)), int(cascadeIndex));
+    return ((cascadeIndex * resolution + coord.y) * resolution) + coord.x;
 }
 
 vec4 permuteSpectrum(vec4 value, ivec2 coord)
@@ -49,9 +64,17 @@ vec4 permuteSpectrum(vec4 value, ivec2 coord)
     return value * signFlip;
 }
 
+float loadPermutedHeight(uint resolution, uint cascadeIndex, uvec2 coord)
+{
+    return permuteSpectrum(
+        displacementSpectrumBuffer.displacementSpectrumData[spectrumIndex(resolution, cascadeIndex, coord)],
+        ivec2(coord)).b;
+}
+
 void main()
 {
     uvec2 gid = gl_GlobalInvocationID.xy;
+    uvec2 lid = gl_LocalInvocationID.xy;
     uint resolution = simulation.dispatchParams.x;
     uint cascadeIndex = simulation.dispatchParams.y;
     if (gid.x >= resolution || gid.y >= resolution)
@@ -60,26 +83,85 @@ void main()
     }
 
     ivec2 centerCoord = ivec2(gid);
-    ivec3 displacementCoord = remappedCoord(gid, cascadeIndex);
-    ivec3 slopeCoord = remappedCoord(gid, cascadeIndex);
+    uvec2 rightIndex = uvec2((gid.x + 1u) % resolution, gid.y);
+    uvec2 leftIndex = uvec2((gid.x + resolution - 1u) % resolution, gid.y);
+    uvec2 upIndex = uvec2(gid.x, (gid.y + 1u) % resolution);
+    uvec2 downIndex = uvec2(gid.x, (gid.y + resolution - 1u) % resolution);
+
     float choppiness = max(cascadeValue(simulation.cascadeChoppinessA, simulation.cascadeChoppinessB, cascadeIndex), 0.0) *
         max(simulation.timeAndGlobal.z, 0.0);
-    float normalization = 1.0 / float(resolution * resolution);
+    vec4 displacementSpectrum = permuteSpectrum(
+        displacementSpectrumBuffer.displacementSpectrumData[spectrumIndex(resolution, cascadeIndex, gid)],
+        centerCoord);
+    vec4 slopeSpectrum = permuteSpectrum(
+        slopeSpectrumBuffer.slopeSpectrumData[spectrumIndex(resolution, cascadeIndex, gid)],
+        centerCoord);
 
-    vec4 displacementSpectrum = permuteSpectrum(texelFetch(displacementSpectrumTexture, displacementCoord, 0), centerCoord) * normalization;
-    vec4 slopeSpectrum = permuteSpectrum(texelFetch(slopeSpectrumTexture, slopeCoord, 0), centerCoord) * normalization;
+    heightTile[lid.y + 1u][lid.x + 1u] = displacementSpectrum.b;
+
+    if (lid.x == 0u)
+    {
+        heightTile[lid.y + 1u][0u] = loadPermutedHeight(resolution, cascadeIndex, leftIndex);
+    }
+    if (lid.x == kTileSize - 1u)
+    {
+        heightTile[lid.y + 1u][kTileWithBorder - 1u] = loadPermutedHeight(resolution, cascadeIndex, rightIndex);
+    }
+    if (lid.y == 0u)
+    {
+        heightTile[0u][lid.x + 1u] = loadPermutedHeight(resolution, cascadeIndex, downIndex);
+    }
+    if (lid.y == kTileSize - 1u)
+    {
+        heightTile[kTileWithBorder - 1u][lid.x + 1u] = loadPermutedHeight(resolution, cascadeIndex, upIndex);
+    }
+    if (lid.x == 0u && lid.y == 0u)
+    {
+        heightTile[0u][0u] = loadPermutedHeight(
+            resolution,
+            cascadeIndex,
+            uvec2(leftIndex.x, downIndex.y));
+    }
+    if (lid.x == kTileSize - 1u && lid.y == 0u)
+    {
+        heightTile[0u][kTileWithBorder - 1u] = loadPermutedHeight(
+            resolution,
+            cascadeIndex,
+            uvec2(rightIndex.x, downIndex.y));
+    }
+    if (lid.x == 0u && lid.y == kTileSize - 1u)
+    {
+        heightTile[kTileWithBorder - 1u][0u] = loadPermutedHeight(
+            resolution,
+            cascadeIndex,
+            uvec2(leftIndex.x, upIndex.y));
+    }
+    if (lid.x == kTileSize - 1u && lid.y == kTileSize - 1u)
+    {
+        heightTile[kTileWithBorder - 1u][kTileWithBorder - 1u] = loadPermutedHeight(
+            resolution,
+            cascadeIndex,
+            uvec2(rightIndex.x, upIndex.y));
+    }
+
+    barrier();
 
     float lambda = choppiness;
-    vec2 displacementXZ = displacementSpectrum.rg;
-    vec2 heightAndCross = displacementSpectrum.ba;
-    vec2 slopeXZ = slopeSpectrum.rg;
-    vec2 curvatureXZ = slopeSpectrum.ba;
+    float worldSize = max(cascadeValue(simulation.cascadeWorldSizesA, simulation.cascadeWorldSizesB, cascadeIndex), 1.0);
+    float texelWorldSize = worldSize / float(resolution);
+    float heightCenter = heightTile[lid.y + 1u][lid.x + 1u];
+    float heightRight = heightTile[lid.y + 1u][lid.x + 2u];
+    float heightLeft = heightTile[lid.y + 1u][lid.x];
+    float heightUp = heightTile[lid.y + 2u][lid.x + 1u];
+    float heightDown = heightTile[lid.y][lid.x + 1u];
+    float dHeightDx = (heightRight - heightLeft) / max(texelWorldSize * 2.0, 0.001);
+    float dHeightDz = (heightUp - heightDown) / max(texelWorldSize * 2.0, 0.001);
     vec3 displacement = vec3(
-        lambda * displacementXZ.x,
-        heightAndCross.x,
-        lambda * displacementXZ.y);
+        lambda * displacementSpectrum.x,
+        heightCenter,
+        lambda * slopeSpectrum.x);
 
-    vec2 slope = slopeXZ / (1.0 + abs(curvatureXZ * lambda));
+    vec2 slope = vec2(dHeightDx, dHeightDz);
 
     imageStore(displacementTexture, centerCoord, vec4(displacement, 1.0));
     imageStore(slopeTexture, centerCoord, vec4(slope, 0.0, 1.0));

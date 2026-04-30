@@ -25,13 +25,19 @@ public:
         const WorldGridQuadtreeLeafId& leafId,
         const Position& leafOrigin,
         double leafSizeMeters,
+        bool terrainExtentsKnown,
+        float terrainMinHeight,
         std::uint8_t quadtreeLodHint);
 
     void flushToRenderer(QuadtreeWaterMeshRenderer& renderer) const;
     [[nodiscard]] std::uint32_t queuedCount() const;
 
 private:
-    [[nodiscard]] bool shouldDrawWaterLeaf(const Position& leafOrigin, double leafSizeMeters) const;
+    [[nodiscard]] bool shouldDrawWaterLeaf(
+        const Position& leafOrigin,
+        double leafSizeMeters,
+        bool terrainExtentsKnown,
+        float terrainMinHeight) const;
     [[nodiscard]] double estimateDistanceToLeaf(const Position& leafOrigin, double leafSizeMeters) const;
     [[nodiscard]] std::uint32_t computeBandMask(double leafSizeMeters, double distanceMeters) const;
 

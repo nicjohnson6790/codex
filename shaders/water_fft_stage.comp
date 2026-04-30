@@ -1,9 +1,16 @@
 #version 450
 
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-layout(set=0, binding=0) uniform sampler2DArray inputSpectrumTexture;
-layout(rgba16f, set=1, binding=0) uniform image2D outputSpectrumTexture;
+layout(set=0, binding=0, std430) readonly buffer InputSpectrumBuffer
+{
+    vec4 inputSpectrumData[];
+} inputSpectrumBuffer;
+
+layout(set=1, binding=0, std430) buffer OutputSpectrumBuffer
+{
+    vec4 outputSpectrumData[];
+} outputSpectrumBuffer;
 
 layout(set=2, binding=0) uniform WaterSimulationUniforms
 {
@@ -19,11 +26,32 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeWindDirZB;
     vec4 cascadeWindSpeedsA;
     vec4 cascadeWindSpeedsB;
+    vec4 cascadeFetchesA;
+    vec4 cascadeFetchesB;
+    vec4 cascadeSpreadBlendA;
+    vec4 cascadeSpreadBlendB;
+    vec4 cascadeSwellA;
+    vec4 cascadeSwellB;
+    vec4 cascadePeakEnhancementA;
+    vec4 cascadePeakEnhancementB;
+    vec4 cascadeShortWavesFadeA;
+    vec4 cascadeShortWavesFadeB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
+    vec4 simulationParams;
 } simulation;
 
 const float kTau = 6.28318530718;
+const uint kFftResolution = 512u;
+const uint kHalfResolution = kFftResolution / 2u;
+
+shared vec4 fftGroupBuffer0[kFftResolution];
+shared vec4 fftGroupBuffer1[kFftResolution];
+
+uint spectrumIndex(uint resolution, uint cascadeIndex, uvec2 coord)
+{
+    return ((cascadeIndex * resolution + coord.y) * resolution) + coord.x;
+}
 
 vec2 complexMultiply(vec2 a, vec2 b)
 {
@@ -32,52 +60,96 @@ vec2 complexMultiply(vec2 a, vec2 b)
         a.x * b.y + a.y * b.x);
 }
 
+void butterflyValues(uint index, uint step, out uvec2 indices, out vec2 twiddle)
+{
+    uint b = kFftResolution >> (step + 1u);
+    uint w = b * (index / b);
+    uint i = (w + index) % kFftResolution;
+    float angle = kTau * float(w) / float(kFftResolution);
+    twiddle = vec2(cos(angle), sin(angle));
+    indices = uvec2(i, i + b);
+}
+
+vec4 fftValue(uint logicalIndex, bool useBuffer1, uint step)
+{
+    uvec2 indices;
+    vec2 twiddle;
+    butterflyValues(logicalIndex, step, indices, twiddle);
+
+    vec4 a = useBuffer1 ? fftGroupBuffer1[indices.x] : fftGroupBuffer0[indices.x];
+    vec4 b = useBuffer1 ? fftGroupBuffer1[indices.y] : fftGroupBuffer0[indices.y];
+    vec2 bHeight = complexMultiply(twiddle, b.xy);
+    vec2 bChop = complexMultiply(twiddle, b.zw);
+    return a + vec4(bHeight, bChop);
+}
+
+void loadInitialValues(uint cascadeIndex, uint axis, uint lineIndex, uint localIndex)
+{
+    uint index0 = localIndex;
+    uint index1 = localIndex + kHalfResolution;
+
+    uvec2 coord0 = axis == 0u ? uvec2(index0, lineIndex) : uvec2(lineIndex, index0);
+    uvec2 coord1 = axis == 0u ? uvec2(index1, lineIndex) : uvec2(lineIndex, index1);
+
+    fftGroupBuffer0[index0] = inputSpectrumBuffer.inputSpectrumData[spectrumIndex(kFftResolution, cascadeIndex, coord0)];
+    fftGroupBuffer0[index1] = inputSpectrumBuffer.inputSpectrumData[spectrumIndex(kFftResolution, cascadeIndex, coord1)];
+}
+
+void storeFinalValues(uint cascadeIndex, uint axis, uint lineIndex, uint localIndex, bool finalInBuffer1)
+{
+    uint index0 = localIndex;
+    uint index1 = localIndex + kHalfResolution;
+
+    uvec2 coord0 = axis == 0u ? uvec2(index0, lineIndex) : uvec2(lineIndex, index0);
+    uvec2 coord1 = axis == 0u ? uvec2(index1, lineIndex) : uvec2(lineIndex, index1);
+
+    vec4 value0 = finalInBuffer1 ? fftGroupBuffer1[index0] : fftGroupBuffer0[index0];
+    vec4 value1 = finalInBuffer1 ? fftGroupBuffer1[index1] : fftGroupBuffer0[index1];
+
+    outputSpectrumBuffer.outputSpectrumData[spectrumIndex(kFftResolution, cascadeIndex, coord0)] = value0;
+    outputSpectrumBuffer.outputSpectrumData[spectrumIndex(kFftResolution, cascadeIndex, coord1)] = value1;
+}
+
 void main()
 {
-    uvec2 gid = gl_GlobalInvocationID.xy;
     uint resolution = simulation.dispatchParams.x;
-    uint cascadeIndex = simulation.dispatchParams.y;
-    uint stageIndex = simulation.dispatchParams.z;
+    uint cascadeCount = simulation.dispatchParams.y;
+    uint cascadeIndex = gl_WorkGroupID.z;
     uint axis = simulation.dispatchParams.w;
-    if (gid.x >= resolution || gid.y >= resolution)
+    uint lineIndex = gl_WorkGroupID.y;
+    uint localIndex = gl_LocalInvocationID.x;
+
+    if (resolution != kFftResolution ||
+        cascadeIndex >= cascadeCount ||
+        lineIndex >= resolution ||
+        localIndex >= kHalfResolution)
     {
         return;
     }
 
-    uint p = 1u << stageIndex;
-    uint blockSize = 2u * p;
-    uint outputIndex = axis == 0u ? gid.x : gid.y;
-    uint lineIndex = axis == 0u ? gid.y : gid.x;
-    uint blockIndex = outputIndex / blockSize;
-    uint blockOffset = outputIndex % blockSize;
-    bool upperHalf = blockOffset >= p;
-    uint j = blockOffset % p;
-    uint inputBase = blockIndex * blockSize + j;
+    loadInitialValues(cascadeIndex, axis, lineIndex, localIndex);
+    barrier();
 
-    ivec3 coordA;
-    ivec3 coordB;
-    ivec2 outCoord = ivec2(gid);
-    if (axis == 0u)
+    bool writeToBuffer1 = true;
+    for (uint step = 0u; step < 9u; ++step)
     {
-        coordA = ivec3(int(inputBase), int(lineIndex), int(cascadeIndex));
-        coordB = ivec3(int(inputBase + p), int(lineIndex), int(cascadeIndex));
+        fftGroupBuffer1[localIndex] = fftValue(localIndex, false, step);
+        fftGroupBuffer1[localIndex + kHalfResolution] = fftValue(localIndex + kHalfResolution, false, step);
+        barrier();
+
+        if (step < 8u)
+        {
+            fftGroupBuffer0[localIndex] = fftValue(localIndex, true, step + 1u);
+            fftGroupBuffer0[localIndex + kHalfResolution] = fftValue(localIndex + kHalfResolution, true, step + 1u);
+            barrier();
+            ++step;
+            writeToBuffer1 = false;
+        }
+        else
+        {
+            writeToBuffer1 = true;
+        }
     }
-    else
-    {
-        coordA = ivec3(int(lineIndex), int(inputBase), int(cascadeIndex));
-        coordB = ivec3(int(lineIndex), int(inputBase + p), int(cascadeIndex));
-    }
 
-    vec4 a = texelFetch(inputSpectrumTexture, coordA, 0);
-    vec4 b = texelFetch(inputSpectrumTexture, coordB, 0);
-
-    float angle = kTau * (float(j) / float(blockSize));
-    vec2 twiddle = vec2(cos(angle), sin(angle));
-    vec2 bHeight = complexMultiply(b.xy, twiddle);
-    vec2 bChop = complexMultiply(b.zw, twiddle);
-
-    vec2 outHeight = upperHalf ? (a.xy - bHeight) : (a.xy + bHeight);
-    vec2 outChop = upperHalf ? (a.zw - bChop) : (a.zw + bChop);
-
-    imageStore(outputSpectrumTexture, outCoord, vec4(outHeight, outChop));
+    storeFinalValues(cascadeIndex, axis, lineIndex, localIndex, writeToBuffer1);
 }

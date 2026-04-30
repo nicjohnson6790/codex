@@ -2,8 +2,20 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(rgba16f, set=1, binding=0) uniform image2D displacementSpectrumTexture;
-layout(rgba16f, set=1, binding=1) uniform image2D slopeSpectrumTexture;
+layout(set=0, binding=0, std430) readonly buffer InitialSpectrumBuffer
+{
+    vec4 initialSpectrumData[];
+} initialSpectrumBuffer;
+
+layout(set=1, binding=0, std430) buffer DisplacementSpectrumBuffer
+{
+    vec4 displacementSpectrumData[];
+} displacementSpectrumBuffer;
+
+layout(set=1, binding=1, std430) buffer SlopeSpectrumBuffer
+{
+    vec4 slopeSpectrumData[];
+} slopeSpectrumBuffer;
 
 layout(set=2, binding=0) uniform WaterSimulationUniforms
 {
@@ -19,44 +31,26 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeWindDirZB;
     vec4 cascadeWindSpeedsA;
     vec4 cascadeWindSpeedsB;
+    vec4 cascadeFetchesA;
+    vec4 cascadeFetchesB;
+    vec4 cascadeSpreadBlendA;
+    vec4 cascadeSpreadBlendB;
+    vec4 cascadeSwellA;
+    vec4 cascadeSwellB;
+    vec4 cascadePeakEnhancementA;
+    vec4 cascadePeakEnhancementB;
+    vec4 cascadeShortWavesFadeA;
+    vec4 cascadeShortWavesFadeB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
+    vec4 simulationParams;
 } simulation;
 
-const float kPi = 3.14159265359;
-const float kTau = 6.28318530718;
 const float kGravity = 9.81;
 
-float cascadeValue(vec4 a, vec4 b, uint cascadeIndex)
+uint spectrumIndex(uint resolution, uint cascadeIndex, uvec2 coord)
 {
-    return cascadeIndex < 4u ? a[cascadeIndex] : b[cascadeIndex - 4u];
-}
-
-uint hashUint(uvec3 v)
-{
-    uint h = v.x * 1664525u + 1013904223u;
-    h ^= v.y * 22695477u + 1u;
-    h ^= v.z * 1103515245u + 12345u;
-    h ^= h >> 16u;
-    h *= 2246822519u;
-    h ^= h >> 13u;
-    h *= 3266489917u;
-    h ^= h >> 16u;
-    return h;
-}
-
-float randomFloat(uvec3 seed)
-{
-    return float(hashUint(seed)) * (1.0 / 4294967295.0);
-}
-
-vec2 gaussianPair(uvec3 seed)
-{
-    float u1 = max(randomFloat(seed), 1.0e-6);
-    float u2 = randomFloat(seed ^ uvec3(0x9e3779b9u, 0x7f4a7c15u, 0x94d049bbu));
-    float radius = sqrt(-2.0 * log(u1));
-    float angle = kTau * u2;
-    return radius * vec2(cos(angle), sin(angle));
+    return ((cascadeIndex * resolution + coord.y) * resolution) + coord.x;
 }
 
 vec2 complexMultiply(vec2 a, vec2 b)
@@ -68,105 +62,50 @@ vec2 complexMultiply(vec2 a, vec2 b)
 
 float dispersion(float waveNumber)
 {
-    return sqrt(kGravity * waveNumber);
-}
-
-float phillipsSpectrum(vec2 k, vec2 windDir, float windSpeed, float amplitude)
-{
-    float kLength = length(k);
-    if (kLength < 1.0e-5)
-    {
-        return 0.0;
-    }
-
-    float k2 = kLength * kLength;
-    float k4 = k2 * k2;
-    float kDotWind = dot(normalize(k), windDir);
-    float L = max((windSpeed * windSpeed) / kGravity, 1.0);
-    float dampingLength = L * 0.001;
-    float directional = kDotWind * kDotWind;
-    float largeWaveDamp = exp(-1.0 / (k2 * L * L));
-    float smallWaveDamp = exp(-k2 * dampingLength * dampingLength);
-    return amplitude * directional * largeWaveDamp * smallWaveDamp / k4;
+    float depth = max(simulation.simulationParams.x, 0.01);
+    return sqrt(kGravity * waveNumber * tanh(min(waveNumber * depth, 20.0)));
 }
 
 void main()
 {
-    uvec2 gid = gl_GlobalInvocationID.xy;
+    uvec3 gid = gl_GlobalInvocationID.xyz;
     uint resolution = simulation.dispatchParams.x;
-    uint cascadeIndex = simulation.dispatchParams.y;
-    if (gid.x >= resolution || gid.y >= resolution)
+    uint cascadeCount = simulation.dispatchParams.y;
+    uint cascadeIndex = gid.z;
+    if (gid.x >= resolution || gid.y >= resolution || cascadeIndex >= cascadeCount)
     {
         return;
     }
 
     float timeSeconds = simulation.timeAndGlobal.x;
-    float globalAmplitude = max(simulation.timeAndGlobal.y, 0.0);
-    float worldSize = max(cascadeValue(simulation.cascadeWorldSizesA, simulation.cascadeWorldSizesB, cascadeIndex), 1.0);
-    float amplitude = max(cascadeValue(simulation.cascadeAmplitudesA, simulation.cascadeAmplitudesB, cascadeIndex), 0.0) * globalAmplitude;
-    float windDirX = cascadeValue(simulation.cascadeWindDirXA, simulation.cascadeWindDirXB, cascadeIndex);
-    float windDirZ = cascadeValue(simulation.cascadeWindDirZA, simulation.cascadeWindDirZB, cascadeIndex);
-    float windSpeed = max(cascadeValue(simulation.cascadeWindSpeedsA, simulation.cascadeWindSpeedsB, cascadeIndex), 0.0);
-    float choppiness = max(cascadeValue(simulation.cascadeChoppinessA, simulation.cascadeChoppinessB, cascadeIndex), 0.0);
+    float globalLambda = max(simulation.timeAndGlobal.z, 0.01);
+    float worldSize = max(
+        cascadeIndex < 4u ? simulation.cascadeWorldSizesA[cascadeIndex] : simulation.cascadeWorldSizesB[cascadeIndex - 4u],
+        1.0);
 
-    vec2 windDir = normalize(vec2(windDirX, windDirZ) + vec2(1.0e-5, 0.0));
-    vec2 centeredIndex = vec2(gid) - vec2(float(resolution) * 0.5);
-    vec2 k = centeredIndex * (kTau / worldSize);
-    vec2 negK = -k;
-    float waveNumber = length(k);
-    float spectrum = phillipsSpectrum(k, windDir, windSpeed, amplitude);
-    float mirrorSpectrum = phillipsSpectrum(negK, windDir, windSpeed, amplitude);
+    float deltaK = 6.28318530718 / worldSize;
+    vec2 centeredIndex = vec2(gid.xy) - vec2(float(resolution) * 0.5);
+    vec2 k = centeredIndex * deltaK;
 
-    uvec2 mirrorGid = uvec2(
-        (resolution - gid.x) & (resolution - 1u),
-        (resolution - gid.y) & (resolution - 1u));
+    vec4 initialSpectrum = initialSpectrumBuffer.initialSpectrumData[spectrumIndex(resolution, cascadeIndex, gid.xy)];
+    vec2 h0 = initialSpectrum.xy;
+    vec2 h0Minus = initialSpectrum.zw;
 
-    vec2 noiseHeight = gaussianPair(uvec3(gid, cascadeIndex));
-    vec2 noiseHeightMirror = gaussianPair(uvec3(mirrorGid, cascadeIndex));
-    float omega = dispersion(waveNumber);
+    float omega = dispersion(length(k));
     float phase = omega * timeSeconds;
     vec2 phaseForward = vec2(cos(phase), sin(phase));
     vec2 phaseBackward = vec2(cos(phase), -sin(phase));
-    float spectrumScale = sqrt(max(spectrum, 0.0) * 0.5) * (1.0 + (choppiness * 0.2));
-    float mirrorSpectrumScale = sqrt(max(mirrorSpectrum, 0.0) * 0.5) * (1.0 + (choppiness * 0.2));
-
-    vec2 h0 = noiseHeight * spectrumScale;
-    vec2 h0Minus = noiseHeightMirror * mirrorSpectrumScale;
-
     vec2 heightSpectrum =
         complexMultiply(h0, phaseForward) +
         complexMultiply(vec2(h0Minus.x, -h0Minus.y), phaseBackward);
 
-    float reciprocalWaveNumber = waveNumber < 1.0e-5 ? 1.0 : (1.0 / waveNumber);
+    float reciprocalWaveNumber = length(k) < 1.0e-5 ? 1.0 : (1.0 / length(k));
     vec2 ih = vec2(-heightSpectrum.y, heightSpectrum.x);
     vec2 displacementX = ih * k.x * reciprocalWaveNumber;
     vec2 displacementY = heightSpectrum;
     vec2 displacementZ = ih * k.y * reciprocalWaveNumber;
-    vec2 displacementXdx = -heightSpectrum * k.x * k.x * reciprocalWaveNumber;
-    vec2 displacementYdx = ih * k.x;
-    vec2 displacementZdx = -heightSpectrum * k.x * k.y * reciprocalWaveNumber;
-    vec2 displacementYdz = ih * k.y;
-    vec2 displacementZdz = -heightSpectrum * k.y * k.y * reciprocalWaveNumber;
 
-    vec2 packedDisplacementXZ = vec2(
-        displacementX.x - displacementZ.y,
-        displacementX.y + displacementZ.x);
-    vec2 packedHeightAndCross = vec2(
-        displacementY.x - displacementZdx.y,
-        displacementY.y + displacementZdx.x);
-    vec2 packedSlopeXZ = vec2(
-        displacementYdx.x - displacementYdz.y,
-        displacementYdx.y + displacementYdz.x);
-    vec2 packedCurvatureXZ = vec2(
-        displacementXdx.x - displacementZdz.y,
-        displacementXdx.y + displacementZdz.x);
-
-    imageStore(
-        displacementSpectrumTexture,
-        ivec2(gid),
-        vec4(packedDisplacementXZ, packedHeightAndCross));
-    imageStore(
-        slopeSpectrumTexture,
-        ivec2(gid),
-        vec4(packedSlopeXZ, packedCurvatureXZ));
+    uint index = spectrumIndex(resolution, cascadeIndex, gid.xy);
+    displacementSpectrumBuffer.displacementSpectrumData[index] = vec4(displacementX, displacementY);
+    slopeSpectrumBuffer.slopeSpectrumData[index] = vec4(displacementZ, 0.0, 0.0);
 }

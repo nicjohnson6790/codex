@@ -43,6 +43,8 @@ void WorldGridQuadtreeWaterManager::requestLeaf(
     const WorldGridQuadtreeLeafId& leafId,
     const Position& leafOrigin,
     double leafSizeMeters,
+    bool terrainExtentsKnown,
+    float terrainMinHeight,
     std::uint8_t quadtreeLodHint)
 {
     if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
@@ -50,7 +52,7 @@ void WorldGridQuadtreeWaterManager::requestLeaf(
         return;
     }
 
-    if (!shouldDrawWaterLeaf(leafOrigin, leafSizeMeters))
+    if (!shouldDrawWaterLeaf(leafOrigin, leafSizeMeters, terrainExtentsKnown, terrainMinHeight))
     {
         return;
     }
@@ -87,10 +89,26 @@ std::uint32_t WorldGridQuadtreeWaterManager::queuedCount() const
     return m_requestCount;
 }
 
-bool WorldGridQuadtreeWaterManager::shouldDrawWaterLeaf(const Position& leafOrigin, double leafSizeMeters) const
+bool WorldGridQuadtreeWaterManager::shouldDrawWaterLeaf(
+    const Position& leafOrigin,
+    double leafSizeMeters,
+    bool terrainExtentsKnown,
+    float terrainMinHeight) const
 {
     (void)leafOrigin;
-    return leafSizeMeters > 0.0;
+    if (leafSizeMeters <= 0.0)
+    {
+        return false;
+    }
+
+    if (!terrainExtentsKnown)
+    {
+        return true;
+    }
+
+    const float maxAllowedTerrainMinHeight =
+        m_settings.waterLevel + m_settings.maxTerrainMinHeightAboveWaterToDraw;
+    return terrainMinHeight <= maxAllowedTerrainMinHeight;
 }
 
 double WorldGridQuadtreeWaterManager::estimateDistanceToLeaf(const Position& leafOrigin, double leafSizeMeters) const
@@ -113,21 +131,15 @@ std::uint32_t WorldGridQuadtreeWaterManager::computeBandMask(
     (void)distanceMeters;
 
     const std::uint32_t count = m_settings.cascadeCount;
-    auto bit = [](std::uint32_t index) -> std::uint32_t
-    {
-        return 1u << index;
-    };
-
-    std::uint32_t mask = bit(0) | bit(1) | bit(2) | bit(3);
     if (count == 0)
     {
         return 0;
     }
 
-    if (count < 32)
+    if (count >= 32)
     {
-        mask &= ((1u << count) - 1u);
+        return 0xFFFFFFFFu;
     }
 
-    return mask;
+    return (1u << count) - 1u;
 }
