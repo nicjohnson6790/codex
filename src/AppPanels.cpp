@@ -141,6 +141,7 @@ void AppPanels::drawControlsTab(Context& context)
     ImGui::Text("Gamepad: %.*s",
         static_cast<int>(context.gamepadName.size()),
         context.gamepadName.data());
+    ImGui::Checkbox("Show viewport FPS overlay", &m_showViewportFpsCounter);
 
     ImGui::Spacing();
     ImGui::TextUnformatted("SDL GPU Drivers");
@@ -482,6 +483,17 @@ void AppPanels::drawWaterTab(Context& context)
         }
     }
 
+    if (ImGui::CollapsingHeader("Crest Foam", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Enabled##CrestFoam", &settings.crestFoamEnabled);
+        ImGui::InputFloat("Amount", &settings.crestFoamAmount, 0.05f, 0.25f, "%.2f");
+        ImGui::InputFloat("Compression threshold", &settings.crestFoamThreshold, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Threshold softness", &settings.crestFoamSoftness, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Slope gate start", &settings.crestFoamSlopeStart, 0.01f, 0.05f, "%.2f");
+        ImGui::InputFloat("Decay rate", &settings.crestFoamDecayRate, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Brightness", &settings.crestFoamBrightness, 0.05f, 0.25f, "%.2f");
+    }
+
     ImGui::SeparatorText("Mesh");
     ImGui::TextWrapped("Water now uses one reusable mesh for all visible quadtree leaves.");
     ImGui::Text(
@@ -507,10 +519,34 @@ void AppPanels::drawViewportPane(Context& context)
 
     if (context.viewportTextureId != 0)
     {
+        const ImVec2 imageMin = ImGui::GetCursorScreenPos();
         ImGui::Image(
             context.viewportTextureId,
             ImVec2(static_cast<float>(m_viewportPanelExtent.width), static_cast<float>(m_viewportPanelExtent.height))
         );
+
+        if (m_showViewportFpsCounter)
+        {
+            const float fps = ImGui::GetIO().Framerate;
+            const std::string fpsLabel = std::to_string(static_cast<int>(std::round(fps))) + " FPS";
+            const ImVec2 textPadding(8.0f, 4.0f);
+            const ImVec2 textSize = ImGui::CalcTextSize(fpsLabel.c_str());
+            const ImVec2 overlayMin(imageMin.x + 10.0f, imageMin.y + 10.0f);
+            const ImVec2 overlayMax(
+                overlayMin.x + textSize.x + (textPadding.x * 2.0f),
+                overlayMin.y + textSize.y + (textPadding.y * 2.0f));
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(
+                overlayMin,
+                overlayMax,
+                IM_COL32(12, 16, 20, 185),
+                6.0f);
+            drawList->AddText(
+                ImVec2(overlayMin.x + textPadding.x, overlayMin.y + textPadding.y),
+                IM_COL32(240, 248, 255, 255),
+                fpsLabel.c_str());
+        }
     }
 
     if (m_viewportPaused)

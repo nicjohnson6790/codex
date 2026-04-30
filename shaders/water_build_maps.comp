@@ -2,20 +2,24 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set=0, binding=0, std430) readonly buffer DisplacementSpectrumBuffer
+layout(set=0, binding=0) uniform sampler2DArray previousFoamTexture;
+
+layout(set=0, binding=1, std430) readonly buffer DisplacementSpectrumBuffer
 {
     vec4 displacementSpectrumData[];
 } displacementSpectrumBuffer;
 
-layout(set=0, binding=1, std430) readonly buffer SlopeSpectrumBuffer
+layout(set=0, binding=2, std430) readonly buffer SlopeSpectrumBuffer
 {
     vec4 slopeSpectrumData[];
 } slopeSpectrumBuffer;
 layout(rgba16f, set=1, binding=0) uniform image2D displacementTexture;
 layout(rgba16f, set=1, binding=1) uniform image2D slopeTexture;
+layout(rgba16f, set=1, binding=2) uniform image2D foamTexture;
 
 layout(set=2, binding=0) uniform WaterSimulationUniforms
 {
+    // Keep this block aligned with QuadtreeWaterMeshRenderer::WaterSimulationUniforms.
     uvec4 dispatchParams;
     vec4 timeAndGlobal;
     vec4 cascadeWorldSizesA;
@@ -40,6 +44,8 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeShortWavesFadeB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
+    vec4 foamParams;
+    vec4 foamParams2;
     vec4 simulationParams;
 } simulation;
 
@@ -71,6 +77,17 @@ float loadPermutedHeight(uint resolution, uint cascadeIndex, uvec2 coord)
         ivec2(coord)).b;
 }
 
+vec2 loadPermutedHorizontalDisplacement(uint resolution, uint cascadeIndex, uvec2 coord, float lambda)
+{
+    vec4 displacementSpectrum = permuteSpectrum(
+        displacementSpectrumBuffer.displacementSpectrumData[spectrumIndex(resolution, cascadeIndex, coord)],
+        ivec2(coord));
+    vec4 slopeSpectrum = permuteSpectrum(
+        slopeSpectrumBuffer.slopeSpectrumData[spectrumIndex(resolution, cascadeIndex, coord)],
+        ivec2(coord));
+    return vec2(lambda * displacementSpectrum.x, lambda * slopeSpectrum.x);
+}
+
 void main()
 {
     uvec2 gid = gl_GlobalInvocationID.xy;
@@ -90,6 +107,7 @@ void main()
 
     float choppiness = max(cascadeValue(simulation.cascadeChoppinessA, simulation.cascadeChoppinessB, cascadeIndex), 0.0) *
         max(simulation.timeAndGlobal.z, 0.0);
+    float lambda = choppiness;
     vec4 displacementSpectrum = permuteSpectrum(
         displacementSpectrumBuffer.displacementSpectrumData[spectrumIndex(resolution, cascadeIndex, gid)],
         centerCoord);
@@ -117,36 +135,27 @@ void main()
     }
     if (lid.x == 0u && lid.y == 0u)
     {
-        heightTile[0u][0u] = loadPermutedHeight(
-            resolution,
-            cascadeIndex,
-            uvec2(leftIndex.x, downIndex.y));
+        uvec2 coord = uvec2(leftIndex.x, downIndex.y);
+        heightTile[0u][0u] = loadPermutedHeight(resolution, cascadeIndex, coord);
     }
     if (lid.x == kTileSize - 1u && lid.y == 0u)
     {
-        heightTile[0u][kTileWithBorder - 1u] = loadPermutedHeight(
-            resolution,
-            cascadeIndex,
-            uvec2(rightIndex.x, downIndex.y));
+        uvec2 coord = uvec2(rightIndex.x, downIndex.y);
+        heightTile[0u][kTileWithBorder - 1u] = loadPermutedHeight(resolution, cascadeIndex, coord);
     }
     if (lid.x == 0u && lid.y == kTileSize - 1u)
     {
-        heightTile[kTileWithBorder - 1u][0u] = loadPermutedHeight(
-            resolution,
-            cascadeIndex,
-            uvec2(leftIndex.x, upIndex.y));
+        uvec2 coord = uvec2(leftIndex.x, upIndex.y);
+        heightTile[kTileWithBorder - 1u][0u] = loadPermutedHeight(resolution, cascadeIndex, coord);
     }
     if (lid.x == kTileSize - 1u && lid.y == kTileSize - 1u)
     {
-        heightTile[kTileWithBorder - 1u][kTileWithBorder - 1u] = loadPermutedHeight(
-            resolution,
-            cascadeIndex,
-            uvec2(rightIndex.x, upIndex.y));
+        uvec2 coord = uvec2(rightIndex.x, upIndex.y);
+        heightTile[kTileWithBorder - 1u][kTileWithBorder - 1u] = loadPermutedHeight(resolution, cascadeIndex, coord);
     }
 
     barrier();
 
-    float lambda = choppiness;
     float worldSize = max(cascadeValue(simulation.cascadeWorldSizesA, simulation.cascadeWorldSizesB, cascadeIndex), 1.0);
     float texelWorldSize = worldSize / float(resolution);
     float heightCenter = heightTile[lid.y + 1u][lid.x + 1u];
@@ -162,7 +171,32 @@ void main()
         lambda * slopeSpectrum.x);
 
     vec2 slope = vec2(dHeightDx, dHeightDz);
+    vec2 displacementRight = loadPermutedHorizontalDisplacement(resolution, cascadeIndex, rightIndex, lambda);
+    vec2 displacementLeft = loadPermutedHorizontalDisplacement(resolution, cascadeIndex, leftIndex, lambda);
+    vec2 displacementUp = loadPermutedHorizontalDisplacement(resolution, cascadeIndex, upIndex, lambda);
+    vec2 displacementDown = loadPermutedHorizontalDisplacement(resolution, cascadeIndex, downIndex, lambda);
+
+    float dDispXdx = (displacementRight.x - displacementLeft.x) / max(texelWorldSize * 2.0, 0.001);
+    float dDispXdz = (displacementUp.x - displacementDown.x) / max(texelWorldSize * 2.0, 0.001);
+    float dDispZdx = (displacementRight.y - displacementLeft.y) / max(texelWorldSize * 2.0, 0.001);
+    float dDispZdz = (displacementUp.y - displacementDown.y) / max(texelWorldSize * 2.0, 0.001);
+    float jacobian = (1.0 + dDispXdx) * (1.0 + dDispZdz) - (dDispXdz * dDispZdx);
+    float compression = max(1.0 - jacobian, 0.0);
+    float threshold = max(simulation.foamParams.y, 0.0);
+    float softness = max(simulation.foamParams.z, 1.0e-4);
+    float slopeGateStart = max(simulation.foamParams.w, 0.0);
+    float slopeGate = smoothstep(slopeGateStart, slopeGateStart + 0.35, length(slope));
+    float generatedFoam = smoothstep(threshold, threshold + softness, compression) * slopeGate * max(simulation.foamParams.x, 0.0);
+    float previousFoam = 0.0;
+    if (simulation.foamParams2.y > 0.5)
+    {
+        previousFoam = texture(previousFoamTexture, vec3((vec2(gid) + 0.5) / float(resolution), float(cascadeIndex))).r;
+    }
+    float decayRate = max(simulation.foamParams2.x, 0.0);
+    float decayedFoam = clamp(previousFoam * exp(-decayRate), 0.0, 1.0);
+    float foam = clamp(decayedFoam + generatedFoam, 0.0, 1.0);
 
     imageStore(displacementTexture, centerCoord, vec4(displacement, 1.0));
-    imageStore(slopeTexture, centerCoord, vec4(slope, 0.0, 1.0));
+    imageStore(slopeTexture, centerCoord, vec4(slope, generatedFoam, 1.0));
+    imageStore(foamTexture, centerCoord, vec4(foam, 0.0, 0.0, 1.0));
 }

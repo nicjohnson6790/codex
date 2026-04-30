@@ -36,6 +36,9 @@ public:
         glm::vec4 sunDirectionTimeOfDay{ 0.0f };
         glm::vec4 opticalParams{ 0.0f };
         glm::vec4 refractionParams{ 0.0f };
+        glm::vec4 foamParams{ 0.0f };
+        glm::vec4 foamParams2{ 0.0f };
+        glm::vec4 foamColor{ 0.0f };
     };
 
     QuadtreeWaterMeshRenderer() = default;
@@ -124,6 +127,7 @@ private:
 
     struct WaterSimulationUniforms
     {
+        // Keep this layout in sync with every water compute shader uniform block.
         glm::uvec4 dispatchParams{ 0u };
         glm::vec4 timeAndGlobal{ 0.0f };
         glm::vec4 cascadeWorldSizesA{ 0.0f };
@@ -148,10 +152,14 @@ private:
         glm::vec4 cascadeShortWavesFadeB{ 0.0f };
         glm::vec4 cascadeChoppinessA{ 0.0f };
         glm::vec4 cascadeChoppinessB{ 0.0f };
+        glm::vec4 foamParams{ 0.0f };
+        glm::vec4 foamParams2{ 0.0f };
         glm::vec4 simulationParams{ 0.0f };
     };
 
     static_assert(sizeof(InstanceData) % 16 == 0);
+    static_assert(sizeof(WaterUniforms) % 16 == 0);
+    static_assert(sizeof(WaterSimulationUniforms) % 16 == 0);
 
     [[nodiscard]] static std::uint32_t packMetadata(
         std::uint8_t quadtreeLodHint,
@@ -195,7 +203,10 @@ private:
     WorkingBufferResources m_workingBuffers{};
     SDL_GPUTexture* m_displacementTexture = nullptr;
     SDL_GPUTexture* m_slopeTexture = nullptr;
+    SDL_GPUTexture* m_foamHistoryReadTexture = nullptr;
+    SDL_GPUTexture* m_foamHistoryWriteTexture = nullptr;
     SDL_GPUSampler* m_waterSampler = nullptr;
     WaterSettings m_settings{};
     bool m_initialSpectrumDirty = true;
+    bool m_hasValidFoamHistory = false;
 };

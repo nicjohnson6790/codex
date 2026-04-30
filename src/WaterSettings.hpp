@@ -14,6 +14,13 @@ inline WaterSettings makeDefaultWaterSettings()
     settings.depthMeters = AppConfig::Water::kDefaultDepthMeters;
     settings.lowCutoff = AppConfig::Water::kDefaultLowCutoff;
     settings.highCutoff = AppConfig::Water::kDefaultHighCutoff;
+    settings.crestFoamEnabled = AppConfig::Water::kDefaultCrestFoamEnabled;
+    settings.crestFoamAmount = AppConfig::Water::kDefaultCrestFoamAmount;
+    settings.crestFoamThreshold = AppConfig::Water::kDefaultCrestFoamThreshold;
+    settings.crestFoamSoftness = AppConfig::Water::kDefaultCrestFoamSoftness;
+    settings.crestFoamSlopeStart = AppConfig::Water::kDefaultCrestFoamSlopeStart;
+    settings.crestFoamDecayRate = AppConfig::Water::kDefaultCrestFoamDecayRate;
+    settings.crestFoamBrightness = AppConfig::Water::kDefaultCrestFoamBrightness;
     settings.maxTerrainMinHeightAboveWaterToDraw = AppConfig::Water::kMaxTerrainMinHeightAboveWaterToDraw;
     settings.cascadeCount = AppConfig::Water::kDefaultCascadeCount;
 

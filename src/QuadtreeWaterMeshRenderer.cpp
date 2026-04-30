@@ -33,6 +33,24 @@ std::uint32_t fftStageCountForResolution(std::uint32_t resolution)
 
     return stages;
 }
+
+glm::vec4 buildFoamGenerationParams(const WaterSettings& settings)
+{
+    return glm::vec4(
+        settings.crestFoamEnabled ? std::max(settings.crestFoamAmount, 0.0f) : 0.0f,
+        std::max(settings.crestFoamThreshold, 0.0f),
+        std::max(settings.crestFoamSoftness, 1.0e-4f),
+        std::max(settings.crestFoamSlopeStart, 0.0f));
+}
+
+glm::vec4 buildFoamHistoryParams(const WaterSettings& settings, bool hasValidFoamHistory)
+{
+    return glm::vec4(
+        std::max(settings.crestFoamDecayRate, 0.0f),
+        hasValidFoamHistory ? 1.0f : 0.0f,
+        0.0f,
+        0.0f);
+}
 }
 
 void QuadtreeWaterMeshRenderer::initialize(
@@ -103,6 +121,7 @@ void QuadtreeWaterMeshRenderer::setSettings(const WaterSettings& settings)
     if (std::memcmp(&m_settings, &settings, sizeof(WaterSettings)) != 0)
     {
         m_initialSpectrumDirty = true;
+        m_hasValidFoamHistory = false;
     }
     m_settings = settings;
 }
@@ -199,6 +218,8 @@ void QuadtreeWaterMeshRenderer::dispatchWaterSimulation(
         m_workingBuffers.slopeSpectrumPong == nullptr ||
         m_displacementTexture == nullptr ||
         m_slopeTexture == nullptr ||
+        m_foamHistoryReadTexture == nullptr ||
+        m_foamHistoryWriteTexture == nullptr ||
         m_waterSampler == nullptr)
     {
         return;
@@ -231,6 +252,7 @@ void QuadtreeWaterMeshRenderer::render(
         m_pipeline == nullptr ||
         m_displacementTexture == nullptr ||
         m_slopeTexture == nullptr ||
+        m_foamHistoryReadTexture == nullptr ||
         m_waterSampler == nullptr ||
         skyboxRenderer.cubemapTexture() == nullptr ||
         skyboxRenderer.atmosphereLutTexture() == nullptr ||
@@ -252,13 +274,14 @@ void QuadtreeWaterMeshRenderer::render(
     };
     SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-    const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[4]{
+    const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[5]{
         { m_displacementTexture, m_waterSampler },
         { m_slopeTexture, m_waterSampler },
+        { m_foamHistoryReadTexture, m_waterSampler },
         { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
         { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
     };
-    SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 4);
+    SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 5);
 
     if (m_mesh.vertexBuffer == nullptr || m_mesh.indexBuffer == nullptr || m_instances.instanceCount == 0)
     {
@@ -307,7 +330,7 @@ std::uint32_t QuadtreeWaterMeshRenderer::packMetadata(
 void QuadtreeWaterMeshRenderer::createPipeline(const std::filesystem::path& shaderDirectory)
 {
     SDL_GPUShader* vertexShader = createShader(shaderDirectory / "water_mesh.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 2, 1);
-    SDL_GPUShader* fragmentShader = createShader(shaderDirectory / "water_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1, 4);
+    SDL_GPUShader* fragmentShader = createShader(shaderDirectory / "water_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1, 5);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -406,7 +429,7 @@ void QuadtreeWaterMeshRenderer::createWaterComputePipelines(const std::filesyste
         kWaterFftThreadCountX, kWaterFftThreadCountY, kWaterFftThreadCountZ);
     m_buildMapsPipeline = createComputePipeline(
         shaderDirectory / "water_build_maps.comp.spv",
-        0, 0, 2, 2, 0,
+        1, 0, 2, 3, 0,
         kWaterComputeThreadCountX, kWaterComputeThreadCountY, kWaterComputeThreadCountZ);
 }
 
@@ -665,10 +688,31 @@ void QuadtreeWaterMeshRenderer::createWaterTextures()
     {
         throwSdlError("Failed to create water slope texture.");
     }
+    m_foamHistoryReadTexture = SDL_CreateGPUTexture(m_device, &textureInfo);
+    if (m_foamHistoryReadTexture == nullptr)
+    {
+        throwSdlError("Failed to create water foam history read texture.");
+    }
+    m_foamHistoryWriteTexture = SDL_CreateGPUTexture(m_device, &textureInfo);
+    if (m_foamHistoryWriteTexture == nullptr)
+    {
+        throwSdlError("Failed to create water foam history write texture.");
+    }
+    m_hasValidFoamHistory = false;
 }
 
 void QuadtreeWaterMeshRenderer::destroyWaterTextures()
 {
+    if (m_foamHistoryWriteTexture != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_foamHistoryWriteTexture);
+        m_foamHistoryWriteTexture = nullptr;
+    }
+    if (m_foamHistoryReadTexture != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_foamHistoryReadTexture);
+        m_foamHistoryReadTexture = nullptr;
+    }
     if (m_slopeTexture != nullptr)
     {
         SDL_ReleaseGPUTexture(m_device, m_slopeTexture);
@@ -754,6 +798,11 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
         AppConfig::Water::kShallowRefractionFullFadeDepthMeters,
         0.0f,
         0.0f);
+    uniforms.foamParams = buildFoamGenerationParams(m_settings);
+    uniforms.foamParams2 = buildFoamHistoryParams(m_settings, false);
+    uniforms.foamColor = glm::vec4(
+        AppConfig::Water::kCrestFoamColor,
+        std::max(m_settings.crestFoamBrightness, 0.0f));
     uniforms.debugParams.y = AppConfig::Water::kSubsurfaceStrength;
     uniforms.debugParams.z = AppConfig::Water::kScatteringAnisotropy;
     uniforms.debugParams.w = AppConfig::Water::kDepthAbsorptionStrength;
@@ -799,6 +848,8 @@ QuadtreeWaterMeshRenderer::WaterSimulationUniforms QuadtreeWaterMeshRenderer::bu
         m_settings.lowCutoff,
         m_settings.highCutoff,
         0.0f);
+    uniforms.foamParams = buildFoamGenerationParams(m_settings);
+    uniforms.foamParams2 = buildFoamHistoryParams(m_settings, m_hasValidFoamHistory);
 
     for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(m_settings.cascadeCount, AppConfig::Water::kMaxCascadeCount); ++cascadeIndex)
     {
@@ -961,7 +1012,7 @@ void QuadtreeWaterMeshRenderer::dispatchBuildMaps(
         uniforms.dispatchParams.y = cascadeIndex;
         SDL_PushGPUComputeUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
-        SDL_GPUStorageTextureReadWriteBinding storageBindings[2]{};
+        SDL_GPUStorageTextureReadWriteBinding storageBindings[3]{};
         storageBindings[0].texture = m_displacementTexture;
         storageBindings[0].mip_level = 0;
         storageBindings[0].layer = cascadeIndex;
@@ -970,14 +1021,22 @@ void QuadtreeWaterMeshRenderer::dispatchBuildMaps(
         storageBindings[1].mip_level = 0;
         storageBindings[1].layer = cascadeIndex;
         storageBindings[1].cycle = false;
+        storageBindings[2].texture = m_foamHistoryWriteTexture;
+        storageBindings[2].mip_level = 0;
+        storageBindings[2].layer = cascadeIndex;
+        storageBindings[2].cycle = false;
 
-        SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, storageBindings, 2, nullptr, 0);
+        SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, storageBindings, 3, nullptr, 0);
         if (computePass == nullptr)
         {
             throwSdlError("Failed to begin water map build compute pass.");
         }
 
         SDL_BindGPUComputePipeline(computePass, m_buildMapsPipeline);
+        const SDL_GPUTextureSamplerBinding samplerBindings[1]{
+            { m_foamHistoryReadTexture, m_waterSampler },
+        };
+        SDL_BindGPUComputeSamplers(computePass, 0, samplerBindings, 1);
         SDL_GPUBuffer* readonlyStorageBuffers[]{
             m_workingBuffers.displacementSpectrumPing,
             m_workingBuffers.slopeSpectrumPing,
@@ -986,6 +1045,8 @@ void QuadtreeWaterMeshRenderer::dispatchBuildMaps(
         SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, 1);
         SDL_EndGPUComputePass(computePass);
     }
+    std::swap(m_foamHistoryReadTexture, m_foamHistoryWriteTexture);
+    m_hasValidFoamHistory = true;
 }
 
 void QuadtreeWaterMeshRenderer::destroyInstanceBuffer()

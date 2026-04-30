@@ -55,6 +55,7 @@ private:
     bool m_dockLayoutInitialized = false;
     bool m_leftPaneCollapsed = false;
     bool m_viewportPaused = false;
+    bool m_showViewportFpsCounter = true;
     bool m_showQuadtreeBorders = true;
     bool m_layoutDirty = false;
     ImGuiID m_viewportDockId = 0;

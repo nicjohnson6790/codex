@@ -13,7 +13,7 @@ Water follows the same broad ownership split as terrain, but stays globally simu
 - `QuadtreeWaterMeshRenderer` owns the reusable water mesh, FFT compute resources, and water draw path
 - `SDLRenderer` orchestrates the terrain and water compute/render order each frame
 
-The current water path uses four shared FFT cascades at `512 x 512`, with a single reusable `129 x 129` water mesh instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth for shallow-water displacement damping, depth-based color/transmission shaping, and a shallow refracted terrain lookup. Water shading is now driven by a sky/atmosphere-aware PBR-style surface model that samples the same cubemap and atmosphere LUT used by the skybox pass.
+The current water path uses four shared FFT cascades at `512 x 512`, with a single reusable `129 x 129` water mesh instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth for shallow-water displacement damping, depth-based color/transmission shaping, and a shallow refracted terrain lookup. Water shading is now driven by a sky/atmosphere-aware PBR-style surface model that samples the same cubemap and atmosphere LUT used by the skybox pass, with crest foam generated from wave compression and accumulated in a separate persistent foam history texture.
 
 Core pieces:
 
@@ -22,7 +22,7 @@ Core pieces:
 - `LineRenderer`: immediate-style debug line rendering
 - `QuadtreeMeshRenderer`: terrain draw path, compute heightmap generation, and async extents readback
 - `WorldGridQuadtreeWaterManager`: CPU-side water leaf selection and staging
-- `QuadtreeWaterMeshRenderer`: water draw path, FFT compute passes, and shared displacement/slope maps
+- `QuadtreeWaterMeshRenderer`: water draw path, FFT compute passes, and shared displacement/slope/foam maps
 - `SkyboxRenderer`: fullscreen skybox pass using a cubemap and inverse view-projection ray reconstruction
 - `WorldGridQuadtree`: quadtree update, draw selection, subdivision/collapse, and debug draw emission
 - `WorldGridQuadtreeHeightmapManager`: heightmap residency, LRU replacement, and compute dispatch queueing
@@ -51,12 +51,12 @@ The renderer then:
    - optional one-time spectrum initialization when water settings change
    - per-frame spectrum evolution from cached `h0`
    - shared-memory FFT passes over SSBO working buffers
-   - displacement/slope map assembly into texture arrays
+   - displacement/slope map assembly plus crest-foam generation and persistence into texture arrays
 4. queues an async terrain extents download
 5. renders terrain, water, triangles, and debug lines into the offscreen viewport
    - the water vertex shader samples the matching resident terrain slice when available
    - local depth is used to damp wave motion in shallow water, with per-cascade damping strengths
-   - the water fragment shader blends sky/atmosphere reflection, depth-based absorption/scattering, and a shallow refracted terrain sample from the resident terrain heightmap
+  - the water fragment shader blends sky/atmosphere reflection, depth-based absorption/scattering, shallow refracted terrain, and persistent crest foam
 6. renders the skybox as a fullscreen quad using the cubemap and the current time-of-day rotation
 7. renders ImGui
 
@@ -74,6 +74,7 @@ The renderer then:
 - Four `512 x 512` water cascades sampled in world space across all visible water leaves
 - SSBO-backed FFT working set with shared-memory butterfly passes
 - Precomputed static water spectrum initialization, rebuilt only when water settings change
+- Crest foam generated from local wave compression, with temporal persistence and decay in a dedicated ping-pong history texture
 - Terrain-aware shallow-water damping by sampling the resident terrain heightmap slice under each water patch
 - Per-cascade shallow-water damping strengths so small and large wave bands can fade differently near shore
 - Sky/atmosphere-aware PBR-style water shading using the same cubemap and atmosphere LUT as the skybox pass
@@ -95,7 +96,7 @@ The renderer then:
 - Gouraud terrain shading with a tunable global sun light
 - Automatic day/night progression with configurable day length and time factor
 - Built-in frame graph and CPU flame graph
-- Water tuning UI for level, amplitude, cutoffs, cascade parameters, terrain-height water culling, and shallow-water damping controls
+- Water tuning UI for level, amplitude, cutoffs, cascade parameters, terrain-height water culling, shallow-water damping, and crest-foam controls
 
 ## Project Layout
 
@@ -130,7 +131,7 @@ The renderer then:
 - `shaders/water_initialize_spectrum.comp`: one-time static water spectrum initialization
 - `shaders/water_spectrum_update.comp`: per-frame spectrum evolution from cached initial spectrum
 - `shaders/water_fft_stage.comp`: shared-memory 1D FFT pass over water working buffers
-- `shaders/water_build_maps.comp`: displacement/slope texture assembly for the water draw path
+- `shaders/water_build_maps.comp`: displacement/slope texture assembly plus crest-foam generation and persistence
 
 ## Dependencies
 
@@ -191,6 +192,12 @@ Startup flags:
 - `--verbose-startup`: print startup progress
 - `--quit-after-first-frame`: submit one frame and exit
 
+Startup logging:
+
+- startup progress is also written to `launch.log`
+- the app truncates `launch.log` at process start, so each normal launch begins with a fresh log
+- `launch.log` is ignored by Git
+
 ## Notes
 
 - The rendering API is SDL GPU, with shaders compiled by `glslc`.
@@ -202,5 +209,6 @@ Startup flags:
 - Water is sampled globally by world position; visible quadtree leaves become draw instances and do not own unique simulation state.
 - Water visibility currently uses both expanded quadtree bounds and a terrain-height gate, so leaves that are clearly dry can skip water entirely while still allowing low terrain under the water plane to remain visible.
 - When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal now affects draw-time damping, water color/transmission, and a shallow refracted terrain lookup, but it still does not feed back into the shared FFT simulation itself.
+- Crest foam is generated during the map-build pass from horizontal-displacement compression, then accumulated with decay in a separate foam history texture rather than being packed into displacement alpha.
 - The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction so it can later grow into atmospheric rendering.
 - Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.

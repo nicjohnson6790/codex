@@ -18,13 +18,17 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 sunDirectionTimeOfDay;
     vec4 opticalParams;
     vec4 refractionParams;
+    vec4 foamParams;
+    vec4 foamParams2;
+    vec4 foamColor;
 } water;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
 layout(set=2, binding=1) uniform sampler2DArray slopeTexture;
-layout(set=2, binding=2) uniform samplerCube skyboxTexture;
-layout(set=2, binding=3) uniform sampler2DArray atmosphereLutTexture;
-layout(set=2, binding=4, std430) readonly buffer HeightmapBuffer
+layout(set=2, binding=2) uniform sampler2DArray foamTexture;
+layout(set=2, binding=3) uniform samplerCube skyboxTexture;
+layout(set=2, binding=4) uniform sampler2DArray atmosphereLutTexture;
+layout(set=2, binding=5, std430) readonly buffer HeightmapBuffer
 {
     float heights[];
 } heightmapBuffer;
@@ -255,6 +259,10 @@ void main()
 
     vec2 slope = vec2(0.0);
     float displacementEnergy = 0.0;
+    float foamCoverage = 0.0;
+    float foamDetail = 0.0;
+    float foamMicroSlope = 0.0;
+    float totalDetailWeight = 0.0;
     for (uint cascadeIndex = 0u; cascadeIndex < cascadeCount; ++cascadeIndex)
     {
         if ((fragBandMask & (1u << cascadeIndex)) == 0u)
@@ -268,7 +276,22 @@ void main()
         vec4 slopeSample = texture(slopeTexture, vec3(uv, float(cascadeIndex)));
         slope += slopeSample.xy;
         displacementEnergy += dot(displacementSample.xyz, displacementSample.xyz);
+        float cascadeFoam = saturate(texture(foamTexture, vec3(uv, float(cascadeIndex))).r);
+        float detailWeight = 1.0 - smoothstep(500.0, 8000.0, worldSize);
+        float coverageWeight = 1.0 - (0.55 * detailWeight);
+        foamCoverage = max(foamCoverage, cascadeFoam * coverageWeight);
+        foamDetail += cascadeFoam * detailWeight;
+        foamMicroSlope += length(slopeSample.xy) * detailWeight;
+        totalDetailWeight += detailWeight;
     }
+    float normalizedFoamDetail = totalDetailWeight > 0.0 ? (foamDetail / totalDetailWeight) : 0.0;
+    float normalizedFoamMicroSlope = totalDetailWeight > 0.0 ? (foamMicroSlope / totalDetailWeight) : 0.0;
+    float foamBreakup = saturate(
+        (normalizedFoamDetail * 1.1) +
+        smoothstep(0.18, 0.95, normalizedFoamMicroSlope) * 0.75);
+    float foamSignal = foamCoverage * mix(0.22, 1.0, foamBreakup);
+    foamSignal = max(foamSignal, normalizedFoamDetail * 0.35);
+    foamSignal = saturate(foamSignal);
 
     float slopeMagnitude = length(slope);
     float roughness = clamp(
@@ -380,6 +403,18 @@ void main()
 
     vec3 color = baseWaterLighting + overheadBlueBoost + environmentSpecular + directSpecular;
     color = mix(color, reflectedSky, saturate(max(fresnelReflection.r, max(fresnelReflection.g, fresnelReflection.b)) * 0.65));
+
+    if (foamSignal > 0.0)
+    {
+        float foamViewBoost = mix(0.85, 1.15, pow(1.0 - normalDotView, 0.35));
+        float foamDiffuse = 0.30 + (0.70 * normalDotLight);
+        vec3 foamLighting =
+            (ambientSky * 0.55) +
+            (water.sunColorAmbient.rgb * water.sunDirectionIntensity.w * foamDiffuse * 0.45);
+        vec3 foamColor = water.foamColor.rgb * foamLighting * water.foamColor.a * foamViewBoost;
+        color = mix(color, foamColor, saturate(foamSignal * 0.72));
+        color += foamColor * foamSignal * 0.12;
+    }
 
     outColor = vec4(color, 1.0);
 }

@@ -116,23 +116,23 @@ inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascade
 
 inline constexpr float kDefaultWaterLevel = 250.0f;
 inline constexpr float kDefaultWindDirectionRadians = 0.0f;
-inline constexpr float kDefaultGlobalAmplitude = 1.0f;
-inline constexpr float kDefaultGlobalChoppiness = 1.0f;
+inline constexpr float kDefaultGlobalAmplitude = 1.1f;
+inline constexpr float kDefaultGlobalChoppiness = 1.2f;
 inline constexpr float kDefaultDepthMeters = 20.0f;
 inline constexpr float kDefaultLowCutoff = 0.0001f;
 inline constexpr float kDefaultHighCutoff = 9000.0f;
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeAmplitudes{
-    0.40f,
-    1.05f,
-    0.05f,
+    0.55f,
+    2.05f,
+    0.20f,
     0.25f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeWindSpeeds{
-    0.30f,
-    2.0f,
-    0.50f,
+    0.80f,
+    4.0f,
+    1.00f,
     10.00f,
 };
 
@@ -160,7 +160,7 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeSwell{
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadePeakEnhancement{
     1.0f,
     1.0f,
-    1.0f,
+    2.6f,
     1.0f,
 };
 
@@ -172,24 +172,24 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShortWav
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeChoppiness{
-    1.0f,
-    1.0f,
-    1.0f,
+    4.05f,
+    4.75f,
+    2.85f,
     1.0f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowDampingStrength{
-    1.25f,
+    0.6f,
+    0.7f,
+    0.8f,
     1.0f,
-    0.55f,
-    0.20f,
 };
 
 inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascadeUpdateModulo{
     1u,
     1u,
-    1u,
-    1u,
+    2u,
+    4u,
 };
 
 inline constexpr float kExpectedWaveHeight = 8.0f;
@@ -207,6 +207,14 @@ inline constexpr float kScatteringAnisotropy = 0.55f;
 inline constexpr float kDepthAbsorptionStrength = 0.065f;
 inline constexpr float kShallowRefractionMaxDepthMeters = 2.50f;
 inline constexpr float kShallowRefractionFullFadeDepthMeters = 7.50f;
+inline constexpr bool kDefaultCrestFoamEnabled = true;
+inline constexpr float kDefaultCrestFoamAmount = 1.85f;
+inline constexpr float kDefaultCrestFoamThreshold = 0.12f;
+inline constexpr float kDefaultCrestFoamSoftness = 0.18f;
+inline constexpr float kDefaultCrestFoamSlopeStart = 0.21f;
+inline constexpr float kDefaultCrestFoamDecayRate = 0.05f;
+inline constexpr float kDefaultCrestFoamBrightness = 1.35f;
+inline constexpr glm::vec3 kCrestFoamColor{ 0.92f, 0.97f, 1.0f };
 
 inline constexpr std::uint32_t kMeshVertexResolution = 129;
 inline constexpr std::uint32_t kMaxWaterInstances = 4096;

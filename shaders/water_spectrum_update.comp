@@ -19,6 +19,7 @@ layout(set=1, binding=1, std430) buffer SlopeSpectrumBuffer
 
 layout(set=2, binding=0) uniform WaterSimulationUniforms
 {
+    // Keep this block aligned with QuadtreeWaterMeshRenderer::WaterSimulationUniforms.
     uvec4 dispatchParams;
     vec4 timeAndGlobal;
     vec4 cascadeWorldSizesA;
@@ -43,6 +44,8 @@ layout(set=2, binding=0) uniform WaterSimulationUniforms
     vec4 cascadeShortWavesFadeB;
     vec4 cascadeChoppinessA;
     vec4 cascadeChoppinessB;
+    vec4 foamParams;
+    vec4 foamParams2;
     vec4 simulationParams;
 } simulation;
 

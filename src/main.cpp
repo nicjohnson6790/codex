@@ -10,6 +10,10 @@ int main(int argc, char** argv)
 {
     try
     {
+        {
+            std::ofstream logFile("launch.log", std::ios::trunc);
+        }
+
         App::Options options{};
         for (int index = 1; index < argc; ++index)
         {

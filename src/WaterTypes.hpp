@@ -27,12 +27,19 @@ struct WaterSettings
 {
     bool enabled = true;
     bool showLodTint = true;
+    bool crestFoamEnabled = AppConfig::Water::kDefaultCrestFoamEnabled;
     float waterLevel = AppConfig::Water::kDefaultWaterLevel;
     float globalAmplitude = AppConfig::Water::kDefaultGlobalAmplitude;
     float globalChoppiness = AppConfig::Water::kDefaultGlobalChoppiness;
     float depthMeters = AppConfig::Water::kDefaultDepthMeters;
     float lowCutoff = AppConfig::Water::kDefaultLowCutoff;
     float highCutoff = AppConfig::Water::kDefaultHighCutoff;
+    float crestFoamAmount = AppConfig::Water::kDefaultCrestFoamAmount;
+    float crestFoamThreshold = AppConfig::Water::kDefaultCrestFoamThreshold;
+    float crestFoamSoftness = AppConfig::Water::kDefaultCrestFoamSoftness;
+    float crestFoamSlopeStart = AppConfig::Water::kDefaultCrestFoamSlopeStart;
+    float crestFoamDecayRate = AppConfig::Water::kDefaultCrestFoamDecayRate;
+    float crestFoamBrightness = AppConfig::Water::kDefaultCrestFoamBrightness;
     float maxTerrainMinHeightAboveWaterToDraw = AppConfig::Water::kMaxTerrainMinHeightAboveWaterToDraw;
     std::uint32_t cascadeCount = AppConfig::Water::kDefaultCascadeCount;
     std::array<WaterCascadeSettings, AppConfig::Water::kMaxCascadeCount> cascades{};
