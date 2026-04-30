@@ -474,6 +474,7 @@ void AppPanels::drawWaterTab(Context& context)
             ImGui::InputFloat("Peak enhancement", &cascade.peakEnhancement, 0.1f, 0.5f, "%.2f");
             ImGui::InputFloat("Short waves fade", &cascade.shortWavesFade, 0.0001f, 0.0005f, "%.4f");
             ImGui::InputFloat("Choppiness", &cascade.choppiness, 0.05f, 0.25f, "%.2f");
+            ImGui::InputFloat("Shallow damping", &cascade.shallowDampingStrength, 0.05f, 0.25f, "%.2f");
             int updateModulo = static_cast<int>(cascade.updateModulo);
             ImGui::SliderInt("Update modulo", &updateModulo, 1, 8);
             cascade.updateModulo = static_cast<std::uint32_t>(std::max(updateModulo, 1));

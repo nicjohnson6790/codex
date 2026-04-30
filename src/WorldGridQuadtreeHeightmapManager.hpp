@@ -40,6 +40,7 @@ public:
         const HeightmapExtents& extents);
     void clearCache();
     [[nodiscard]] bool getExtents(const WorldGridQuadtreeLeafId& leafId, HeightmapExtents& extents) const;
+    [[nodiscard]] bool getResidentSliceIndex(const WorldGridQuadtreeLeafId& leafId, std::uint16_t& sliceIndex) const;
     [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_noiseGenerator.settings(); }
     [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_noiseGenerator.settings(); }
     [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_computeDispatchBudget; }

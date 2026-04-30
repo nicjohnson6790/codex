@@ -27,6 +27,8 @@ public:
         double leafSizeMeters,
         bool terrainExtentsKnown,
         float terrainMinHeight,
+        bool hasTerrainSlice,
+        std::uint16_t terrainSliceIndex,
         std::uint8_t quadtreeLodHint);
 
     void flushToRenderer(QuadtreeWaterMeshRenderer& renderer) const;

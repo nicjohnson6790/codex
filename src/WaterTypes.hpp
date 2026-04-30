@@ -19,6 +19,7 @@ struct WaterCascadeSettings
     float peakEnhancement = AppConfig::Water::kDefaultCascadePeakEnhancement[0];
     float shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[0];
     float choppiness = AppConfig::Water::kDefaultCascadeChoppiness[0];
+    float shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[0];
     std::uint32_t updateModulo = 1;
 };
 
@@ -44,4 +45,6 @@ struct WaterLeafDrawRequest
     double sizeMeters = 0.0;
     std::uint8_t quadtreeLodHint = 0;
     std::uint32_t bandMask = 0;
+    std::uint16_t terrainSliceIndex = 0;
+    bool hasTerrainSlice = false;
 };

@@ -238,7 +238,13 @@ void SDLRenderer::renderFrame(
         if constexpr (AppConfig::Water::kEnabled)
         {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderWater", ProfileScopeGroup::Renderer);
-            waterMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem, timeSeconds);
+            waterMeshRenderer.render(
+                renderPass,
+                commandBuffer,
+                viewProjection,
+                lightingSystem,
+                timeSeconds,
+                quadtreeMeshRenderer.heightmapBuffer());
         }
         {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderDebugPrimitives", ProfileScopeGroup::Renderer);

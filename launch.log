@@ -1372,3 +1372,63 @@
 [startup] shutdown ImGui
 [startup] shutdown app subsystems
 [startup] shutdown complete
+[startup] run begin
+[startup] SDL init
+[startup] create window
+[startup] window created
+[startup] query SDL GPU drivers
+[startup] queried SDL GPU drivers
+[startup] init gamepad input
+[startup] gamepad input initialized
+[startup] init performance capture
+[startup] performance capture initialized
+[startup] create default camera
+[startup] default camera created
+[startup] init SDL GPU renderer
+[startup] SDL GPU renderer initialized
+[startup] init triangle renderer
+[startup] init line renderer
+[startup] init quadtree mesh renderer
+[startup] init water mesh renderer
+[startup] init skybox renderer
+[startup] create ImGui context
+[startup] init ImGui SDL backend
+[startup] init ImGui SDL GPU backend
+[startup] initialize complete
+[startup] first frame submitted
+[startup] quit-after-first-frame requested
+[startup] shutdown begin
+[startup] wait for device idle
+[startup] shutdown ImGui
+[startup] shutdown app subsystems
+[startup] shutdown complete
+[startup] run begin
+[startup] SDL init
+[startup] create window
+[startup] window created
+[startup] query SDL GPU drivers
+[startup] queried SDL GPU drivers
+[startup] init gamepad input
+[startup] gamepad input initialized
+[startup] init performance capture
+[startup] performance capture initialized
+[startup] create default camera
+[startup] default camera created
+[startup] init SDL GPU renderer
+[startup] SDL GPU renderer initialized
+[startup] init triangle renderer
+[startup] init line renderer
+[startup] init quadtree mesh renderer
+[startup] init water mesh renderer
+[startup] init skybox renderer
+[startup] create ImGui context
+[startup] init ImGui SDL backend
+[startup] init ImGui SDL GPU backend
+[startup] initialize complete
+[startup] first frame submitted
+[startup] quit-after-first-frame requested
+[startup] shutdown begin
+[startup] wait for device idle
+[startup] shutdown ImGui
+[startup] shutdown app subsystems
+[startup] shutdown complete

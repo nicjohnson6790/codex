@@ -74,6 +74,7 @@ public:
 
     // Issues the terrain draws for all queued leaf instances.
     void render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection, const LightingSystem &lightingSystem) const;
+    [[nodiscard]] SDL_GPUBuffer* heightmapBuffer() const { return m_heightmapBuffer; }
 
 private:
     // Static grid vertex data for one terrain patch. localCoord is patch space; sampleCoord is height lookup space.

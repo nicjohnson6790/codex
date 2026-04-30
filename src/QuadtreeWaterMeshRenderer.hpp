@@ -27,6 +27,9 @@ public:
         glm::vec4 debugParams{ 0.0f };
         glm::vec4 cascadeWorldSizesA{ 0.0f };
         glm::vec4 cascadeWorldSizesB{ 0.0f };
+        glm::vec4 cascadeShallowDampingA{ 0.0f };
+        glm::vec4 cascadeShallowDampingB{ 0.0f };
+        glm::vec4 depthEffectParams{ 0.0f };
     };
 
     QuadtreeWaterMeshRenderer() = default;
@@ -52,6 +55,8 @@ public:
         const Position& leafOrigin,
         double leafSizeMeters,
         std::uint8_t quadtreeLodHint,
+        bool hasTerrainSlice,
+        std::uint16_t terrainSliceIndex,
         std::uint32_t bandMask);
 
     void upload(SDL_GPUCopyPass* copyPass);
@@ -64,7 +69,8 @@ public:
         SDL_GPUCommandBuffer* commandBuffer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
-        float timeSeconds) const;
+        float timeSeconds,
+        SDL_GPUBuffer* terrainHeightmapBuffer) const;
 
     [[nodiscard]] std::uint32_t instanceCount() const;
     [[nodiscard]] std::uint32_t totalInstanceCount() const;

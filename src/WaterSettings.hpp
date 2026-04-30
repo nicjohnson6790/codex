@@ -29,6 +29,7 @@ inline WaterSettings makeDefaultWaterSettings()
         settings.cascades[i].peakEnhancement = AppConfig::Water::kDefaultCascadePeakEnhancement[i];
         settings.cascades[i].shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[i];
         settings.cascades[i].choppiness = AppConfig::Water::kDefaultCascadeChoppiness[i];
+        settings.cascades[i].shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[i];
         settings.cascades[i].updateModulo = AppConfig::Water::kDefaultCascadeUpdateModulo[i];
     }
 

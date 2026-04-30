@@ -13,7 +13,7 @@ Water follows the same broad ownership split as terrain, but stays globally simu
 - `QuadtreeWaterMeshRenderer` owns the reusable water mesh, FFT compute resources, and water draw path
 - `SDLRenderer` orchestrates the terrain and water compute/render order each frame
 
-The current water path uses four shared FFT cascades at `512 x 512`, with a single reusable `129 x 129` water mesh instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders.
+The current water path uses four shared FFT cascades at `512 x 512`, with a single reusable `129 x 129` water mesh instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth, which is currently used for shallow-water displacement damping and shoreline tinting.
 
 Core pieces:
 
@@ -54,6 +54,8 @@ The renderer then:
    - displacement/slope map assembly into texture arrays
 4. queues an async terrain extents download
 5. renders terrain, water, triangles, and debug lines into the offscreen viewport
+   - the water vertex shader samples the matching resident terrain slice when available
+   - local depth is used to damp wave motion in shallow water, with per-cascade damping strengths
 6. renders the skybox as a fullscreen quad using the cubemap and the current time-of-day rotation
 7. renders ImGui
 
@@ -71,6 +73,8 @@ The renderer then:
 - Four `512 x 512` water cascades sampled in world space across all visible water leaves
 - SSBO-backed FFT working set with shared-memory butterfly passes
 - Precomputed static water spectrum initialization, rebuilt only when water settings change
+- Terrain-aware shallow-water damping by sampling the resident terrain heightmap slice under each water patch
+- Per-cascade shallow-water damping strengths so small and large wave bands can fade differently near shore
 - Skybox cubemap rendering from `resources/skybox`
 - Time-of-day controls that rotate both the sun and skybox around a shared orbit axis
 - Runtime terrain tuning:
@@ -87,7 +91,7 @@ The renderer then:
 - Gouraud terrain shading with a tunable global sun light
 - Automatic day/night progression with configurable day length and time factor
 - Built-in frame graph and CPU flame graph
-- Water tuning UI for level, amplitude, cutoffs, cascade parameters, and terrain-height water culling
+- Water tuning UI for level, amplitude, cutoffs, cascade parameters, terrain-height water culling, and shallow-water damping controls
 
 ## Project Layout
 
@@ -192,5 +196,6 @@ Startup flags:
 - The quadtree processes all allocated nodes during update; draw selection is separate from subdivision/collapse decisions.
 - Water is sampled globally by world position; visible quadtree leaves become draw instances and do not own unique simulation state.
 - Water visibility currently uses both expanded quadtree bounds and a terrain-height gate, so leaves that are clearly dry can skip water entirely while still allowing low terrain under the water plane to remain visible.
+- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal currently affects only draw-time damping/tinting, not the shared FFT simulation itself.
 - The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction so it can later grow into atmospheric rendering.
 - Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.

@@ -128,6 +128,8 @@ void QuadtreeWaterMeshRenderer::addLeaf(
     const Position& leafOrigin,
     double leafSizeMeters,
     std::uint8_t quadtreeLodHint,
+    bool hasTerrainSlice,
+    std::uint16_t terrainSliceIndex,
     std::uint32_t bandMask)
 {
     (void)leafId;
@@ -147,8 +149,8 @@ void QuadtreeWaterMeshRenderer::addLeaf(
     instance.leafParams = glm::vec4(
         static_cast<float>(leafSizeMeters),
         m_settings.waterLevel,
-        0.0f,
-        0.0f);
+        static_cast<float>(terrainSliceIndex),
+        hasTerrainSlice ? 1.0f : 0.0f);
 }
 
 void QuadtreeWaterMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
@@ -218,7 +220,8 @@ void QuadtreeWaterMeshRenderer::render(
     SDL_GPUCommandBuffer* commandBuffer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
-    float timeSeconds) const
+    float timeSeconds,
+    SDL_GPUBuffer* terrainHeightmapBuffer) const
 {
     HELLO_PROFILE_SCOPE_GROUPS("QuadtreeWaterMeshRenderer::Render", ProfileScopeGroup::Renderer);
 
@@ -227,7 +230,8 @@ void QuadtreeWaterMeshRenderer::render(
         m_pipeline == nullptr ||
         m_displacementTexture == nullptr ||
         m_slopeTexture == nullptr ||
-        m_waterSampler == nullptr)
+        m_waterSampler == nullptr ||
+        terrainHeightmapBuffer == nullptr)
     {
         return;
     }
@@ -260,8 +264,8 @@ void QuadtreeWaterMeshRenderer::render(
     const SDL_GPUBufferBinding indexBinding{ m_mesh.indexBuffer, 0 };
     SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-    SDL_GPUBuffer* storageBuffers[]{ m_instances.instanceBuffer };
-    SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 1);
+    SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, m_instances.instanceBuffer };
+    SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
 
     SDL_DrawGPUIndexedPrimitives(
         renderPass,
@@ -293,7 +297,7 @@ std::uint32_t QuadtreeWaterMeshRenderer::packMetadata(
 
 void QuadtreeWaterMeshRenderer::createPipeline(const std::filesystem::path& shaderDirectory)
 {
-    SDL_GPUShader* vertexShader = createShader(shaderDirectory / "water_mesh.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 1, 1);
+    SDL_GPUShader* vertexShader = createShader(shaderDirectory / "water_mesh.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 2, 1);
     SDL_GPUShader* fragmentShader = createShader(shaderDirectory / "water_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 2);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
@@ -719,17 +723,25 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     uniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     uniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
     uniforms.debugParams = glm::vec4(m_settings.showLodTint ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    uniforms.depthEffectParams = glm::vec4(
+        AppConfig::Water::kShallowDepthFadeStartMeters,
+        AppConfig::Water::kShallowDepthFadeEndMeters,
+        AppConfig::Water::kShorelineTintDepthMeters,
+        0.0f);
 
     for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(m_settings.cascadeCount, AppConfig::Water::kMaxCascadeCount); ++cascadeIndex)
     {
         const float worldSize = std::max(m_settings.cascades[cascadeIndex].worldSizeMeters, 1.0f);
+        const float shallowDamping = std::max(m_settings.cascades[cascadeIndex].shallowDampingStrength, 0.0f);
         if (cascadeIndex < 4u)
         {
             (&uniforms.cascadeWorldSizesA.x)[cascadeIndex] = worldSize;
+            (&uniforms.cascadeShallowDampingA.x)[cascadeIndex] = shallowDamping;
         }
         else
         {
             (&uniforms.cascadeWorldSizesB.x)[cascadeIndex - 4u] = worldSize;
+            (&uniforms.cascadeShallowDampingB.x)[cascadeIndex - 4u] = shallowDamping;
         }
     }
 

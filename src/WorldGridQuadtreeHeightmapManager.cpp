@@ -100,6 +100,20 @@ bool WorldGridQuadtreeHeightmapManager::getExtents(const WorldGridQuadtreeLeafId
     return true;
 }
 
+bool WorldGridQuadtreeHeightmapManager::getResidentSliceIndex(
+    const WorldGridQuadtreeLeafId& leafId,
+    std::uint16_t& sliceIndex) const
+{
+    const std::uint16_t residentIndex = findResidentIndex(leafId);
+    if (residentIndex == kCapacity)
+    {
+        return false;
+    }
+
+    sliceIndex = m_residentMap[residentIndex].lruSlice;
+    return true;
+}
+
 void WorldGridQuadtreeHeightmapManager::applyGeneratedExtents(
     const WorldGridQuadtreeLeafId& leafId,
     std::uint16_t sliceIndex,

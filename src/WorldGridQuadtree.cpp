@@ -341,12 +341,16 @@ void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManag
         const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
         (void)maxCorner;
         const std::uint8_t quadtreeLodHint = std::min<std::uint8_t>(worldGridQuadtreeLeafScalePow(node.nodeId), 4u);
+        std::uint16_t terrainSliceIndex = 0;
+        const bool hasTerrainSlice = m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex);
         waterManager.requestLeaf(
             node.nodeId,
             minCorner,
             worldGridQuadtreeLeafSize(node.nodeId),
             nodeHasFlag(node, QuadtreeNode::HasExtentsMask),
             node.minHeight,
+            hasTerrainSlice,
+            terrainSliceIndex,
             quadtreeLodHint);
     }
 }

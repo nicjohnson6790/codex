@@ -10,6 +10,7 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 debugParams;
     vec4 cascadeWorldSizesA;
     vec4 cascadeWorldSizesB;
+    vec4 depthEffectParams;
 } water;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
@@ -17,7 +18,7 @@ layout(set=2, binding=1) uniform sampler2DArray slopeTexture;
 
 layout(location = 0) in vec3 fragWorldPosition;
 layout(location = 1) flat in uint fragBandMask;
-layout(location = 2) in float fragLodBlend;
+layout(location = 2) in float fragShoreFactor;
 
 layout(location = 0) out vec4 outColor;
 
@@ -62,10 +63,11 @@ void main()
     vec3 deepColor = vec3(0.03, 0.18, 0.30);
     vec3 shallowColor = vec3(0.08, 0.34, 0.52);
     vec3 baseColor = mix(shallowColor, deepColor, 0.30);
+    baseColor = mix(baseColor, vec3(0.16, 0.42, 0.46), clamp(fragShoreFactor, 0.0, 1.0) * 0.65);
     baseColor += vec3(0.02, 0.03, 0.04) * clamp(displacementEnergy * 0.01, 0.0, 1.0);
     if (water.debugParams.x > 0.5)
     {
-        vec3 lodTint = mix(vec3(0.10, 0.20, 0.28), vec3(0.03, 0.12, 0.18), fragLodBlend);
+        vec3 lodTint = vec3(0.10, 0.20, 0.28);
         baseColor += lodTint * 0.25;
     }
 

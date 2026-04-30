@@ -178,6 +178,13 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeChoppine
     1.0f,
 };
 
+inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowDampingStrength{
+    1.25f,
+    1.0f,
+    0.55f,
+    0.20f,
+};
+
 inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascadeUpdateModulo{
     1u,
     1u,
@@ -188,6 +195,9 @@ inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascade
 inline constexpr float kExpectedWaveHeight = 8.0f;
 inline constexpr float kVisibilityHeightPadding = 2.0f;
 inline constexpr float kMaxTerrainMinHeightAboveWaterToDraw = 50.0f;
+inline constexpr float kShallowDepthFadeStartMeters = 12.0f;
+inline constexpr float kShallowDepthFadeEndMeters = 2.0f;
+inline constexpr float kShorelineTintDepthMeters = 6.0f;
 
 inline constexpr std::uint32_t kMeshVertexResolution = 129;
 inline constexpr std::uint32_t kMaxWaterInstances = 4096;
