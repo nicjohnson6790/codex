@@ -198,6 +198,15 @@ inline constexpr float kMaxTerrainMinHeightAboveWaterToDraw = 50.0f;
 inline constexpr float kShallowDepthFadeStartMeters = 12.0f;
 inline constexpr float kShallowDepthFadeEndMeters = 2.0f;
 inline constexpr float kShorelineTintDepthMeters = 6.0f;
+inline constexpr float kBaseReflectance = 0.02037f;
+inline constexpr float kBaseRoughness = 0.08f;
+inline constexpr float kSlopeRoughnessStrength = 0.18f;
+inline constexpr float kEnvironmentReflectionStrength = 1.0f;
+inline constexpr float kSubsurfaceStrength = 0.28f;
+inline constexpr float kScatteringAnisotropy = 0.55f;
+inline constexpr float kDepthAbsorptionStrength = 0.065f;
+inline constexpr float kShallowRefractionMaxDepthMeters = 2.50f;
+inline constexpr float kShallowRefractionFullFadeDepthMeters = 7.50f;
 
 inline constexpr std::uint32_t kMeshVertexResolution = 129;
 inline constexpr std::uint32_t kMaxWaterInstances = 4096;

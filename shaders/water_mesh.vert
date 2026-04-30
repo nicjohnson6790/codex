@@ -13,6 +13,11 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 cascadeShallowDampingA;
     vec4 cascadeShallowDampingB;
     vec4 depthEffectParams;
+    mat4 skyRotation;
+    vec4 atmosphereParams;
+    vec4 sunDirectionTimeOfDay;
+    vec4 opticalParams;
+    vec4 refractionParams;
 } water;
 
 layout(set=0, binding=0) uniform sampler2DArray displacementTexture;
@@ -39,6 +44,11 @@ layout(location = 0) in vec2 inLocalCoord;
 layout(location = 0) out vec3 fragWorldPosition;
 layout(location = 1) flat out uint fragBandMask;
 layout(location = 2) out float fragShoreFactor;
+layout(location = 3) out float fragLocalDepth;
+layout(location = 4) out vec2 fragLocalMeters;
+layout(location = 5) flat out uint fragTerrainSliceIndex;
+layout(location = 6) flat out float fragLeafSize;
+layout(location = 7) flat out uint fragHasTerrainSlice;
 
 const uint kHeightmapResolution = 259u;
 const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
@@ -131,5 +141,10 @@ void main()
     fragWorldPosition = position;
     fragBandMask = bandMask;
     fragShoreFactor = shoreFactor;
+    fragLocalDepth = localDepth;
+    fragLocalMeters = localMeters;
+    fragTerrainSliceIndex = terrainSliceIndex;
+    fragLeafSize = leafSize;
+    fragHasTerrainSlice = hasTerrainSlice ? 1u : 0u;
     gl_Position = water.viewProjection * vec4(position, 1.0);
 }

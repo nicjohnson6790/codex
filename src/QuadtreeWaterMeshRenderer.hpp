@@ -3,6 +3,7 @@
 #include "EngineRendererBase.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
+#include "SkyboxRenderer.hpp"
 #include "WaterSettings.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
 
@@ -30,6 +31,11 @@ public:
         glm::vec4 cascadeShallowDampingA{ 0.0f };
         glm::vec4 cascadeShallowDampingB{ 0.0f };
         glm::vec4 depthEffectParams{ 0.0f };
+        glm::mat4 skyRotation{ 1.0f };
+        glm::vec4 atmosphereParams{ 0.0f };
+        glm::vec4 sunDirectionTimeOfDay{ 0.0f };
+        glm::vec4 opticalParams{ 0.0f };
+        glm::vec4 refractionParams{ 0.0f };
     };
 
     QuadtreeWaterMeshRenderer() = default;
@@ -69,6 +75,7 @@ public:
         SDL_GPUCommandBuffer* commandBuffer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
+        const SkyboxRenderer& skyboxRenderer,
         float timeSeconds,
         SDL_GPUBuffer* terrainHeightmapBuffer) const;
 
@@ -166,6 +173,7 @@ private:
     [[nodiscard]] WaterUniforms buildWaterUniforms(
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
+        const SkyboxRenderer& skyboxRenderer,
         float timeSeconds) const;
     [[nodiscard]] WaterSimulationUniforms buildSimulationUniforms(
         float timeSeconds,

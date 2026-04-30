@@ -13,7 +13,7 @@ Water follows the same broad ownership split as terrain, but stays globally simu
 - `QuadtreeWaterMeshRenderer` owns the reusable water mesh, FFT compute resources, and water draw path
 - `SDLRenderer` orchestrates the terrain and water compute/render order each frame
 
-The current water path uses four shared FFT cascades at `512 x 512`, with a single reusable `129 x 129` water mesh instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth, which is currently used for shallow-water displacement damping and shoreline tinting.
+The current water path uses four shared FFT cascades at `512 x 512`, with a single reusable `129 x 129` water mesh instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth for shallow-water displacement damping, depth-based color/transmission shaping, and a shallow refracted terrain lookup. Water shading is now driven by a sky/atmosphere-aware PBR-style surface model that samples the same cubemap and atmosphere LUT used by the skybox pass.
 
 Core pieces:
 
@@ -56,6 +56,7 @@ The renderer then:
 5. renders terrain, water, triangles, and debug lines into the offscreen viewport
    - the water vertex shader samples the matching resident terrain slice when available
    - local depth is used to damp wave motion in shallow water, with per-cascade damping strengths
+   - the water fragment shader blends sky/atmosphere reflection, depth-based absorption/scattering, and a shallow refracted terrain sample from the resident terrain heightmap
 6. renders the skybox as a fullscreen quad using the cubemap and the current time-of-day rotation
 7. renders ImGui
 
@@ -75,6 +76,9 @@ The renderer then:
 - Precomputed static water spectrum initialization, rebuilt only when water settings change
 - Terrain-aware shallow-water damping by sampling the resident terrain heightmap slice under each water patch
 - Per-cascade shallow-water damping strengths so small and large wave bands can fade differently near shore
+- Sky/atmosphere-aware PBR-style water shading using the same cubemap and atmosphere LUT as the skybox pass
+- Depth-driven water color, absorption, and transmission beyond the shoreline band
+- Shallow refracted terrain lookup from resident terrain heightmap data, without screen-space scene color sampling
 - Skybox cubemap rendering from `resources/skybox`
 - Time-of-day controls that rotate both the sun and skybox around a shared orbit axis
 - Runtime terrain tuning:
@@ -197,6 +201,6 @@ Startup flags:
 - The quadtree processes all allocated nodes during update; draw selection is separate from subdivision/collapse decisions.
 - Water is sampled globally by world position; visible quadtree leaves become draw instances and do not own unique simulation state.
 - Water visibility currently uses both expanded quadtree bounds and a terrain-height gate, so leaves that are clearly dry can skip water entirely while still allowing low terrain under the water plane to remain visible.
-- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal currently affects only draw-time damping/tinting, not the shared FFT simulation itself.
+- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal now affects draw-time damping, water color/transmission, and a shallow refracted terrain lookup, but it still does not feed back into the shared FFT simulation itself.
 - The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction so it can later grow into atmospheric rendering.
 - Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.

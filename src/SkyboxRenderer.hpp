@@ -74,6 +74,13 @@ public:
         glm::vec4 sunDirectionTimeOfDay{0.0f};
     };
 
+    struct SharedSkyUniforms
+    {
+        glm::mat4 skyRotation{1.0f};
+        glm::vec4 atmosphereParams{0.0f};
+        glm::vec4 sunDirectionTimeOfDay{0.0f};
+    };
+
     static constexpr std::uint32_t kAtmosphereLutResolution = 32;
 
     void initialize(
@@ -92,8 +99,15 @@ public:
         SDL_GPUTexture* depthTexture,
         float cameraAltitude,
         const LightingSystem& lightingSystem) const;
+    [[nodiscard]] SharedSkyUniforms buildSharedSkyUniforms(
+        float cameraAltitude,
+        const LightingSystem& lightingSystem) const;
     [[nodiscard]] AtmosphereSettings& atmosphereSettings() { return m_atmosphereSettings; }
     [[nodiscard]] const AtmosphereSettings& atmosphereSettings() const { return m_atmosphereSettings; }
+    [[nodiscard]] SDL_GPUTexture* cubemapTexture() const { return m_cubemapTexture; }
+    [[nodiscard]] SDL_GPUTexture* atmosphereLutTexture() const { return m_atmosphereLutTexture; }
+    [[nodiscard]] SDL_GPUSampler* cubemapSampler() const { return m_cubemapSampler; }
+    [[nodiscard]] SDL_GPUSampler* atmosphereSampler() const { return m_atmosphereSampler; }
     void regenerateAtmosphereLut();
     void resetAtmosphereSettings();
     void sanitizeAtmosphereSettings();

@@ -205,6 +205,20 @@ void SkyboxRenderer::render(
 
     FragmentUniforms uniforms{};
     uniforms.inverseViewProjection = inverseViewProjection;
+    const SharedSkyUniforms sharedUniforms = buildSharedSkyUniforms(cameraAltitude, lightingSystem);
+    uniforms.skyRotation = sharedUniforms.skyRotation;
+    uniforms.atmosphereParams = sharedUniforms.atmosphereParams;
+    uniforms.sunDirectionTimeOfDay = sharedUniforms.sunDirectionTimeOfDay;
+    SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+
+    SDL_DrawGPUPrimitives(renderPass, static_cast<Uint32>(kFullscreenQuadVertices.size()), 1, 0, 0);
+}
+
+SkyboxRenderer::SharedSkyUniforms SkyboxRenderer::buildSharedSkyUniforms(
+    float cameraAltitude,
+    const LightingSystem& lightingSystem) const
+{
+    SharedSkyUniforms uniforms{};
     uniforms.skyRotation = lightingSystem.skyboxRotationMatrix();
     uniforms.atmosphereParams = glm::vec4(
         m_atmosphereSettings.atmosphereHeight,
@@ -212,6 +226,7 @@ void SkyboxRenderer::render(
         static_cast<float>(AppConfig::Camera::kNearPlane),
         cameraAltitude
     );
+
     const glm::vec3 sunDirection = lightingSystem.sunDirection();
     uniforms.sunDirectionTimeOfDay = glm::vec4(
         sunDirection.x,
@@ -219,9 +234,7 @@ void SkyboxRenderer::render(
         sunDirection.z,
         lightingSystem.sun().timeOfDayHours / 24.0f
     );
-    SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
-
-    SDL_DrawGPUPrimitives(renderPass, static_cast<Uint32>(kFullscreenQuadVertices.size()), 1, 0, 0);
+    return uniforms;
 }
 
 void SkyboxRenderer::regenerateAtmosphereLut()
