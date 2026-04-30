@@ -105,7 +105,7 @@ The renderer then:
 - `src/WorldGridQuadtreeHeightmapManager.*`: heightmap LRU and compute queue management
 - `src/WorldGridQuadtreeWaterManager.*`: water draw filtering and leaf staging
 - `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug box rendering
-- `src/HeightmapNoiseGenerator.*`: CPU reference terrain sampling and shared settings
+- `src/HeightmapNoiseGenerator.*`: shared terrain noise settings and CPU-side sampling helpers
 - `src/TriangleRenderer.*`: triangle rendering
 - `src/LineRenderer.*`: debug line rendering
 - `src/CameraManager.*`: camera storage and projection building
@@ -192,6 +192,7 @@ Startup flags:
 - The rendering API is SDL GPU, with shaders compiled by `glslc`.
 - Skybox faces are loaded through SDL_image and uploaded into an SDL GPU cubemap texture.
 - World positions use large horizontal grid cells plus local coordinates for stable camera-relative rendering.
+- The maintained terrain path is the runtime GPU compute path; the older standalone quadtree sanity executable has been removed.
 - Terrain extents are produced on the GPU and read back asynchronously, so newly generated slices may briefly fall back to conservative bounds until their readback completes.
 - The quadtree processes all allocated nodes during update; draw selection is separate from subdivision/collapse decisions.
 - Water is sampled globally by world position; visible quadtree leaves become draw instances and do not own unique simulation state.

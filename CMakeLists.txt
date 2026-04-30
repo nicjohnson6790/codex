@@ -174,11 +174,6 @@ add_executable(terrain_sandbox
     src/WorldGridQuadtreeWaterManager.cpp
 )
 
-add_executable(quadtree_sanity
-    src/HeightmapNoiseGenerator.cpp
-    src/QuadtreeSanityTests.cpp
-)
-
 add_dependencies(terrain_sandbox shaders)
 
 add_custom_command(TARGET terrain_sandbox POST_BUILD
@@ -192,21 +187,10 @@ target_include_directories(terrain_sandbox
         ${glm_SOURCE_DIR}
 )
 
-target_include_directories(quadtree_sanity
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/src
-        ${glm_SOURCE_DIR}
-)
-
 target_compile_definitions(terrain_sandbox
     PRIVATE
         TERRAIN_SANDBOX_SHADER_DIR="${SHADER_OUTPUT_DIR}"
         TERRAIN_SANDBOX_RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources"
-        NOMINMAX
-)
-
-target_compile_definitions(quadtree_sanity
-    PRIVATE
         NOMINMAX
 )
 
@@ -215,11 +199,6 @@ target_link_libraries(terrain_sandbox
         imgui_backend
         SDL3::SDL3
         SDL3_image::SDL3_image
-)
-
-target_link_libraries(quadtree_sanity
-    PRIVATE
-        SDL3::SDL3
 )
 
 if (MSVC)
@@ -245,17 +224,6 @@ if (MSVC)
             $<$<CONFIG:Release>:/GL>
     )
 
-    target_compile_options(quadtree_sanity
-        PRIVATE
-            /permissive-
-            /Zc:__cplusplus
-            /Gy
-            /Gw
-            $<$<CONFIG:Release>:/O2>
-            $<$<CONFIG:Release>:/Oi>
-            $<$<CONFIG:Release>:/GL>
-    )
-
     target_link_options(imgui_backend
         PRIVATE
             $<$<CONFIG:Release>:/LTCG>
@@ -268,10 +236,4 @@ if (MSVC)
             $<$<CONFIG:Release>:/LTCG>
     )
 
-    target_link_options(quadtree_sanity
-        PRIVATE
-            $<$<CONFIG:Release>:/OPT:REF>
-            $<$<CONFIG:Release>:/OPT:ICF>
-            $<$<CONFIG:Release>:/LTCG>
-    )
 endif()
