@@ -62,6 +62,8 @@ public:
 
     // Queues one quadtree leaf instance for drawing, using the given heightmap slice.
     void addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
+    void addBridge(const WorldGridQuadtreeLeafId& leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
+    void addCoarseBridge(const WorldGridQuadtreeLeafId& leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
 
     // Uploads staged instance and indirect draw data into GPU buffers.
     void upload(SDL_GPUCopyPass *copyPass);
@@ -89,6 +91,15 @@ private:
     {
         float position[3]{};
         std::uint32_t packedMetadata = 0;
+    };
+
+    struct MeshResources
+    {
+        SDL_GPUBuffer* vertexBuffer = nullptr;
+        SDL_GPUTransferBuffer* vertexTransferBuffer = nullptr;
+        SDL_GPUBuffer* indexBuffer = nullptr;
+        SDL_GPUTransferBuffer* indexTransferBuffer = nullptr;
+        std::uint32_t indexCount = 0;
     };
 
     struct alignas(16) HeightmapGenerationUniforms
@@ -129,14 +140,23 @@ private:
     static_assert(offsetof(InstanceData, packedMetadata) == 12, "Terrain packed metadata must stay at offset 12.");
     static_assert(sizeof(HeightmapGenerationUniforms) == 224, "Heightmap generation uniforms must stay tightly packed.");
 
-    [[nodiscard]] static std::uint32_t packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow);
+    [[nodiscard]] static std::uint32_t packMetadata(
+        std::uint16_t sliceIndex,
+        std::uint8_t scalePow,
+        std::uint8_t edgeIndex = 0);
 
-    // Creates the terrain graphics pipeline and loads the terrain shaders.
-    void createPipeline(const std::filesystem::path &shaderDirectory);
+    // Creates the terrain graphics pipelines and loads the terrain shaders.
+    void createPipelines(const std::filesystem::path& shaderDirectory);
     void createHeightmapComputePipeline(const std::filesystem::path& shaderDirectory);
 
-    // Builds the static mesh buffers for the reusable terrain patch.
+    // Builds the static mesh buffers for the reusable terrain meshes.
     void createStaticMeshResources();
+    void createMeshResources(
+        const std::vector<Vertex>& vertices,
+        const std::vector<std::uint32_t>& indices,
+        MeshResources& meshResources);
+    [[nodiscard]] static float instanceDistanceSquared(const InstanceData& instance);
+    static void sortInstances(InstanceData* instances, std::uint16_t instanceCount);
 
     // Convenience helper for filling SDL's indexed-indirect draw struct.
     [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(
@@ -146,23 +166,31 @@ private:
         std::int32_t vertexOffset,
         std::uint32_t firstInstance);
 
-    // Pipeline object for the terrain pass.
-    SDL_GPUGraphicsPipeline *m_pipeline = nullptr;
+    // Pipeline objects for the terrain pass.
+    SDL_GPUGraphicsPipeline* m_mainPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* m_bridgePipeline = nullptr;
     SDL_GPUComputePipeline* m_heightmapComputePipeline = nullptr;
 
-    // Static patch mesh buffers plus their one-time upload buffers.
-    SDL_GPUBuffer *m_vertexBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_vertexTransferBuffer = nullptr;
-    SDL_GPUBuffer *m_indexBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_indexTransferBuffer = nullptr;
+    // Static reusable terrain meshes plus their one-time upload buffers.
+    MeshResources m_mainMesh{};
+    MeshResources m_bridgeMesh{};
+    MeshResources m_coarseBridgeMesh{};
 
     // Per-frame instance data buffer plus staging buffer.
-    SDL_GPUBuffer *m_instanceBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_instanceTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_instanceBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_instanceTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_bridgeInstanceBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_bridgeInstanceTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_coarseBridgeInstanceBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_coarseBridgeInstanceTransferBuffer = nullptr;
 
     // Indirect draw-command buffer plus staging buffer.
-    SDL_GPUBuffer *m_indirectBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_indirectTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_indirectBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_indirectTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_bridgeIndirectBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_bridgeIndirectTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_coarseBridgeIndirectBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_coarseBridgeIndirectTransferBuffer = nullptr;
 
     // GPU heightmap slice storage written directly by the compute shader.
     SDL_GPUBuffer* m_heightmapGenerationBuffer = nullptr;
@@ -171,10 +199,9 @@ private:
     SDL_GPUBuffer* m_heightmapExtentsBuffer = nullptr;
     SDL_GPUTransferBuffer* m_heightmapExtentsInitTransferBuffer = nullptr;
 
-    // Cached index count for the reusable terrain patch mesh.
-    std::uint32_t m_mainIndexCount = 0;
-
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
+    std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_bridgeInstanceData{};
+    std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_coarseBridgeInstanceData{};
     std::array<HeightmapGenerationUniforms, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingHeightmapGenerations{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationLeafIds{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedLeafIds{};
@@ -182,6 +209,8 @@ private:
     static constexpr std::size_t kHeightmapReadbackSlotCount = 8;
     std::array<PendingExtentsReadback, kHeightmapReadbackSlotCount> m_pendingExtentsReadbacks{};
     std::uint16_t m_instanceCount = 0;
+    std::uint16_t m_bridgeInstanceCount = 0;
+    std::uint16_t m_coarseBridgeInstanceCount = 0;
     std::uint16_t m_pendingHeightmapGenerationCount = 0;
     std::uint16_t m_lastDispatchedGenerationCount = 0;
     std::uint16_t m_pendingFenceReadbackSlot = UINT16_MAX;

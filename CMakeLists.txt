@@ -104,6 +104,7 @@ set(TRIANGLE_FRAG_SPV ${SHADER_OUTPUT_DIR}/triangle.frag.spv)
 set(LINE_VERT_SPV ${SHADER_OUTPUT_DIR}/line.vert.spv)
 set(LINE_FRAG_SPV ${SHADER_OUTPUT_DIR}/line.frag.spv)
 set(QUADTREE_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.vert.spv)
+set(QUADTREE_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh_bridge.vert.spv)
 set(QUADTREE_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.frag.spv)
 set(HEIGHTMAP_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/heightmap_generate.comp.spv)
 set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
@@ -120,6 +121,7 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/triangle.frag ${TRIANGLE_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/line.vert ${LINE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/line.frag ${LINE_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.vert ${QUADTREE_MESH_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_MESH_BRIDGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_GENERATE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
@@ -138,6 +140,7 @@ add_custom_target(shaders ALL
         ${LINE_VERT_SPV}
         ${LINE_FRAG_SPV}
         ${QUADTREE_MESH_VERT_SPV}
+        ${QUADTREE_MESH_BRIDGE_VERT_SPV}
         ${QUADTREE_MESH_FRAG_SPV}
         ${HEIGHTMAP_GENERATE_COMP_SPV}
         ${SKYBOX_VERT_SPV}

@@ -7,11 +7,13 @@
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>
+#include <utility>
 #include <vector>
 
 namespace
 {
 constexpr double kVisibilityBoundsHalfHeight = 10000.0;
+constexpr double kEdgeCoverageEpsilon = 1.0e-4;
 
 void initializeBaseNode(
     QuadtreeNode& node,
@@ -251,26 +253,31 @@ void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
 
     for (const QuadtreeNode& node : m_nodes)
     {
-        if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask) ||
-            !nodeHasFlag(node, QuadtreeNode::ShouldDrawMask))
+        if (!nodeContributesTerrainDraw(node))
         {
             continue;
         }
 
-        if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
+        std::uint16_t sliceIndex = 0;
+        if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, sliceIndex))
         {
-            if (!nodeHasFlag(node, QuadtreeNode::IsUploadingMask))
+            continue;
+        }
+
+        m_heightmapManager.requestLeaf(node.nodeId, *renderEngines.quadtreeMeshRenderer);
+
+        for (std::uint8_t edgeIndex = 0; edgeIndex < 4; ++edgeIndex)
+        {
+            if (edgeHasDrawableNeighborCoverage(node, edgeIndex))
             {
-                m_heightmapManager.requestLeaf(node.nodeId, *renderEngines.quadtreeMeshRenderer);
+                renderEngines.quadtreeMeshRenderer->addBridge(node.nodeId, sliceIndex, edgeIndex);
+                continue;
             }
-            continue;
-        }
 
-        if (nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) &&
-            !nodeHasFlag(node, QuadtreeNode::IsUploadingMask))
-        {
-            // While subdividing, the parent stays drawable until the child subtrees can cover its area.
-            m_heightmapManager.requestLeaf(node.nodeId, *renderEngines.quadtreeMeshRenderer);
+            if (edgeHasDrawableCoarserNeighbor(node, edgeIndex))
+            {
+                renderEngines.quadtreeMeshRenderer->addCoarseBridge(node.nodeId, sliceIndex, edgeIndex);
+            }
         }
     }
 }
@@ -598,6 +605,208 @@ void WorldGridQuadtree::applyGeneratedExtentsToKnownNodes(
         node.maxHeight = extents.maxHeight;
         setNodeFlag(node, QuadtreeNode::HasExtentsMask, true);
     }
+}
+
+bool WorldGridQuadtree::nodeContributesTerrainDraw(const QuadtreeNode& node)
+{
+    if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask) ||
+        !nodeHasFlag(node, QuadtreeNode::ShouldDrawMask))
+    {
+        return false;
+    }
+
+    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
+    {
+        return !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
+    }
+
+    return
+        nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) &&
+        !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
+}
+
+bool WorldGridQuadtree::nodeHasResidentTerrainSurface(const QuadtreeNode& node)
+{
+    if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask))
+    {
+        return false;
+    }
+
+    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
+    {
+        return !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
+    }
+
+    return
+        nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) &&
+        !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
+}
+
+bool WorldGridQuadtree::edgeHasDrawableNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const
+{
+    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
+    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
+    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
+    const double nodeSize = nodeMax.x - nodeMin.x;
+
+    std::vector<std::pair<double, double>> coverageIntervals;
+    coverageIntervals.reserve(8);
+
+    for (const QuadtreeNode& candidate : m_nodes)
+    {
+        if (&candidate == &node || !nodeHasResidentTerrainSurface(candidate))
+        {
+            continue;
+        }
+
+        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
+        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
+        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
+        const double candidateSize = candidateMax.x - candidateMin.x;
+        if (candidateSize > nodeSize + kEdgeCoverageEpsilon)
+        {
+            continue;
+        }
+
+        double intervalStart = 0.0;
+        double intervalEnd = 0.0;
+        bool touchesEdge = false;
+
+        switch (edgeIndex)
+        {
+        case 0:
+            touchesEdge = std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.z, candidateMin.z);
+            intervalEnd = std::min(nodeMax.z, candidateMax.z);
+            break;
+        case 1:
+            touchesEdge = std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.x, candidateMin.x);
+            intervalEnd = std::min(nodeMax.x, candidateMax.x);
+            break;
+        case 2:
+            touchesEdge = std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.z, candidateMin.z);
+            intervalEnd = std::min(nodeMax.z, candidateMax.z);
+            break;
+        case 3:
+            touchesEdge = std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.x, candidateMin.x);
+            intervalEnd = std::min(nodeMax.x, candidateMax.x);
+            break;
+        default:
+            return false;
+        }
+
+        if (!touchesEdge || intervalEnd <= intervalStart + kEdgeCoverageEpsilon)
+        {
+            continue;
+        }
+
+        coverageIntervals.emplace_back(intervalStart, intervalEnd);
+    }
+
+    if (coverageIntervals.empty())
+    {
+        return false;
+    }
+
+    std::sort(coverageIntervals.begin(), coverageIntervals.end());
+    const double targetStart = (edgeIndex == 0 || edgeIndex == 2) ? nodeMin.z : nodeMin.x;
+    const double targetEnd = (edgeIndex == 0 || edgeIndex == 2) ? nodeMax.z : nodeMax.x;
+    if (coverageIntervals.front().first > targetStart + kEdgeCoverageEpsilon)
+    {
+        return false;
+    }
+
+    double coveredEnd = coverageIntervals.front().second;
+    if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
+    {
+        return true;
+    }
+
+    for (std::size_t intervalIndex = 1; intervalIndex < coverageIntervals.size(); ++intervalIndex)
+    {
+        const auto& [intervalStart, intervalEnd] = coverageIntervals[intervalIndex];
+        if (intervalStart > coveredEnd + kEdgeCoverageEpsilon)
+        {
+            return false;
+        }
+
+        coveredEnd = std::max(coveredEnd, intervalEnd);
+        if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool WorldGridQuadtree::edgeHasDrawableCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const
+{
+    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
+    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
+    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
+    const double nodeSize = nodeMax.x - nodeMin.x;
+    const double expectedNeighborSize = nodeSize * 2.0;
+
+    for (const QuadtreeNode& candidate : m_nodes)
+    {
+        if (&candidate == &node || !nodeHasResidentTerrainSurface(candidate))
+        {
+            continue;
+        }
+
+        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
+        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
+        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
+        const double candidateSize = candidateMax.x - candidateMin.x;
+        if (std::abs(candidateSize - expectedNeighborSize) > kEdgeCoverageEpsilon)
+        {
+            continue;
+        }
+
+        switch (edgeIndex)
+        {
+        case 0:
+            if (std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon &&
+                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
+                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        case 1:
+            if (std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon &&
+                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
+                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        case 2:
+            if (std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon &&
+                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
+                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        case 3:
+            if (std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon &&
+                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
+                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        default:
+            return false;
+        }
+    }
+
+    return false;
 }
 
 void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager::Camera& activeCamera)

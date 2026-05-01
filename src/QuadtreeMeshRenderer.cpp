@@ -29,6 +29,9 @@ constexpr std::uint32_t kHeightmapComputeThreadCountY = 16;
 constexpr std::uint32_t kHeightmapComputeThreadCountZ = 1;
 constexpr std::int32_t kInitialMinHeightCentimeters = std::numeric_limits<std::int32_t>::max();
 constexpr std::int32_t kInitialMaxHeightCentimeters = std::numeric_limits<std::int32_t>::lowest();
+constexpr std::uint32_t kBridgeOuterVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount + 1;
+constexpr std::uint32_t kBridgeInnerVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount - 1;
+constexpr std::uint32_t kCoarseBridgeOuterVertexCount = (AppConfig::Terrain::kHeightmapLeafIntervalCount / 2) + 1;
 }
 
 void QuadtreeMeshRenderer::initialize(
@@ -40,7 +43,7 @@ void QuadtreeMeshRenderer::initialize(
 {
     initializeRendererBase(device, colorFormat, depthFormat);
     createStaticMeshResources();
-    createPipeline(shaderDirectory);
+    createPipelines(shaderDirectory);
     createHeightmapComputePipeline(shaderDirectory);
 
     SDL_GPUBufferCreateInfo instanceInfo{};
@@ -61,6 +64,42 @@ void QuadtreeMeshRenderer::initialize(
         throwSdlError("Failed to create quadtree mesh instance transfer buffer.");
     }
 
+    SDL_GPUBufferCreateInfo bridgeInstanceInfo{};
+    bridgeInstanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+    bridgeInstanceInfo.size = static_cast<Uint32>(sizeof(InstanceData) * m_bridgeInstanceData.size());
+    m_bridgeInstanceBuffer = SDL_CreateGPUBuffer(m_device, &bridgeInstanceInfo);
+    if (m_bridgeInstanceBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree bridge instance buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo bridgeInstanceTransferInfo{};
+    bridgeInstanceTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    bridgeInstanceTransferInfo.size = bridgeInstanceInfo.size;
+    m_bridgeInstanceTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &bridgeInstanceTransferInfo);
+    if (m_bridgeInstanceTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree bridge instance transfer buffer.");
+    }
+
+    SDL_GPUBufferCreateInfo coarseBridgeInstanceInfo{};
+    coarseBridgeInstanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+    coarseBridgeInstanceInfo.size = static_cast<Uint32>(sizeof(InstanceData) * m_coarseBridgeInstanceData.size());
+    m_coarseBridgeInstanceBuffer = SDL_CreateGPUBuffer(m_device, &coarseBridgeInstanceInfo);
+    if (m_coarseBridgeInstanceBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree coarse bridge instance buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo coarseBridgeInstanceTransferInfo{};
+    coarseBridgeInstanceTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    coarseBridgeInstanceTransferInfo.size = coarseBridgeInstanceInfo.size;
+    m_coarseBridgeInstanceTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &coarseBridgeInstanceTransferInfo);
+    if (m_coarseBridgeInstanceTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree coarse bridge instance transfer buffer.");
+    }
+
     SDL_GPUBufferCreateInfo indirectInfo{};
     indirectInfo.usage = SDL_GPU_BUFFERUSAGE_INDIRECT;
     indirectInfo.size = sizeof(SDL_GPUIndexedIndirectDrawCommand);
@@ -77,6 +116,42 @@ void QuadtreeMeshRenderer::initialize(
     if (m_indirectTransferBuffer == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh indirect transfer buffer.");
+    }
+
+    SDL_GPUBufferCreateInfo bridgeIndirectInfo{};
+    bridgeIndirectInfo.usage = SDL_GPU_BUFFERUSAGE_INDIRECT;
+    bridgeIndirectInfo.size = sizeof(SDL_GPUIndexedIndirectDrawCommand);
+    m_bridgeIndirectBuffer = SDL_CreateGPUBuffer(m_device, &bridgeIndirectInfo);
+    if (m_bridgeIndirectBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree bridge indirect buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo bridgeIndirectTransferInfo{};
+    bridgeIndirectTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    bridgeIndirectTransferInfo.size = bridgeIndirectInfo.size;
+    m_bridgeIndirectTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &bridgeIndirectTransferInfo);
+    if (m_bridgeIndirectTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree bridge indirect transfer buffer.");
+    }
+
+    SDL_GPUBufferCreateInfo coarseBridgeIndirectInfo{};
+    coarseBridgeIndirectInfo.usage = SDL_GPU_BUFFERUSAGE_INDIRECT;
+    coarseBridgeIndirectInfo.size = sizeof(SDL_GPUIndexedIndirectDrawCommand);
+    m_coarseBridgeIndirectBuffer = SDL_CreateGPUBuffer(m_device, &coarseBridgeIndirectInfo);
+    if (m_coarseBridgeIndirectBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree coarse bridge indirect buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo coarseBridgeIndirectTransferInfo{};
+    coarseBridgeIndirectTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    coarseBridgeIndirectTransferInfo.size = coarseBridgeIndirectInfo.size;
+    m_coarseBridgeIndirectTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &coarseBridgeIndirectTransferInfo);
+    if (m_coarseBridgeIndirectTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create quadtree coarse bridge indirect transfer buffer.");
     }
 
     SDL_GPUBufferCreateInfo heightmapInfo{};
@@ -181,10 +256,15 @@ void QuadtreeMeshRenderer::shutdown()
         SDL_ReleaseGPUComputePipeline(m_device, m_heightmapComputePipeline);
         m_heightmapComputePipeline = nullptr;
     }
-    if (m_pipeline != nullptr)
+    if (m_bridgePipeline != nullptr)
     {
-        SDL_ReleaseGPUGraphicsPipeline(m_device, m_pipeline);
-        m_pipeline = nullptr;
+        SDL_ReleaseGPUGraphicsPipeline(m_device, m_bridgePipeline);
+        m_bridgePipeline = nullptr;
+    }
+    if (m_mainPipeline != nullptr)
+    {
+        SDL_ReleaseGPUGraphicsPipeline(m_device, m_mainPipeline);
+        m_mainPipeline = nullptr;
     }
     if (m_heightmapBuffer != nullptr)
     {
@@ -201,6 +281,26 @@ void QuadtreeMeshRenderer::shutdown()
         SDL_ReleaseGPUBuffer(m_device, m_indirectBuffer);
         m_indirectBuffer = nullptr;
     }
+    if (m_bridgeIndirectTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer);
+        m_bridgeIndirectTransferBuffer = nullptr;
+    }
+    if (m_bridgeIndirectBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_bridgeIndirectBuffer);
+        m_bridgeIndirectBuffer = nullptr;
+    }
+    if (m_coarseBridgeIndirectTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_coarseBridgeIndirectTransferBuffer);
+        m_coarseBridgeIndirectTransferBuffer = nullptr;
+    }
+    if (m_coarseBridgeIndirectBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_coarseBridgeIndirectBuffer);
+        m_coarseBridgeIndirectBuffer = nullptr;
+    }
     if (m_instanceTransferBuffer != nullptr)
     {
         SDL_ReleaseGPUTransferBuffer(m_device, m_instanceTransferBuffer);
@@ -211,26 +311,54 @@ void QuadtreeMeshRenderer::shutdown()
         SDL_ReleaseGPUBuffer(m_device, m_instanceBuffer);
         m_instanceBuffer = nullptr;
     }
-    if (m_indexTransferBuffer != nullptr)
+    if (m_bridgeInstanceTransferBuffer != nullptr)
     {
-        SDL_ReleaseGPUTransferBuffer(m_device, m_indexTransferBuffer);
-        m_indexTransferBuffer = nullptr;
+        SDL_ReleaseGPUTransferBuffer(m_device, m_bridgeInstanceTransferBuffer);
+        m_bridgeInstanceTransferBuffer = nullptr;
     }
-    if (m_indexBuffer != nullptr)
+    if (m_bridgeInstanceBuffer != nullptr)
     {
-        SDL_ReleaseGPUBuffer(m_device, m_indexBuffer);
-        m_indexBuffer = nullptr;
+        SDL_ReleaseGPUBuffer(m_device, m_bridgeInstanceBuffer);
+        m_bridgeInstanceBuffer = nullptr;
     }
-    if (m_vertexTransferBuffer != nullptr)
+    if (m_coarseBridgeInstanceTransferBuffer != nullptr)
     {
-        SDL_ReleaseGPUTransferBuffer(m_device, m_vertexTransferBuffer);
-        m_vertexTransferBuffer = nullptr;
+        SDL_ReleaseGPUTransferBuffer(m_device, m_coarseBridgeInstanceTransferBuffer);
+        m_coarseBridgeInstanceTransferBuffer = nullptr;
     }
-    if (m_vertexBuffer != nullptr)
+    if (m_coarseBridgeInstanceBuffer != nullptr)
     {
-        SDL_ReleaseGPUBuffer(m_device, m_vertexBuffer);
-        m_vertexBuffer = nullptr;
+        SDL_ReleaseGPUBuffer(m_device, m_coarseBridgeInstanceBuffer);
+        m_coarseBridgeInstanceBuffer = nullptr;
     }
+
+    auto releaseMeshResources = [this](MeshResources& meshResources)
+    {
+        if (meshResources.indexTransferBuffer != nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, meshResources.indexTransferBuffer);
+            meshResources.indexTransferBuffer = nullptr;
+        }
+        if (meshResources.indexBuffer != nullptr)
+        {
+            SDL_ReleaseGPUBuffer(m_device, meshResources.indexBuffer);
+            meshResources.indexBuffer = nullptr;
+        }
+        if (meshResources.vertexTransferBuffer != nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer);
+            meshResources.vertexTransferBuffer = nullptr;
+        }
+        if (meshResources.vertexBuffer != nullptr)
+        {
+            SDL_ReleaseGPUBuffer(m_device, meshResources.vertexBuffer);
+            meshResources.vertexBuffer = nullptr;
+        }
+        meshResources.indexCount = 0;
+    };
+    releaseMeshResources(m_coarseBridgeMesh);
+    releaseMeshResources(m_bridgeMesh);
+    releaseMeshResources(m_mainMesh);
 
     clear();
     m_pendingHeightmapGenerationCount = 0;
@@ -241,6 +369,8 @@ void QuadtreeMeshRenderer::shutdown()
 void QuadtreeMeshRenderer::clear()
 {
     m_instanceCount = 0;
+    m_bridgeInstanceCount = 0;
+    m_coarseBridgeInstanceCount = 0;
 }
 
 void QuadtreeMeshRenderer::setActiveCamera(const Position& cameraPosition)
@@ -374,6 +504,54 @@ void QuadtreeMeshRenderer::addLeaf(const WorldGridQuadtreeLeafId& leafId, std::u
     };
 }
 
+void QuadtreeMeshRenderer::addBridge(
+    const WorldGridQuadtreeLeafId& leafId,
+    std::uint16_t sliceIndex,
+    std::uint8_t edgeIndex)
+{
+    if (m_bridgeInstanceCount >= m_bridgeInstanceData.size())
+    {
+        return;
+    }
+
+    const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(leafId);
+    (void)maxCorner;
+    const glm::vec3 localMinCorner = localPositionFromWorldPosition(minCorner);
+
+    m_bridgeInstanceData[m_bridgeInstanceCount++] = {
+        .position{
+            localMinCorner.x,
+            localMinCorner.y,
+            localMinCorner.z,
+        },
+        .packedMetadata = packMetadata(sliceIndex, worldGridQuadtreeLeafScalePow(leafId), edgeIndex),
+    };
+}
+
+void QuadtreeMeshRenderer::addCoarseBridge(
+    const WorldGridQuadtreeLeafId& leafId,
+    std::uint16_t sliceIndex,
+    std::uint8_t edgeIndex)
+{
+    if (m_coarseBridgeInstanceCount >= m_coarseBridgeInstanceData.size())
+    {
+        return;
+    }
+
+    const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(leafId);
+    (void)maxCorner;
+    const glm::vec3 localMinCorner = localPositionFromWorldPosition(minCorner);
+
+    m_coarseBridgeInstanceData[m_coarseBridgeInstanceCount++] = {
+        .position{
+            localMinCorner.x,
+            localMinCorner.y,
+            localMinCorner.z,
+        },
+        .packedMetadata = packMetadata(sliceIndex, worldGridQuadtreeLeafScalePow(leafId), edgeIndex),
+    };
+}
+
 void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::Upload");
@@ -425,29 +603,7 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
 
     if (m_instanceCount > 0)
     {
-        if (m_instanceCount > 1)
-        {
-            std::sort(
-                m_instanceData.begin(),
-                m_instanceData.begin() + m_instanceCount,
-                [](const InstanceData& left, const InstanceData& right)
-                {
-                    const auto distanceSquared = [](const InstanceData& instance)
-                    {
-                        const std::uint8_t scalePow = static_cast<std::uint8_t>((instance.packedMetadata >> 16U) & 0xFFU);
-                        const float leafSize = static_cast<float>(
-                            AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(1ULL << scalePow));
-                        const float centerX = instance.position[0] + (leafSize * 0.5f);
-                        const float centerY = instance.position[1];
-                        const float centerZ = instance.position[2] + (leafSize * 0.5f);
-                        return
-                            (centerX * centerX) +
-                            (centerY * centerY) +
-                            (centerZ * centerZ);
-                    };
-                    return distanceSquared(left) < distanceSquared(right);
-                });
-        }
+        sortInstances(m_instanceData.data(), m_instanceCount);
 
         void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_instanceTransferBuffer, true);
         std::memcpy(mappedInstances, m_instanceData.data(), sizeof(InstanceData) * m_instanceCount);
@@ -461,7 +617,7 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
         SDL_UploadToGPUBuffer(copyPass, &instanceSource, &instanceDestination, true);
 
         const SDL_GPUIndexedIndirectDrawCommand drawCommand = makeDrawCommand(
-            m_mainIndexCount,
+            m_mainMesh.indexCount,
             m_instanceCount,
             0,
             0,
@@ -480,6 +636,79 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
         SDL_UploadToGPUBuffer(copyPass, &indirectSource, &indirectDestination, true);
     }
 
+    if (m_bridgeInstanceCount > 0)
+    {
+        sortInstances(m_bridgeInstanceData.data(), m_bridgeInstanceCount);
+
+        void* mappedBridgeInstances = SDL_MapGPUTransferBuffer(m_device, m_bridgeInstanceTransferBuffer, true);
+        std::memcpy(
+            mappedBridgeInstances,
+            m_bridgeInstanceData.data(),
+            sizeof(InstanceData) * m_bridgeInstanceCount);
+        SDL_UnmapGPUTransferBuffer(m_device, m_bridgeInstanceTransferBuffer);
+
+        SDL_GPUTransferBufferLocation bridgeInstanceSource{};
+        bridgeInstanceSource.transfer_buffer = m_bridgeInstanceTransferBuffer;
+        SDL_GPUBufferRegion bridgeInstanceDestination{};
+        bridgeInstanceDestination.buffer = m_bridgeInstanceBuffer;
+        bridgeInstanceDestination.size = static_cast<Uint32>(sizeof(InstanceData) * m_bridgeInstanceCount);
+        SDL_UploadToGPUBuffer(copyPass, &bridgeInstanceSource, &bridgeInstanceDestination, true);
+
+        const SDL_GPUIndexedIndirectDrawCommand bridgeDrawCommand = makeDrawCommand(
+            m_bridgeMesh.indexCount,
+            m_bridgeInstanceCount,
+            0,
+            0,
+            0);
+
+        void* mappedBridgeIndirect = SDL_MapGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer, true);
+        std::memcpy(mappedBridgeIndirect, &bridgeDrawCommand, sizeof(bridgeDrawCommand));
+        SDL_UnmapGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer);
+
+        SDL_GPUTransferBufferLocation bridgeIndirectSource{};
+        bridgeIndirectSource.transfer_buffer = m_bridgeIndirectTransferBuffer;
+        SDL_GPUBufferRegion bridgeIndirectDestination{};
+        bridgeIndirectDestination.buffer = m_bridgeIndirectBuffer;
+        bridgeIndirectDestination.size = sizeof(SDL_GPUIndexedIndirectDrawCommand);
+        SDL_UploadToGPUBuffer(copyPass, &bridgeIndirectSource, &bridgeIndirectDestination, true);
+    }
+
+    if (m_coarseBridgeInstanceCount > 0)
+    {
+        sortInstances(m_coarseBridgeInstanceData.data(), m_coarseBridgeInstanceCount);
+
+        void* mappedCoarseBridgeInstances = SDL_MapGPUTransferBuffer(m_device, m_coarseBridgeInstanceTransferBuffer, true);
+        std::memcpy(
+            mappedCoarseBridgeInstances,
+            m_coarseBridgeInstanceData.data(),
+            sizeof(InstanceData) * m_coarseBridgeInstanceCount);
+        SDL_UnmapGPUTransferBuffer(m_device, m_coarseBridgeInstanceTransferBuffer);
+
+        SDL_GPUTransferBufferLocation coarseBridgeInstanceSource{};
+        coarseBridgeInstanceSource.transfer_buffer = m_coarseBridgeInstanceTransferBuffer;
+        SDL_GPUBufferRegion coarseBridgeInstanceDestination{};
+        coarseBridgeInstanceDestination.buffer = m_coarseBridgeInstanceBuffer;
+        coarseBridgeInstanceDestination.size = static_cast<Uint32>(sizeof(InstanceData) * m_coarseBridgeInstanceCount);
+        SDL_UploadToGPUBuffer(copyPass, &coarseBridgeInstanceSource, &coarseBridgeInstanceDestination, true);
+
+        const SDL_GPUIndexedIndirectDrawCommand coarseBridgeDrawCommand = makeDrawCommand(
+            m_coarseBridgeMesh.indexCount,
+            m_coarseBridgeInstanceCount,
+            0,
+            0,
+            0);
+
+        void* mappedCoarseBridgeIndirect = SDL_MapGPUTransferBuffer(m_device, m_coarseBridgeIndirectTransferBuffer, true);
+        std::memcpy(mappedCoarseBridgeIndirect, &coarseBridgeDrawCommand, sizeof(coarseBridgeDrawCommand));
+        SDL_UnmapGPUTransferBuffer(m_device, m_coarseBridgeIndirectTransferBuffer);
+
+        SDL_GPUTransferBufferLocation coarseBridgeIndirectSource{};
+        coarseBridgeIndirectSource.transfer_buffer = m_coarseBridgeIndirectTransferBuffer;
+        SDL_GPUBufferRegion coarseBridgeIndirectDestination{};
+        coarseBridgeIndirectDestination.buffer = m_coarseBridgeIndirectBuffer;
+        coarseBridgeIndirectDestination.size = sizeof(SDL_GPUIndexedIndirectDrawCommand);
+        SDL_UploadToGPUBuffer(copyPass, &coarseBridgeIndirectSource, &coarseBridgeIndirectDestination, true);
+    }
 }
 
 void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* commandBuffer)
@@ -624,21 +853,10 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass* renderPass, SDL_GPUCommandB
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::Render");
 
-    if (m_instanceCount == 0)
+    if (m_instanceCount == 0 && m_bridgeInstanceCount == 0 && m_coarseBridgeInstanceCount == 0)
     {
         return;
     }
-
-    SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
-
-    const SDL_GPUBufferBinding vertexBinding{ m_vertexBuffer, 0 };
-    SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
-
-    SDL_GPUBufferBinding indexBinding{ m_indexBuffer, 0 };
-    SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-    SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_instanceBuffer };
-    SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
 
     TerrainUniforms uniforms{};
     uniforms.viewProjection = viewProjection;
@@ -648,14 +866,54 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass* renderPass, SDL_GPUCommandB
     uniforms.terrainHeightParams = glm::vec4(m_terrainBaseHeight, m_terrainHeightAmplitude, 0.0f, 0.0f);
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
-    SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
+    if (m_instanceCount > 0)
+    {
+        SDL_BindGPUGraphicsPipeline(renderPass, m_mainPipeline);
+
+        const SDL_GPUBufferBinding vertexBinding{ m_mainMesh.vertexBuffer, 0 };
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+
+        const SDL_GPUBufferBinding indexBinding{ m_mainMesh.indexBuffer, 0 };
+        SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_instanceBuffer };
+        SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
+        SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
+    }
+
+    if (m_bridgeInstanceCount > 0)
+    {
+        SDL_BindGPUGraphicsPipeline(renderPass, m_bridgePipeline);
+
+        const SDL_GPUBufferBinding vertexBinding{ m_bridgeMesh.vertexBuffer, 0 };
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+
+        const SDL_GPUBufferBinding indexBinding{ m_bridgeMesh.indexBuffer, 0 };
+        SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_bridgeInstanceBuffer };
+        SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
+        SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, 1);
+    }
+
+    if (m_coarseBridgeInstanceCount > 0)
+    {
+        SDL_BindGPUGraphicsPipeline(renderPass, m_bridgePipeline);
+
+        const SDL_GPUBufferBinding vertexBinding{ m_coarseBridgeMesh.vertexBuffer, 0 };
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+
+        const SDL_GPUBufferBinding indexBinding{ m_coarseBridgeMesh.indexBuffer, 0 };
+        SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_coarseBridgeInstanceBuffer };
+        SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
+        SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_coarseBridgeIndirectBuffer, 0, 1);
+    }
 }
 
-void QuadtreeMeshRenderer::createPipeline(const std::filesystem::path& shaderDirectory)
+void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path& shaderDirectory)
 {
-    SDL_GPUShader* vertexShader = createShader(shaderDirectory / "quadtree_mesh.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 2);
-    SDL_GPUShader* fragmentShader = createShader(shaderDirectory / "quadtree_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
-
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
     vertexBufferDescription.pitch = sizeof(Vertex);
@@ -686,8 +944,6 @@ void QuadtreeMeshRenderer::createPipeline(const std::filesystem::path& shaderDir
     colorTargetDescription.blend_state = blendState;
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.vertex_shader = vertexShader;
-    pipelineInfo.fragment_shader = fragmentShader;
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
@@ -706,13 +962,37 @@ void QuadtreeMeshRenderer::createPipeline(const std::filesystem::path& shaderDir
     pipelineInfo.vertex_input_state.num_vertex_attributes = 2;
     pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
-    m_pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
-    SDL_ReleaseGPUShader(m_device, fragmentShader);
-    SDL_ReleaseGPUShader(m_device, vertexShader);
+    auto createGraphicsPipeline = [this, &pipelineInfo, &shaderDirectory](const char* vertexShaderName)
+    {
+        SDL_GPUShader* vertexShader = createShader(
+            shaderDirectory / vertexShaderName,
+            SDL_GPU_SHADERSTAGE_VERTEX,
+            1,
+            2);
+        SDL_GPUShader* fragmentShader = createShader(
+            shaderDirectory / "quadtree_mesh.frag.spv",
+            SDL_GPU_SHADERSTAGE_FRAGMENT,
+            0,
+            0);
 
-    if (m_pipeline == nullptr)
+        pipelineInfo.vertex_shader = vertexShader;
+        pipelineInfo.fragment_shader = fragmentShader;
+        SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
+        SDL_ReleaseGPUShader(m_device, fragmentShader);
+        SDL_ReleaseGPUShader(m_device, vertexShader);
+        return pipeline;
+    };
+
+    m_mainPipeline = createGraphicsPipeline("quadtree_mesh.vert.spv");
+    if (m_mainPipeline == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh graphics pipeline.");
+    }
+
+    m_bridgePipeline = createGraphicsPipeline("quadtree_mesh_bridge.vert.spv");
+    if (m_bridgePipeline == nullptr)
+    {
+        throwSdlError("Failed to create quadtree bridge graphics pipeline.");
     }
 }
 
@@ -780,13 +1060,133 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
         }
     }
 
-    m_mainIndexCount = static_cast<std::uint32_t>(indices.size());
+    createMeshResources(vertices, indices, m_mainMesh);
 
+    std::vector<Vertex> bridgeVertices;
+    bridgeVertices.reserve(kBridgeOuterVertexCount + kBridgeInnerVertexCount);
+    std::array<std::uint32_t, kBridgeOuterVertexCount> outerVertexIndices{};
+    std::array<std::uint32_t, kBridgeInnerVertexCount> innerVertexIndices{};
+
+    for (std::uint32_t z = 0; z < kBridgeOuterVertexCount; ++z)
+    {
+        outerVertexIndices[z] = static_cast<std::uint32_t>(bridgeVertices.size());
+        bridgeVertices.push_back({
+            { 0.0f, static_cast<float>(z) },
+            { static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo), static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z) },
+        });
+    }
+
+    for (std::uint32_t z = 1; z < AppConfig::Terrain::kHeightmapLeafIntervalCount; ++z)
+    {
+        innerVertexIndices[z - 1] = static_cast<std::uint32_t>(bridgeVertices.size());
+        bridgeVertices.push_back({
+            { kRenderedLocalCoordOffset, static_cast<float>(z) },
+            { kRenderedSampleCoordOffset, static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z) },
+        });
+    }
+
+    std::vector<std::uint32_t> bridgeIndices;
+    bridgeIndices.reserve((AppConfig::Terrain::kHeightmapLeafIntervalCount * 6) - 6);
+
+    bridgeIndices.push_back(outerVertexIndices[0]);
+    bridgeIndices.push_back(outerVertexIndices[1]);
+    bridgeIndices.push_back(innerVertexIndices[0]);
+
+    for (std::uint32_t z = 1; z < AppConfig::Terrain::kHeightmapLeafIntervalCount - 1; ++z)
+    {
+        const std::uint32_t outerTop = outerVertexIndices[z];
+        const std::uint32_t outerBottom = outerVertexIndices[z + 1];
+        const std::uint32_t innerTop = innerVertexIndices[z - 1];
+        const std::uint32_t innerBottom = innerVertexIndices[z];
+
+        bridgeIndices.push_back(outerTop);
+        bridgeIndices.push_back(outerBottom);
+        bridgeIndices.push_back(innerTop);
+        bridgeIndices.push_back(innerTop);
+        bridgeIndices.push_back(outerBottom);
+        bridgeIndices.push_back(innerBottom);
+    }
+
+    bridgeIndices.push_back(outerVertexIndices[AppConfig::Terrain::kHeightmapLeafIntervalCount - 1]);
+    bridgeIndices.push_back(outerVertexIndices[AppConfig::Terrain::kHeightmapLeafIntervalCount]);
+    bridgeIndices.push_back(innerVertexIndices[kBridgeInnerVertexCount - 1]);
+
+    createMeshResources(bridgeVertices, bridgeIndices, m_bridgeMesh);
+
+    std::vector<Vertex> coarseBridgeVertices;
+    coarseBridgeVertices.reserve(kCoarseBridgeOuterVertexCount + kBridgeInnerVertexCount);
+    std::array<std::uint32_t, kCoarseBridgeOuterVertexCount> coarseOuterVertexIndices{};
+    std::array<std::uint32_t, kBridgeInnerVertexCount> coarseInnerVertexIndices{};
+
+    for (std::uint32_t z = 0; z < kCoarseBridgeOuterVertexCount; ++z)
+    {
+        const float localZ = static_cast<float>(z * 2u);
+        coarseOuterVertexIndices[z] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
+        coarseBridgeVertices.push_back({
+            { 0.0f, localZ },
+            { static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo), static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo) + localZ },
+        });
+    }
+
+    for (std::uint32_t innerIndex = 0; innerIndex < kBridgeInnerVertexCount; ++innerIndex)
+    {
+        coarseInnerVertexIndices[innerIndex] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
+        coarseBridgeVertices.push_back(bridgeVertices[kBridgeOuterVertexCount + innerIndex]);
+    }
+
+    std::vector<std::uint32_t> coarseBridgeIndices;
+    coarseBridgeIndices.reserve((126u * 9u) + 12u);
+
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[0]);
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
+
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[2]);
+
+    for (std::uint32_t coarseSegment = 1; coarseSegment < (kCoarseBridgeOuterVertexCount - 2); ++coarseSegment)
+    {
+        const std::uint32_t outerStart = coarseOuterVertexIndices[coarseSegment];
+        const std::uint32_t outerEnd = coarseOuterVertexIndices[coarseSegment + 1];
+        const std::uint32_t innerStart = coarseInnerVertexIndices[(coarseSegment * 2u) - 1u];
+        const std::uint32_t innerMid = coarseInnerVertexIndices[coarseSegment * 2u];
+        const std::uint32_t innerEnd = coarseInnerVertexIndices[(coarseSegment * 2u) + 1u];
+
+        coarseBridgeIndices.push_back(outerStart);
+        coarseBridgeIndices.push_back(outerEnd);
+        coarseBridgeIndices.push_back(innerMid);
+
+        coarseBridgeIndices.push_back(innerMid);
+        coarseBridgeIndices.push_back(outerEnd);
+        coarseBridgeIndices.push_back(innerEnd);
+
+        coarseBridgeIndices.push_back(outerStart);
+        coarseBridgeIndices.push_back(innerMid);
+        coarseBridgeIndices.push_back(innerStart);
+    }
+
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kCoarseBridgeOuterVertexCount - 2]);
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kCoarseBridgeOuterVertexCount - 1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kBridgeInnerVertexCount - 1]);
+
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kCoarseBridgeOuterVertexCount - 2]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kBridgeInnerVertexCount - 1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kBridgeInnerVertexCount - 2]);
+
+    createMeshResources(coarseBridgeVertices, coarseBridgeIndices, m_coarseBridgeMesh);
+}
+
+void QuadtreeMeshRenderer::createMeshResources(
+    const std::vector<Vertex>& vertices,
+    const std::vector<std::uint32_t>& indices,
+    MeshResources& meshResources)
+{
     SDL_GPUBufferCreateInfo vertexInfo{};
     vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
     vertexInfo.size = static_cast<Uint32>(sizeof(Vertex) * vertices.size());
-    m_vertexBuffer = SDL_CreateGPUBuffer(m_device, &vertexInfo);
-    if (m_vertexBuffer == nullptr)
+    meshResources.vertexBuffer = SDL_CreateGPUBuffer(m_device, &vertexInfo);
+    if (meshResources.vertexBuffer == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh vertex buffer.");
     }
@@ -794,21 +1194,21 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     SDL_GPUTransferBufferCreateInfo vertexTransferInfo{};
     vertexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     vertexTransferInfo.size = vertexInfo.size;
-    m_vertexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &vertexTransferInfo);
-    if (m_vertexTransferBuffer == nullptr)
+    meshResources.vertexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &vertexTransferInfo);
+    if (meshResources.vertexTransferBuffer == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh vertex transfer buffer.");
     }
 
-    void* mappedVertices = SDL_MapGPUTransferBuffer(m_device, m_vertexTransferBuffer, false);
+    void* mappedVertices = SDL_MapGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer, false);
     std::memcpy(mappedVertices, vertices.data(), sizeof(Vertex) * vertices.size());
-    SDL_UnmapGPUTransferBuffer(m_device, m_vertexTransferBuffer);
+    SDL_UnmapGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer);
 
     SDL_GPUBufferCreateInfo indexInfo{};
     indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
     indexInfo.size = static_cast<Uint32>(sizeof(std::uint32_t) * indices.size());
-    m_indexBuffer = SDL_CreateGPUBuffer(m_device, &indexInfo);
-    if (m_indexBuffer == nullptr)
+    meshResources.indexBuffer = SDL_CreateGPUBuffer(m_device, &indexInfo);
+    if (meshResources.indexBuffer == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh index buffer.");
     }
@@ -816,30 +1216,30 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     SDL_GPUTransferBufferCreateInfo indexTransferInfo{};
     indexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     indexTransferInfo.size = indexInfo.size;
-    m_indexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &indexTransferInfo);
-    if (m_indexTransferBuffer == nullptr)
+    meshResources.indexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &indexTransferInfo);
+    if (meshResources.indexTransferBuffer == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh index transfer buffer.");
     }
 
-    void* mappedIndices = SDL_MapGPUTransferBuffer(m_device, m_indexTransferBuffer, false);
+    void* mappedIndices = SDL_MapGPUTransferBuffer(m_device, meshResources.indexTransferBuffer, false);
     std::memcpy(mappedIndices, indices.data(), sizeof(std::uint32_t) * indices.size());
-    SDL_UnmapGPUTransferBuffer(m_device, m_indexTransferBuffer);
+    SDL_UnmapGPUTransferBuffer(m_device, meshResources.indexTransferBuffer);
 
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
 
     SDL_GPUTransferBufferLocation vertexSource{};
-    vertexSource.transfer_buffer = m_vertexTransferBuffer;
+    vertexSource.transfer_buffer = meshResources.vertexTransferBuffer;
     SDL_GPUBufferRegion vertexDestination{};
-    vertexDestination.buffer = m_vertexBuffer;
+    vertexDestination.buffer = meshResources.vertexBuffer;
     vertexDestination.size = vertexInfo.size;
     SDL_UploadToGPUBuffer(copyPass, &vertexSource, &vertexDestination, false);
 
     SDL_GPUTransferBufferLocation indexSource{};
-    indexSource.transfer_buffer = m_indexTransferBuffer;
+    indexSource.transfer_buffer = meshResources.indexTransferBuffer;
     SDL_GPUBufferRegion indexDestination{};
-    indexDestination.buffer = m_indexBuffer;
+    indexDestination.buffer = meshResources.indexBuffer;
     indexDestination.size = indexInfo.size;
     SDL_UploadToGPUBuffer(copyPass, &indexSource, &indexDestination, false);
 
@@ -848,6 +1248,8 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     {
         throwSdlError("Failed to upload quadtree mesh static buffers.");
     }
+
+    meshResources.indexCount = static_cast<std::uint32_t>(indices.size());
 }
 
 SDL_GPUIndexedIndirectDrawCommand QuadtreeMeshRenderer::makeDrawCommand(
@@ -867,9 +1269,43 @@ SDL_GPUIndexedIndirectDrawCommand QuadtreeMeshRenderer::makeDrawCommand(
     return command;
 }
 
-std::uint32_t QuadtreeMeshRenderer::packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow)
+float QuadtreeMeshRenderer::instanceDistanceSquared(const InstanceData& instance)
+{
+    const std::uint8_t scalePow = static_cast<std::uint8_t>((instance.packedMetadata >> 16U) & 0xFFU);
+    const float leafSize = static_cast<float>(
+        AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(1ULL << scalePow));
+    const float centerX = instance.position[0] + (leafSize * 0.5f);
+    const float centerY = instance.position[1];
+    const float centerZ = instance.position[2] + (leafSize * 0.5f);
+    return
+        (centerX * centerX) +
+        (centerY * centerY) +
+        (centerZ * centerZ);
+}
+
+void QuadtreeMeshRenderer::sortInstances(InstanceData* instances, std::uint16_t instanceCount)
+{
+    if (instanceCount <= 1)
+    {
+        return;
+    }
+
+    std::sort(
+        instances,
+        instances + instanceCount,
+        [](const InstanceData& left, const InstanceData& right)
+        {
+            return instanceDistanceSquared(left) < instanceDistanceSquared(right);
+        });
+}
+
+std::uint32_t QuadtreeMeshRenderer::packMetadata(
+    std::uint16_t sliceIndex,
+    std::uint8_t scalePow,
+    std::uint8_t edgeIndex)
 {
     return
         static_cast<std::uint32_t>(sliceIndex) |
-        (static_cast<std::uint32_t>(scalePow) << 16U);
+        (static_cast<std::uint32_t>(scalePow) << 16U) |
+        (static_cast<std::uint32_t>(edgeIndex & 0x3U) << 24U);
 }
