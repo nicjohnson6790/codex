@@ -22,6 +22,11 @@ constexpr std::uint32_t kWaterFftThreadCountX = 256;
 constexpr std::uint32_t kWaterFftThreadCountY = 1;
 constexpr std::uint32_t kWaterFftThreadCountZ = 1;
 constexpr SDL_GPUTextureFormat kWaterTextureFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+constexpr std::uint32_t kWaterMeshIntervalCount = AppConfig::Water::kMeshVertexResolution - 1u;
+constexpr float kWaterMeshInset = 1.0f / static_cast<float>(kWaterMeshIntervalCount);
+constexpr std::uint32_t kWaterBridgeOuterVertexCount = AppConfig::Water::kMeshVertexResolution;
+constexpr std::uint32_t kWaterBridgeInnerVertexCount = kWaterMeshIntervalCount - 1u;
+constexpr std::uint32_t kWaterCoarseBridgeOuterVertexCount = (kWaterMeshIntervalCount / 2u) + 1u;
 
 std::uint32_t fftStageCountForResolution(std::uint32_t resolution)
 {
@@ -66,7 +71,7 @@ void QuadtreeWaterMeshRenderer::initialize(
     createWorkingBuffers();
     createWaterTextures();
     createWaterSampler();
-    createPipeline(shaderDirectory);
+    createPipelines(shaderDirectory);
     createWaterComputePipelines(shaderDirectory);
 }
 
@@ -92,10 +97,15 @@ void QuadtreeWaterMeshRenderer::shutdown()
         SDL_ReleaseGPUComputePipeline(m_device, m_spectrumUpdatePipeline);
         m_spectrumUpdatePipeline = nullptr;
     }
-    if (m_pipeline != nullptr)
+    if (m_bridgePipeline != nullptr)
     {
-        SDL_ReleaseGPUGraphicsPipeline(m_device, m_pipeline);
-        m_pipeline = nullptr;
+        SDL_ReleaseGPUGraphicsPipeline(m_device, m_bridgePipeline);
+        m_bridgePipeline = nullptr;
+    }
+    if (m_mainPipeline != nullptr)
+    {
+        SDL_ReleaseGPUGraphicsPipeline(m_device, m_mainPipeline);
+        m_mainPipeline = nullptr;
     }
 
     destroyWaterSampler();
@@ -109,6 +119,8 @@ void QuadtreeWaterMeshRenderer::shutdown()
 void QuadtreeWaterMeshRenderer::clear()
 {
     m_instances.instanceCount = 0;
+    m_bridgeInstances.instanceCount = 0;
+    m_coarseBridgeInstances.instanceCount = 0;
 }
 
 void QuadtreeWaterMeshRenderer::setActiveCamera(const Position& cameraPosition)
@@ -172,20 +184,87 @@ void QuadtreeWaterMeshRenderer::addLeaf(
         hasTerrainSlice ? 1.0f : 0.0f);
 }
 
-void QuadtreeWaterMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
+void QuadtreeWaterMeshRenderer::addBridge(
+    const WorldGridQuadtreeLeafId& leafId,
+    const Position& leafOrigin,
+    double leafSizeMeters,
+    std::uint8_t quadtreeLodHint,
+    bool hasTerrainSlice,
+    std::uint16_t terrainSliceIndex,
+    std::uint32_t bandMask,
+    std::uint8_t edgeIndex)
 {
-    HELLO_PROFILE_SCOPE_GROUPS("QuadtreeWaterMeshRenderer::Upload", ProfileScopeGroup::Renderer);
+    (void)leafId;
 
-    if (m_instances.instanceCount == 0)
+    if (m_bridgeInstances.instanceCount >= AppConfig::Water::kMaxWaterInstances)
     {
         return;
     }
 
-    if (m_instances.instanceCount > 1)
+    const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
+
+    InstanceData& instance = m_bridgeInstances.instances[m_bridgeInstances.instanceCount++];
+    instance.position[0] = localOrigin.x;
+    instance.position[1] = localOrigin.y;
+    instance.position[2] = localOrigin.z;
+    instance.packedMetadata = packMetadata(quadtreeLodHint, bandMask, edgeIndex);
+    instance.leafParams = glm::vec4(
+        static_cast<float>(leafSizeMeters),
+        m_settings.waterLevel,
+        static_cast<float>(terrainSliceIndex),
+        hasTerrainSlice ? 1.0f : 0.0f);
+}
+
+void QuadtreeWaterMeshRenderer::addCoarseBridge(
+    const WorldGridQuadtreeLeafId& leafId,
+    const Position& leafOrigin,
+    double leafSizeMeters,
+    std::uint8_t quadtreeLodHint,
+    bool hasTerrainSlice,
+    std::uint16_t terrainSliceIndex,
+    std::uint32_t bandMask,
+    std::uint8_t edgeIndex)
+{
+    (void)leafId;
+
+    if (m_coarseBridgeInstances.instanceCount >= AppConfig::Water::kMaxWaterInstances)
     {
+        return;
+    }
+
+    const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
+
+    InstanceData& instance = m_coarseBridgeInstances.instances[m_coarseBridgeInstances.instanceCount++];
+    instance.position[0] = localOrigin.x;
+    instance.position[1] = localOrigin.y;
+    instance.position[2] = localOrigin.z;
+    instance.packedMetadata = packMetadata(quadtreeLodHint, bandMask, edgeIndex);
+    instance.leafParams = glm::vec4(
+        static_cast<float>(leafSizeMeters),
+        m_settings.waterLevel,
+        static_cast<float>(terrainSliceIndex),
+        hasTerrainSlice ? 1.0f : 0.0f);
+}
+
+void QuadtreeWaterMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
+{
+    HELLO_PROFILE_SCOPE_GROUPS("QuadtreeWaterMeshRenderer::Upload", ProfileScopeGroup::Renderer);
+
+    if (totalInstanceCount() == 0)
+    {
+        return;
+    }
+
+    const auto sortInstances = [](InstanceResources& resources)
+    {
+        if (resources.instanceCount <= 1)
+        {
+            return;
+        }
+
         std::sort(
-            m_instances.instances.begin(),
-            m_instances.instances.begin() + m_instances.instanceCount,
+            resources.instances.begin(),
+            resources.instances.begin() + resources.instanceCount,
             [](const InstanceData& left, const InstanceData& right)
             {
                 const auto distanceSquared = [](const InstanceData& instance)
@@ -201,22 +280,38 @@ void QuadtreeWaterMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
                 };
                 return distanceSquared(left) < distanceSquared(right);
             });
-    }
+    };
 
-    void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_instances.instanceTransferBuffer, true);
-    std::memcpy(
-        mappedInstances,
-        m_instances.instances.data(),
-        sizeof(InstanceData) * m_instances.instanceCount);
-    SDL_UnmapGPUTransferBuffer(m_device, m_instances.instanceTransferBuffer);
+    const auto uploadInstances = [this, copyPass](InstanceResources& resources)
+    {
+        if (resources.instanceCount == 0)
+        {
+            return;
+        }
 
-    SDL_GPUTransferBufferLocation source{};
-    source.transfer_buffer = m_instances.instanceTransferBuffer;
+        void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, resources.instanceTransferBuffer, true);
+        std::memcpy(
+            mappedInstances,
+            resources.instances.data(),
+            sizeof(InstanceData) * resources.instanceCount);
+        SDL_UnmapGPUTransferBuffer(m_device, resources.instanceTransferBuffer);
 
-    SDL_GPUBufferRegion destination{};
-    destination.buffer = m_instances.instanceBuffer;
-    destination.size = static_cast<Uint32>(sizeof(InstanceData) * m_instances.instanceCount);
-    SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
+        SDL_GPUTransferBufferLocation source{};
+        source.transfer_buffer = resources.instanceTransferBuffer;
+
+        SDL_GPUBufferRegion destination{};
+        destination.buffer = resources.instanceBuffer;
+        destination.size = static_cast<Uint32>(sizeof(InstanceData) * resources.instanceCount);
+        SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
+    };
+
+    sortInstances(m_instances);
+    sortInstances(m_bridgeInstances);
+    sortInstances(m_coarseBridgeInstances);
+
+    uploadInstances(m_instances);
+    uploadInstances(m_bridgeInstances);
+    uploadInstances(m_coarseBridgeInstances);
 }
 
 void QuadtreeWaterMeshRenderer::dispatchWaterSimulation(
@@ -271,7 +366,8 @@ void QuadtreeWaterMeshRenderer::render(
 
     if (!m_settings.enabled ||
         totalInstanceCount() == 0 ||
-        m_pipeline == nullptr ||
+        m_mainPipeline == nullptr ||
+        m_bridgePipeline == nullptr ||
         m_displacementTexture == nullptr ||
         m_slopeTexture == nullptr ||
         m_foamHistoryReadTexture == nullptr ||
@@ -285,49 +381,60 @@ void QuadtreeWaterMeshRenderer::render(
         return;
     }
 
-    SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
-
     const WaterUniforms uniforms = buildWaterUniforms(viewProjection, lightingSystem, skyboxRenderer, timeSeconds);
-    SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
-    SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
-    const SDL_GPUTextureSamplerBinding vertexSamplerBindings[1]{
-        { m_displacementTexture, m_waterSampler },
-    };
-    SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
-
-    const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[5]{
-        { m_displacementTexture, m_waterSampler },
-        { m_slopeTexture, m_waterSampler },
-        { m_foamHistoryReadTexture, m_waterSampler },
-        { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
-        { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
-    };
-    SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 5);
-
-    if (m_mesh.vertexBuffer == nullptr || m_mesh.indexBuffer == nullptr || m_instances.instanceCount == 0)
+    const auto drawMeshInstances = [&](SDL_GPUGraphicsPipeline* pipeline, const MeshResources& mesh, const InstanceResources& instances)
     {
-        return;
-    }
+        if (pipeline == nullptr ||
+            mesh.vertexBuffer == nullptr ||
+            mesh.indexBuffer == nullptr ||
+            instances.instanceBuffer == nullptr ||
+            instances.instanceCount == 0)
+        {
+            return;
+        }
 
-    const SDL_GPUBufferBinding vertexBinding{ m_mesh.vertexBuffer, 0 };
-    SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+        SDL_BindGPUGraphicsPipeline(renderPass, pipeline);
+        SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+        SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
-    const SDL_GPUBufferBinding indexBinding{ m_mesh.indexBuffer, 0 };
-    SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        const SDL_GPUTextureSamplerBinding vertexSamplerBindings[1]{
+            { m_displacementTexture, m_waterSampler },
+        };
+        SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-    SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, m_instances.instanceBuffer };
-    SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-    SDL_GPUBuffer* fragmentStorageBuffers[]{ terrainHeightmapBuffer };
-    SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[5]{
+            { m_displacementTexture, m_waterSampler },
+            { m_slopeTexture, m_waterSampler },
+            { m_foamHistoryReadTexture, m_waterSampler },
+            { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
+            { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
+        };
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 5);
 
-    SDL_DrawGPUIndexedPrimitives(
-        renderPass,
-        m_mesh.indexCount,
-        m_instances.instanceCount,
-        0,
-        0,
-        0);
+        const SDL_GPUBufferBinding vertexBinding{ mesh.vertexBuffer, 0 };
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+
+        const SDL_GPUBufferBinding indexBinding{ mesh.indexBuffer, 0 };
+        SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, instances.instanceBuffer };
+        SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
+        SDL_GPUBuffer* fragmentStorageBuffers[]{ terrainHeightmapBuffer };
+        SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
+
+        SDL_DrawGPUIndexedPrimitives(
+            renderPass,
+            mesh.indexCount,
+            instances.instanceCount,
+            0,
+            0,
+            0);
+    };
+
+    drawMeshInstances(m_mainPipeline, m_mesh, m_instances);
+    drawMeshInstances(m_bridgePipeline, m_bridgeMesh, m_bridgeInstances);
+    drawMeshInstances(m_bridgePipeline, m_coarseBridgeMesh, m_coarseBridgeInstances);
 }
 
 std::uint32_t QuadtreeWaterMeshRenderer::instanceCount() const
@@ -337,23 +444,22 @@ std::uint32_t QuadtreeWaterMeshRenderer::instanceCount() const
 
 std::uint32_t QuadtreeWaterMeshRenderer::totalInstanceCount() const
 {
-    return m_instances.instanceCount;
+    return m_instances.instanceCount + m_bridgeInstances.instanceCount + m_coarseBridgeInstances.instanceCount;
 }
 
 std::uint32_t QuadtreeWaterMeshRenderer::packMetadata(
     std::uint8_t quadtreeLodHint,
-    std::uint32_t bandMask)
+    std::uint32_t bandMask,
+    std::uint8_t edgeIndex)
 {
     return
         (static_cast<std::uint32_t>(quadtreeLodHint) & 0xFFu) |
+        ((static_cast<std::uint32_t>(edgeIndex) & 0x3u) << 8u) |
         ((bandMask & 0xFFFFu) << 16);
 }
 
-void QuadtreeWaterMeshRenderer::createPipeline(const std::filesystem::path& shaderDirectory)
+void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& shaderDirectory)
 {
-    SDL_GPUShader* vertexShader = createShader(shaderDirectory / "water_mesh.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 2, 1);
-    SDL_GPUShader* fragmentShader = createShader(shaderDirectory / "water_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1, 5);
-
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
     vertexBufferDescription.pitch = sizeof(Vertex);
@@ -369,8 +475,6 @@ void QuadtreeWaterMeshRenderer::createPipeline(const std::filesystem::path& shad
     colorTargetDescription.format = m_colorFormat;
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.vertex_shader = vertexShader;
-    pipelineInfo.fragment_shader = fragmentShader;
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
@@ -389,13 +493,38 @@ void QuadtreeWaterMeshRenderer::createPipeline(const std::filesystem::path& shad
     pipelineInfo.vertex_input_state.num_vertex_attributes = 1;
     pipelineInfo.vertex_input_state.vertex_attributes = &vertexAttribute;
 
-    m_pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
-    SDL_ReleaseGPUShader(m_device, fragmentShader);
-    SDL_ReleaseGPUShader(m_device, vertexShader);
+    auto createGraphicsPipeline = [this, &pipelineInfo, &shaderDirectory](const char* vertexShaderName)
+    {
+        SDL_GPUShader* vertexShader = createShader(
+            shaderDirectory / vertexShaderName,
+            SDL_GPU_SHADERSTAGE_VERTEX,
+            1,
+            2,
+            1);
+        SDL_GPUShader* fragmentShader = createShader(
+            shaderDirectory / "water_mesh.frag.spv",
+            SDL_GPU_SHADERSTAGE_FRAGMENT,
+            1,
+            1,
+            5);
+        pipelineInfo.vertex_shader = vertexShader;
+        pipelineInfo.fragment_shader = fragmentShader;
+        SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
+        SDL_ReleaseGPUShader(m_device, fragmentShader);
+        SDL_ReleaseGPUShader(m_device, vertexShader);
+        return pipeline;
+    };
 
-    if (m_pipeline == nullptr)
+    m_mainPipeline = createGraphicsPipeline("water_mesh.vert.spv");
+    if (m_mainPipeline == nullptr)
     {
         throwSdlError("Failed to create water graphics pipeline.");
+    }
+
+    m_bridgePipeline = createGraphicsPipeline("water_mesh_bridge.vert.spv");
+    if (m_bridgePipeline == nullptr)
+    {
+        throwSdlError("Failed to create water bridge graphics pipeline.");
     }
 }
 
@@ -458,6 +587,138 @@ void QuadtreeWaterMeshRenderer::createWaterComputePipelines(const std::filesyste
 void QuadtreeWaterMeshRenderer::createMesh()
 {
     createMeshGeometry(AppConfig::Water::kMeshVertexResolution);
+
+    const auto mainGridCoord = [](std::uint32_t index)
+    {
+        const float normalized = static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
+        const float usableSpan = 1.0f - (kWaterMeshInset * 2.0f);
+        return kWaterMeshInset + (normalized * usableSpan);
+    };
+    const auto bridgeEdgeCoord = [](std::uint32_t index)
+    {
+        return static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
+    };
+
+    std::vector<Vertex> bridgeVertices;
+    bridgeVertices.reserve(kWaterBridgeOuterVertexCount + kWaterBridgeInnerVertexCount);
+    std::array<std::uint32_t, kWaterBridgeOuterVertexCount> outerVertexIndices{};
+    std::array<std::uint32_t, kWaterBridgeInnerVertexCount> innerVertexIndices{};
+
+    outerVertexIndices[0] = static_cast<std::uint32_t>(bridgeVertices.size());
+    bridgeVertices.push_back({
+        { 0.0f, bridgeEdgeCoord(0u) },
+    });
+
+    for (std::uint32_t y = 1; y < kWaterMeshIntervalCount; ++y)
+    {
+        outerVertexIndices[y] = static_cast<std::uint32_t>(bridgeVertices.size());
+        bridgeVertices.push_back({
+            { 0.0f, bridgeEdgeCoord(y) },
+        });
+    }
+
+    outerVertexIndices[kWaterBridgeOuterVertexCount - 1u] = static_cast<std::uint32_t>(bridgeVertices.size());
+    bridgeVertices.push_back({
+        { 0.0f, bridgeEdgeCoord(kWaterMeshIntervalCount) },
+    });
+
+    for (std::uint32_t y = 1; y < kWaterMeshIntervalCount; ++y)
+    {
+        innerVertexIndices[y - 1u] = static_cast<std::uint32_t>(bridgeVertices.size());
+        bridgeVertices.push_back({
+            { kWaterMeshInset, bridgeEdgeCoord(y) },
+        });
+    }
+
+    std::vector<std::uint32_t> bridgeIndices;
+    bridgeIndices.reserve((126u * 6u) + 6u);
+
+    bridgeIndices.push_back(outerVertexIndices[0]);
+    bridgeIndices.push_back(outerVertexIndices[1]);
+    bridgeIndices.push_back(innerVertexIndices[0]);
+
+    for (std::uint32_t y = 0; y < 126u; ++y)
+    {
+        const std::uint32_t outerTop = outerVertexIndices[y + 1u];
+        const std::uint32_t outerBottom = outerVertexIndices[y + 2u];
+        const std::uint32_t innerTop = innerVertexIndices[y];
+        const std::uint32_t innerBottom = innerVertexIndices[y + 1u];
+
+        bridgeIndices.push_back(outerTop);
+        bridgeIndices.push_back(outerBottom);
+        bridgeIndices.push_back(innerTop);
+
+        bridgeIndices.push_back(innerTop);
+        bridgeIndices.push_back(outerBottom);
+        bridgeIndices.push_back(innerBottom);
+    }
+
+    bridgeIndices.push_back(outerVertexIndices[kWaterBridgeOuterVertexCount - 2u]);
+    bridgeIndices.push_back(outerVertexIndices[kWaterBridgeOuterVertexCount - 1u]);
+    bridgeIndices.push_back(innerVertexIndices[kWaterBridgeInnerVertexCount - 1u]);
+
+    createMeshResources(bridgeVertices, bridgeIndices, m_bridgeMesh);
+
+    std::vector<Vertex> coarseBridgeVertices;
+    coarseBridgeVertices.reserve(kWaterCoarseBridgeOuterVertexCount + kWaterBridgeInnerVertexCount);
+    std::array<std::uint32_t, kWaterCoarseBridgeOuterVertexCount> coarseOuterVertexIndices{};
+    std::array<std::uint32_t, kWaterBridgeInnerVertexCount> coarseInnerVertexIndices{};
+
+    for (std::uint32_t y = 0; y < kWaterCoarseBridgeOuterVertexCount; ++y)
+    {
+        coarseOuterVertexIndices[y] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
+        coarseBridgeVertices.push_back({
+            { 0.0f, bridgeEdgeCoord(y * 2u) },
+        });
+    }
+
+    for (std::uint32_t innerIndex = 0; innerIndex < kWaterBridgeInnerVertexCount; ++innerIndex)
+    {
+        coarseInnerVertexIndices[innerIndex] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
+        coarseBridgeVertices.push_back(bridgeVertices[kWaterBridgeOuterVertexCount + innerIndex]);
+    }
+
+    std::vector<std::uint32_t> coarseBridgeIndices;
+    coarseBridgeIndices.reserve((126u * 9u) + 12u);
+
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[0]);
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
+
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[2]);
+
+    for (std::uint32_t coarseSegment = 1; coarseSegment < (kWaterCoarseBridgeOuterVertexCount - 2u); ++coarseSegment)
+    {
+        const std::uint32_t outerStart = coarseOuterVertexIndices[coarseSegment];
+        const std::uint32_t outerEnd = coarseOuterVertexIndices[coarseSegment + 1u];
+        const std::uint32_t innerStart = coarseInnerVertexIndices[(coarseSegment * 2u) - 1u];
+        const std::uint32_t innerMid = coarseInnerVertexIndices[coarseSegment * 2u];
+        const std::uint32_t innerEnd = coarseInnerVertexIndices[(coarseSegment * 2u) + 1u];
+
+        coarseBridgeIndices.push_back(outerStart);
+        coarseBridgeIndices.push_back(outerEnd);
+        coarseBridgeIndices.push_back(innerMid);
+
+        coarseBridgeIndices.push_back(innerMid);
+        coarseBridgeIndices.push_back(outerEnd);
+        coarseBridgeIndices.push_back(innerEnd);
+
+        coarseBridgeIndices.push_back(outerStart);
+        coarseBridgeIndices.push_back(innerMid);
+        coarseBridgeIndices.push_back(innerStart);
+    }
+
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kWaterCoarseBridgeOuterVertexCount - 2u]);
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kWaterCoarseBridgeOuterVertexCount - 1u]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kWaterBridgeInnerVertexCount - 1u]);
+
+    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kWaterCoarseBridgeOuterVertexCount - 2u]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kWaterBridgeInnerVertexCount - 1u]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kWaterBridgeInnerVertexCount - 2u]);
+
+    createMeshResources(coarseBridgeVertices, coarseBridgeIndices, m_coarseBridgeMesh);
 }
 
 void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolution)
@@ -505,6 +766,47 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
         }
     }
 
+    createMeshResources(vertices, indices, resources);
+}
+
+void QuadtreeWaterMeshRenderer::destroyMesh()
+{
+    auto destroyMeshResources = [this](MeshResources& resources)
+    {
+        if (resources.indexTransferBuffer != nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, resources.indexTransferBuffer);
+            resources.indexTransferBuffer = nullptr;
+        }
+        if (resources.indexBuffer != nullptr)
+        {
+            SDL_ReleaseGPUBuffer(m_device, resources.indexBuffer);
+            resources.indexBuffer = nullptr;
+        }
+        if (resources.vertexTransferBuffer != nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, resources.vertexTransferBuffer);
+            resources.vertexTransferBuffer = nullptr;
+        }
+        if (resources.vertexBuffer != nullptr)
+        {
+            SDL_ReleaseGPUBuffer(m_device, resources.vertexBuffer);
+            resources.vertexBuffer = nullptr;
+        }
+        resources.vertexResolution = 0;
+        resources.indexCount = 0;
+    };
+
+    destroyMeshResources(m_coarseBridgeMesh);
+    destroyMeshResources(m_bridgeMesh);
+    destroyMeshResources(m_mesh);
+}
+
+void QuadtreeWaterMeshRenderer::createMeshResources(
+    const std::vector<Vertex>& vertices,
+    const std::vector<std::uint32_t>& indices,
+    MeshResources& resources)
+{
     resources.indexCount = static_cast<std::uint32_t>(indices.size());
 
     SDL_GPUBufferCreateInfo vertexInfo{};
@@ -575,52 +877,33 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
     }
 }
 
-void QuadtreeWaterMeshRenderer::destroyMesh()
-{
-    MeshResources& resources = m_mesh;
-    if (resources.indexTransferBuffer != nullptr)
-    {
-        SDL_ReleaseGPUTransferBuffer(m_device, resources.indexTransferBuffer);
-        resources.indexTransferBuffer = nullptr;
-    }
-    if (resources.indexBuffer != nullptr)
-    {
-        SDL_ReleaseGPUBuffer(m_device, resources.indexBuffer);
-        resources.indexBuffer = nullptr;
-    }
-    if (resources.vertexTransferBuffer != nullptr)
-    {
-        SDL_ReleaseGPUTransferBuffer(m_device, resources.vertexTransferBuffer);
-        resources.vertexTransferBuffer = nullptr;
-    }
-    if (resources.vertexBuffer != nullptr)
-    {
-        SDL_ReleaseGPUBuffer(m_device, resources.vertexBuffer);
-        resources.vertexBuffer = nullptr;
-    }
-    resources.vertexResolution = 0;
-    resources.indexCount = 0;
-}
-
 void QuadtreeWaterMeshRenderer::createInstanceBuffer()
 {
     SDL_GPUBufferCreateInfo instanceInfo{};
     instanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
     instanceInfo.size = static_cast<Uint32>(sizeof(InstanceData) * m_instances.instances.size());
-    m_instances.instanceBuffer = SDL_CreateGPUBuffer(m_device, &instanceInfo);
-    if (m_instances.instanceBuffer == nullptr)
-    {
-        throwSdlError("Failed to create water instance buffer.");
-    }
 
-    SDL_GPUTransferBufferCreateInfo transferInfo{};
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    transferInfo.size = instanceInfo.size;
-    m_instances.instanceTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
-    if (m_instances.instanceTransferBuffer == nullptr)
+    auto createInstanceResources = [this, &instanceInfo](InstanceResources& resources, const char* bufferError, const char* transferError)
     {
-        throwSdlError("Failed to create water instance transfer buffer.");
-    }
+        resources.instanceBuffer = SDL_CreateGPUBuffer(m_device, &instanceInfo);
+        if (resources.instanceBuffer == nullptr)
+        {
+            throwSdlError(bufferError);
+        }
+
+        SDL_GPUTransferBufferCreateInfo transferInfo{};
+        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        transferInfo.size = instanceInfo.size;
+        resources.instanceTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+        if (resources.instanceTransferBuffer == nullptr)
+        {
+            throwSdlError(transferError);
+        }
+    };
+
+    createInstanceResources(m_instances, "Failed to create water instance buffer.", "Failed to create water instance transfer buffer.");
+    createInstanceResources(m_bridgeInstances, "Failed to create water bridge instance buffer.", "Failed to create water bridge instance transfer buffer.");
+    createInstanceResources(m_coarseBridgeInstances, "Failed to create water coarse bridge instance buffer.", "Failed to create water coarse bridge instance transfer buffer.");
 }
 
 void QuadtreeWaterMeshRenderer::createWorkingBuffers()
@@ -1073,15 +1356,22 @@ void QuadtreeWaterMeshRenderer::dispatchBuildMaps(
 
 void QuadtreeWaterMeshRenderer::destroyInstanceBuffer()
 {
-    if (m_instances.instanceTransferBuffer != nullptr)
+    auto destroyInstanceResources = [this](InstanceResources& resources)
     {
-        SDL_ReleaseGPUTransferBuffer(m_device, m_instances.instanceTransferBuffer);
-        m_instances.instanceTransferBuffer = nullptr;
-    }
-    if (m_instances.instanceBuffer != nullptr)
-    {
-        SDL_ReleaseGPUBuffer(m_device, m_instances.instanceBuffer);
-        m_instances.instanceBuffer = nullptr;
-    }
-    m_instances.instanceCount = 0;
+        if (resources.instanceTransferBuffer != nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, resources.instanceTransferBuffer);
+            resources.instanceTransferBuffer = nullptr;
+        }
+        if (resources.instanceBuffer != nullptr)
+        {
+            SDL_ReleaseGPUBuffer(m_device, resources.instanceBuffer);
+            resources.instanceBuffer = nullptr;
+        }
+        resources.instanceCount = 0;
+    };
+
+    destroyInstanceResources(m_coarseBridgeInstances);
+    destroyInstanceResources(m_bridgeInstances);
+    destroyInstanceResources(m_instances);
 }

@@ -93,8 +93,11 @@ private:
         const HeightmapExtents& extents);
     [[nodiscard]] static bool nodeContributesTerrainDraw(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeHasResidentTerrainSurface(const QuadtreeNode& node);
+    [[nodiscard]] static bool nodeContributesWaterDraw(const QuadtreeNode& node);
+    [[nodiscard]] static bool nodeHasWaterSurface(const QuadtreeNode& node);
     [[nodiscard]] bool edgeHasDrawableNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool edgeHasWaterNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool shouldSubdivide(const QuadtreeNode& node, const Position& cameraPosition) const;
     [[nodiscard]] static bool nodeHasFlag(const QuadtreeNode& node, std::uint8_t mask);
     static void setNodeFlag(QuadtreeNode& node, std::uint8_t mask, bool enabled);

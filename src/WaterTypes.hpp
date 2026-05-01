@@ -47,10 +47,19 @@ struct WaterSettings
 
 struct WaterLeafDrawRequest
 {
+    enum class Type : std::uint8_t
+    {
+        Leaf = 0,
+        Bridge = 1,
+        CoarseBridge = 2,
+    };
+
+    Type type = Type::Leaf;
     WorldGridQuadtreeLeafId leafId{};
     Position origin{};
     double sizeMeters = 0.0;
     std::uint8_t quadtreeLodHint = 0;
+    std::uint8_t edgeIndex = 0;
     std::uint32_t bandMask = 0;
     std::uint16_t terrainSliceIndex = 0;
     bool hasTerrainSlice = false;

@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <vector>
 
 class QuadtreeWaterMeshRenderer : private EngineRendererBase
 {
@@ -67,6 +68,24 @@ public:
         bool hasTerrainSlice,
         std::uint16_t terrainSliceIndex,
         std::uint32_t bandMask);
+    void addBridge(
+        const WorldGridQuadtreeLeafId& leafId,
+        const Position& leafOrigin,
+        double leafSizeMeters,
+        std::uint8_t quadtreeLodHint,
+        bool hasTerrainSlice,
+        std::uint16_t terrainSliceIndex,
+        std::uint32_t bandMask,
+        std::uint8_t edgeIndex);
+    void addCoarseBridge(
+        const WorldGridQuadtreeLeafId& leafId,
+        const Position& leafOrigin,
+        double leafSizeMeters,
+        std::uint8_t quadtreeLodHint,
+        bool hasTerrainSlice,
+        std::uint16_t terrainSliceIndex,
+        std::uint32_t bandMask,
+        std::uint8_t edgeIndex);
 
     void upload(SDL_GPUCopyPass* copyPass);
     void dispatchWaterSimulation(
@@ -163,13 +182,18 @@ private:
 
     [[nodiscard]] static std::uint32_t packMetadata(
         std::uint8_t quadtreeLodHint,
-        std::uint32_t bandMask);
+        std::uint32_t bandMask,
+        std::uint8_t edgeIndex = 0);
 
-    void createPipeline(const std::filesystem::path& shaderDirectory);
+    void createPipelines(const std::filesystem::path& shaderDirectory);
     void createWaterComputePipelines(const std::filesystem::path& shaderDirectory);
     void createMesh();
     void createMeshGeometry(std::uint32_t vertexResolution);
     void destroyMesh();
+    void createMeshResources(
+        const std::vector<Vertex>& vertices,
+        const std::vector<std::uint32_t>& indices,
+        MeshResources& resources);
     void createInstanceBuffer();
     void destroyInstanceBuffer();
     void createWorkingBuffers();
@@ -193,13 +217,18 @@ private:
     void dispatchFftStages(SDL_GPUCommandBuffer* commandBuffer, float timeSeconds);
     void dispatchBuildMaps(SDL_GPUCommandBuffer* commandBuffer, const WaterSimulationUniforms& uniforms);
 
-    SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
+    SDL_GPUGraphicsPipeline* m_mainPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* m_bridgePipeline = nullptr;
     SDL_GPUComputePipeline* m_initializeSpectrumPipeline = nullptr;
     SDL_GPUComputePipeline* m_spectrumUpdatePipeline = nullptr;
     SDL_GPUComputePipeline* m_fftStagePipeline = nullptr;
     SDL_GPUComputePipeline* m_buildMapsPipeline = nullptr;
     MeshResources m_mesh{};
+    MeshResources m_bridgeMesh{};
+    MeshResources m_coarseBridgeMesh{};
     InstanceResources m_instances{};
+    InstanceResources m_bridgeInstances{};
+    InstanceResources m_coarseBridgeInstances{};
     WorkingBufferResources m_workingBuffers{};
     SDL_GPUTexture* m_displacementTexture = nullptr;
     SDL_GPUTexture* m_slopeTexture = nullptr;

@@ -21,7 +21,7 @@ public:
     [[nodiscard]] WaterSettings& settings();
     [[nodiscard]] const WaterSettings& settings() const;
 
-    void requestLeaf(
+    [[nodiscard]] bool requestLeaf(
         const WorldGridQuadtreeLeafId& leafId,
         const Position& leafOrigin,
         double leafSizeMeters,
@@ -30,6 +30,16 @@ public:
         bool hasTerrainSlice,
         std::uint16_t terrainSliceIndex,
         std::uint8_t quadtreeLodHint);
+    [[nodiscard]] std::uint32_t computeBandMaskForLeaf(const Position& leafOrigin, double leafSizeMeters) const;
+    void requestBridge(
+        const WorldGridQuadtreeLeafId& leafId,
+        const Position& leafOrigin,
+        double leafSizeMeters,
+        bool hasTerrainSlice,
+        std::uint16_t terrainSliceIndex,
+        std::uint8_t quadtreeLodHint,
+        std::uint32_t bandMask,
+        std::uint8_t edgeIndex);
 
     void flushToRenderer(QuadtreeWaterMeshRenderer& renderer) const;
     [[nodiscard]] std::uint32_t queuedCount() const;

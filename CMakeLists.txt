@@ -110,6 +110,7 @@ set(HEIGHTMAP_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/heightmap_generate.comp.spv
 set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
 set(SKYBOX_FRAG_SPV ${SHADER_OUTPUT_DIR}/skybox.frag.spv)
 set(WATER_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh.vert.spv)
+set(WATER_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh_bridge.vert.spv)
 set(WATER_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/water_mesh.frag.spv)
 set(WATER_INITIALIZE_SPECTRUM_COMP_SPV ${SHADER_OUTPUT_DIR}/water_initialize_spectrum.comp.spv)
 set(WATER_SPECTRUM_UPDATE_COMP_SPV ${SHADER_OUTPUT_DIR}/water_spectrum_update.comp.spv)
@@ -127,6 +128,7 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_G
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh_bridge.vert ${WATER_MESH_BRIDGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_initialize_spectrum.comp ${WATER_INITIALIZE_SPECTRUM_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_spectrum_update.comp ${WATER_SPECTRUM_UPDATE_COMP_SPV})
@@ -146,6 +148,7 @@ add_custom_target(shaders ALL
         ${SKYBOX_VERT_SPV}
         ${SKYBOX_FRAG_SPV}
         ${WATER_MESH_VERT_SPV}
+        ${WATER_MESH_BRIDGE_VERT_SPV}
         ${WATER_MESH_FRAG_SPV}
         ${WATER_INITIALIZE_SPECTRUM_COMP_SPV}
         ${WATER_SPECTRUM_UPDATE_COMP_SPV}

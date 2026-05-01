@@ -326,39 +326,49 @@ void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManag
 
     for (const QuadtreeNode& node : m_nodes)
     {
-        if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask) ||
-            !nodeHasFlag(node, QuadtreeNode::ShouldDrawMask))
-        {
-            continue;
-        }
-
-        if (!nodeHasFlag(node, QuadtreeNode::IsLeafMask) &&
-            (nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) &&
-             nodeHasFlag(node, QuadtreeNode::IsUploadingMask)))
-        {
-            continue;
-        }
-
-        if (!nodeHasFlag(node, QuadtreeNode::IsLeafMask) &&
-            !nodeHasFlag(node, QuadtreeNode::IsSubdividingMask))
+        if (!nodeContributesWaterDraw(node))
         {
             continue;
         }
 
         const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
         (void)maxCorner;
+        const double leafSizeMeters = worldGridQuadtreeLeafSize(node.nodeId);
         const std::uint8_t quadtreeLodHint = std::min<std::uint8_t>(worldGridQuadtreeLeafScalePow(node.nodeId), 4u);
         std::uint16_t terrainSliceIndex = 0;
         const bool hasTerrainSlice = m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex);
-        waterManager.requestLeaf(
+        const bool queuedLeaf = waterManager.requestLeaf(
             node.nodeId,
             minCorner,
-            worldGridQuadtreeLeafSize(node.nodeId),
+            leafSizeMeters,
             nodeHasFlag(node, QuadtreeNode::HasExtentsMask),
             node.minHeight,
             hasTerrainSlice,
             terrainSliceIndex,
             quadtreeLodHint);
+        if (!queuedLeaf)
+        {
+            continue;
+        }
+
+        const std::uint32_t bandMask = waterManager.computeBandMaskForLeaf(minCorner, leafSizeMeters);
+        for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
+        {
+            if (!edgeHasWaterNeighborCoverage(node, edgeIndex))
+            {
+                continue;
+            }
+
+            waterManager.requestBridge(
+                node.nodeId,
+                minCorner,
+                leafSizeMeters,
+                hasTerrainSlice,
+                terrainSliceIndex,
+                quadtreeLodHint,
+                bandMask,
+                edgeIndex);
+        }
     }
 }
 
@@ -642,6 +652,28 @@ bool WorldGridQuadtree::nodeHasResidentTerrainSurface(const QuadtreeNode& node)
         !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
 }
 
+bool WorldGridQuadtree::nodeContributesWaterDraw(const QuadtreeNode& node)
+{
+    return nodeHasFlag(node, QuadtreeNode::ShouldDrawMask) && nodeHasWaterSurface(node);
+}
+
+bool WorldGridQuadtree::nodeHasWaterSurface(const QuadtreeNode& node)
+{
+    if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask))
+    {
+        return false;
+    }
+
+    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
+    {
+        return true;
+    }
+
+    return
+        nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) &&
+        !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
+}
+
 bool WorldGridQuadtree::edgeHasDrawableNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const
 {
     const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
@@ -803,6 +835,107 @@ bool WorldGridQuadtree::edgeHasDrawableCoarserNeighbor(const QuadtreeNode& node,
             break;
         default:
             return false;
+        }
+    }
+
+    return false;
+}
+
+bool WorldGridQuadtree::edgeHasWaterNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const
+{
+    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
+    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
+    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
+    const double nodeSize = nodeMax.x - nodeMin.x;
+
+    std::vector<std::pair<double, double>> coverageIntervals;
+    coverageIntervals.reserve(8);
+
+    for (const QuadtreeNode& candidate : m_nodes)
+    {
+        if (&candidate == &node || !nodeHasWaterSurface(candidate))
+        {
+            continue;
+        }
+
+        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
+        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
+        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
+        const double candidateSize = candidateMax.x - candidateMin.x;
+        if (candidateSize > nodeSize + kEdgeCoverageEpsilon)
+        {
+            continue;
+        }
+
+        double intervalStart = 0.0;
+        double intervalEnd = 0.0;
+        bool touchesEdge = false;
+
+        switch (edgeIndex)
+        {
+        case 0:
+            touchesEdge = std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.z, candidateMin.z);
+            intervalEnd = std::min(nodeMax.z, candidateMax.z);
+            break;
+        case 1:
+            touchesEdge = std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.x, candidateMin.x);
+            intervalEnd = std::min(nodeMax.x, candidateMax.x);
+            break;
+        case 2:
+            touchesEdge = std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.z, candidateMin.z);
+            intervalEnd = std::min(nodeMax.z, candidateMax.z);
+            break;
+        case 3:
+            touchesEdge = std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon;
+            intervalStart = std::max(nodeMin.x, candidateMin.x);
+            intervalEnd = std::min(nodeMax.x, candidateMax.x);
+            break;
+        default:
+            return false;
+        }
+
+        if (!touchesEdge || intervalEnd <= intervalStart + kEdgeCoverageEpsilon)
+        {
+            continue;
+        }
+
+        coverageIntervals.emplace_back(intervalStart, intervalEnd);
+    }
+
+    if (coverageIntervals.empty())
+    {
+        return false;
+    }
+
+    std::sort(coverageIntervals.begin(), coverageIntervals.end());
+    const double targetStart = (edgeIndex == 0 || edgeIndex == 2) ? nodeMin.z : nodeMin.x;
+    const double targetEnd = (edgeIndex == 0 || edgeIndex == 2) ? nodeMax.z : nodeMax.x;
+    if (coverageIntervals.front().first > targetStart + kEdgeCoverageEpsilon)
+    {
+        return false;
+    }
+
+    double coveredEnd = coverageIntervals.front().second;
+    if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
+    {
+        return true;
+    }
+
+    for (std::size_t intervalIndex = 1; intervalIndex < coverageIntervals.size(); ++intervalIndex)
+    {
+        const auto& [intervalStart, intervalEnd] = coverageIntervals[intervalIndex];
+        if (intervalStart > coveredEnd + kEdgeCoverageEpsilon)
+        {
+            return false;
+        }
+
+        coveredEnd = std::max(coveredEnd, intervalEnd);
+        if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
+        {
+            return true;
         }
     }
 

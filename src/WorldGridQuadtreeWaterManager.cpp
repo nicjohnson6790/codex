@@ -39,7 +39,7 @@ const WaterSettings& WorldGridQuadtreeWaterManager::settings() const
     return m_settings;
 }
 
-void WorldGridQuadtreeWaterManager::requestLeaf(
+bool WorldGridQuadtreeWaterManager::requestLeaf(
     const WorldGridQuadtreeLeafId& leafId,
     const Position& leafOrigin,
     double leafSizeMeters,
@@ -51,22 +51,59 @@ void WorldGridQuadtreeWaterManager::requestLeaf(
 {
     if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
     {
-        return;
+        return false;
     }
 
     if (!shouldDrawWaterLeaf(leafOrigin, leafSizeMeters, terrainExtentsKnown, terrainMinHeight))
     {
-        return;
+        return false;
     }
 
-    const double distanceMeters = estimateDistanceToLeaf(leafOrigin, leafSizeMeters);
-    const std::uint32_t bandMask = computeBandMask(leafSizeMeters, distanceMeters);
+    const std::uint32_t bandMask = computeBandMaskForLeaf(leafOrigin, leafSizeMeters);
 
     WaterLeafDrawRequest& request = m_requests[m_requestCount++];
+    request.type = WaterLeafDrawRequest::Type::Leaf;
     request.leafId = leafId;
     request.origin = leafOrigin;
     request.sizeMeters = leafSizeMeters;
     request.quadtreeLodHint = quadtreeLodHint;
+    request.edgeIndex = 0;
+    request.bandMask = bandMask;
+    request.terrainSliceIndex = terrainSliceIndex;
+    request.hasTerrainSlice = hasTerrainSlice;
+    return true;
+}
+
+std::uint32_t WorldGridQuadtreeWaterManager::computeBandMaskForLeaf(
+    const Position& leafOrigin,
+    double leafSizeMeters) const
+{
+    const double distanceMeters = estimateDistanceToLeaf(leafOrigin, leafSizeMeters);
+    return computeBandMask(leafSizeMeters, distanceMeters);
+}
+
+void WorldGridQuadtreeWaterManager::requestBridge(
+    const WorldGridQuadtreeLeafId& leafId,
+    const Position& leafOrigin,
+    double leafSizeMeters,
+    bool hasTerrainSlice,
+    std::uint16_t terrainSliceIndex,
+    std::uint8_t quadtreeLodHint,
+    std::uint32_t bandMask,
+    std::uint8_t edgeIndex)
+{
+    if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
+    {
+        return;
+    }
+
+    WaterLeafDrawRequest& request = m_requests[m_requestCount++];
+    request.type = WaterLeafDrawRequest::Type::Bridge;
+    request.leafId = leafId;
+    request.origin = leafOrigin;
+    request.sizeMeters = leafSizeMeters;
+    request.quadtreeLodHint = quadtreeLodHint;
+    request.edgeIndex = edgeIndex;
     request.bandMask = bandMask;
     request.terrainSliceIndex = terrainSliceIndex;
     request.hasTerrainSlice = hasTerrainSlice;
@@ -79,14 +116,41 @@ void WorldGridQuadtreeWaterManager::flushToRenderer(QuadtreeWaterMeshRenderer& r
     for (std::uint32_t index = 0; index < m_requestCount; ++index)
     {
         const WaterLeafDrawRequest& request = m_requests[index];
-        renderer.addLeaf(
-            request.leafId,
-            request.origin,
-            request.sizeMeters,
-            request.quadtreeLodHint,
-            request.hasTerrainSlice,
-            request.terrainSliceIndex,
-            request.bandMask);
+        switch (request.type)
+        {
+        case WaterLeafDrawRequest::Type::Leaf:
+            renderer.addLeaf(
+                request.leafId,
+                request.origin,
+                request.sizeMeters,
+                request.quadtreeLodHint,
+                request.hasTerrainSlice,
+                request.terrainSliceIndex,
+                request.bandMask);
+            break;
+        case WaterLeafDrawRequest::Type::Bridge:
+            renderer.addBridge(
+                request.leafId,
+                request.origin,
+                request.sizeMeters,
+                request.quadtreeLodHint,
+                request.hasTerrainSlice,
+                request.terrainSliceIndex,
+                request.bandMask,
+                request.edgeIndex);
+            break;
+        case WaterLeafDrawRequest::Type::CoarseBridge:
+            renderer.addCoarseBridge(
+                request.leafId,
+                request.origin,
+                request.sizeMeters,
+                request.quadtreeLodHint,
+                request.hasTerrainSlice,
+                request.terrainSliceIndex,
+                request.bandMask,
+                request.edgeIndex);
+            break;
+        }
     }
 }
 
