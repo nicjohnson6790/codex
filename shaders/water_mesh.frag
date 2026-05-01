@@ -107,58 +107,6 @@ vec3 shadeTerrainBelowWater(vec2 localMeters)
     return terrainAlbedo(terrainHeight) * (ambient + (water.sunColorAmbient.rgb * diffuse));
 }
 
-bool traceShallowRefraction(vec3 waterNormal, vec3 viewDir, out vec2 hitLocalMeters, out vec3 hitTerrainColor)
-{
-    if (fragHasTerrainSlice == 0u)
-    {
-        return false;
-    }
-
-    if (fragLocalDepth > max(water.refractionParams.y, 0.01))
-    {
-        return false;
-    }
-
-    vec3 refractedDir = refract(-viewDir, waterNormal, 1.0 / 1.333);
-    if (refractedDir.y >= -0.001)
-    {
-        return false;
-    }
-
-    float maxTravel = fragLocalDepth / max(-refractedDir.y, 0.05);
-    vec2 previousLocalMeters = fragLocalMeters;
-    float previousDifference = fragLocalDepth;
-    const int stepCount = 6;
-
-    for (int stepIndex = 1; stepIndex <= stepCount; ++stepIndex)
-    {
-        float t = maxTravel * (float(stepIndex) / float(stepCount));
-        vec2 localMeters = fragLocalMeters + (refractedDir.xz * t);
-        if (localMeters.x < 0.0 || localMeters.y < 0.0 || localMeters.x > fragLeafSize || localMeters.y > fragLeafSize)
-        {
-            return false;
-        }
-
-        float rayHeight = (fragWorldPosition.y - water.waterParams.x) + water.waterParams.x + (refractedDir.y * t);
-        float terrainHeight = sampleTerrainHeight(fragTerrainSliceIndex, localMeters, fragLeafSize);
-        float difference = rayHeight - terrainHeight;
-        if (difference <= 0.0)
-        {
-            float blend = clamp(previousDifference / max(previousDifference - difference, 1.0e-4), 0.0, 1.0);
-            hitLocalMeters = mix(localMeters, previousLocalMeters, blend);
-            hitTerrainColor = shadeTerrainBelowWater(hitLocalMeters);
-            return true;
-        }
-
-        previousLocalMeters = localMeters;
-        previousDifference = difference;
-    }
-
-    hitLocalMeters = previousLocalMeters;
-    hitTerrainColor = shadeTerrainBelowWater(hitLocalMeters);
-    return true;
-}
-
 float saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
@@ -381,26 +329,13 @@ void main()
         float exponentialT = (exp(2.0 * depthT) - 1.0) / (exp(2.0) - 1.0);
         shallowRefractionBlend = 1.0 - exponentialT;
     }
-    vec3 refractedTerrainColor = vec3(0.0);
-    vec2 refractedLocalMeters = fragLocalMeters;
-    bool hasRefractedTerrain = false;
-    if (shallowRefractionBlend > 0.0 && fragHasTerrainSlice != 0u)
-    {
-        hasRefractedTerrain = traceShallowRefraction(normal, viewDir, refractedLocalMeters, refractedTerrainColor);
-    }
-    vec3 shallowTransmission =
-        refractedTerrainColor *
-        transmission *
-        mix(vec3(1.0), waterBodyColor, 0.12);
-
-    vec3 baseWaterLighting = ambient + subsurface;
-    if (hasRefractedTerrain)
-    {
-        baseWaterLighting = mix(baseWaterLighting, shallowTransmission + (ambient * 0.35), shallowRefractionBlend);
-    }
-
-    vec3 color = baseWaterLighting + overheadBlueBoost + environmentSpecular + directSpecular;
-    color = mix(color, reflectedSky, saturate(max(fresnelReflection.r, max(fresnelReflection.g, fresnelReflection.b)) * 0.65));
+    vec3 bodyColor = ambient + subsurface + overheadBlueBoost + directSpecular;
+    vec3 reflectionColor = environmentSpecular;
+    reflectionColor = mix(
+        reflectionColor,
+        reflectedSky,
+        saturate(max(fresnelReflection.r, max(fresnelReflection.g, fresnelReflection.b)) * 0.65));
+    vec3 foamOverlay = vec3(0.0);
 
     if (foamSignal > 0.0)
     {
@@ -410,9 +345,16 @@ void main()
             (ambientSky * 0.55) +
             (water.sunColorAmbient.rgb * water.sunDirectionIntensity.w * foamDiffuse * 0.45);
         vec3 foamColor = water.foamColor.rgb * foamLighting * water.foamColor.a * foamViewBoost;
-        color = mix(color, foamColor, saturate(foamSignal * 0.72));
-        color += foamColor * foamSignal * 0.12;
+        foamOverlay = mix(foamOverlay, foamColor, saturate(foamSignal * 0.72));
+        foamOverlay += foamColor * foamSignal * 0.12;
     }
 
-    outColor = vec4(color, 1.0);
+    float surfaceAlpha = 1.0;
+    if (fragHasTerrainSlice != 0u)
+    {
+        surfaceAlpha = 1.0 - shallowRefractionBlend;
+    }
+
+    vec3 premultipliedColor = (bodyColor * surfaceAlpha) + reflectionColor + foamOverlay;
+    outColor = vec4(premultipliedColor, surfaceAlpha);
 }

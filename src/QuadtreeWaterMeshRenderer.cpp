@@ -606,8 +606,23 @@ void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& sha
     vertexAttribute.format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
     vertexAttribute.offset = offsetof(Vertex, localCoord);
 
+    SDL_GPUColorTargetBlendState blendState{};
+    blendState.enable_blend = true;
+    blendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    blendState.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    blendState.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    blendState.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    blendState.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    blendState.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    blendState.color_write_mask =
+        SDL_GPU_COLORCOMPONENT_R |
+        SDL_GPU_COLORCOMPONENT_G |
+        SDL_GPU_COLORCOMPONENT_B |
+        SDL_GPU_COLORCOMPONENT_A;
+
     SDL_GPUColorTargetDescription colorTargetDescription{};
     colorTargetDescription.format = m_colorFormat;
+    colorTargetDescription.blend_state = blendState;
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
