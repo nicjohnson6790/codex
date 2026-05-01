@@ -103,6 +103,10 @@ public:
 
     [[nodiscard]] std::uint32_t instanceCount() const;
     [[nodiscard]] std::uint32_t totalInstanceCount() const;
+    [[nodiscard]] const WaterSettings& settings() const { return m_settings; }
+    [[nodiscard]] SDL_GPUTexture* displacementTexture() const { return m_displacementTexture; }
+    [[nodiscard]] SDL_GPUTexture* slopeTexture() const { return m_slopeTexture; }
+    [[nodiscard]] SDL_GPUSampler* waterSampler() const { return m_waterSampler; }
 
 private:
     struct Vertex

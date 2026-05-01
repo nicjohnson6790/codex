@@ -6,6 +6,8 @@ layout(set=1, binding=0) uniform TerrainUniforms
     vec4 sunDirectionIntensity;
     vec4 sunColorAmbient;
     vec4 terrainHeightParams;
+    vec4 cameraWorldAndTime;
+    vec4 waterCausticsParams;
 } terrain;
 
 layout(set=0, binding=0, std430) readonly buffer HeightmapBuffer
@@ -27,7 +29,8 @@ layout(set=0, binding=1, std430) readonly buffer InstanceBuffer
 layout(location = 0) in vec2 inLocalCoord;
 layout(location = 1) in vec2 inSampleCoord;
 
-layout(location = 0) out vec3 fragColor;
+layout(location = 0) out vec3 fragLocalPosition;
+layout(location = 1) out vec3 fragWorldNormal;
 
 const uint kHeightmapResolution = 259u;
 const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
@@ -63,16 +66,6 @@ vec3 computeNormal(uint sliceIndex, ivec2 sampleCoord, float sampleSpacing)
     return normalize(cross(tangentZ, tangentX));
 }
 
-vec3 terrainAlbedo(float height)
-{
-    float baseHeight = terrain.terrainHeightParams.x;
-    float heightAmplitude = max(terrain.terrainHeightParams.y, 0.001);
-    float normalizedHeight = clamp((height - baseHeight) / (heightAmplitude * 1.8), 0.0, 1.0);
-    vec3 lowland = vec3(0.14, 0.34, 0.16);
-    vec3 highland = vec3(0.46, 0.40, 0.31);
-    return mix(lowland, highland, normalizedHeight);
-}
-
 void main()
 {
     TerrainInstance instance = instanceBuffer.instanceData[gl_InstanceIndex];
@@ -91,12 +84,7 @@ void main()
         instance.position.z + localOffset.y
     );
 
-    vec3 normal = computeNormal(sliceIndex, sampleCoord, sampleSpacing);
-    vec3 sunDirection = normalize(terrain.sunDirectionIntensity.xyz);
-    float diffuse = max(dot(normal, sunDirection), 0.0) * terrain.sunDirectionIntensity.w;
-    vec3 ambient = terrain.sunColorAmbient.rgb * terrain.sunColorAmbient.a;
-    vec3 litColor = terrainAlbedo(height) * (ambient + (terrain.sunColorAmbient.rgb * diffuse));
-
     gl_Position = terrain.viewProjection * vec4(worldPosition, 1.0);
-    fragColor = litColor;
+    fragLocalPosition = worldPosition;
+    fragWorldNormal = computeNormal(sliceIndex, sampleCoord, sampleSpacing);
 }

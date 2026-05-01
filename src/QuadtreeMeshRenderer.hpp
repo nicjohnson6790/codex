@@ -4,6 +4,7 @@
 #include "HeightmapNoiseGenerator.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
+#include "QuadtreeWaterMeshRenderer.hpp"
 #include "WorldGridQuadtreeHeightmapManager.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
 
@@ -33,6 +34,10 @@ public:
         glm::vec4 sunDirectionIntensity{0.0f, 1.0f, 0.0f, 1.0f};
         glm::vec4 sunColorAmbient{1.0f, 1.0f, 1.0f, 0.2f};
         glm::vec4 terrainHeightParams{0.0f, static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude), 0.0f, 0.0f};
+        glm::vec4 cameraWorldAndTime{0.0f};
+        glm::vec4 waterCausticsParams{0.0f};
+        glm::vec4 waterCascadeWorldSizesA{0.0f};
+        glm::vec4 waterCascadeWorldSizesB{0.0f};
     };
 
     QuadtreeMeshRenderer() = default;
@@ -54,6 +59,7 @@ public:
     // Sets the camera used to convert world Positions into camera-local coordinates.
     void setActiveCamera(const Position& cameraPosition);
     void setTerrainHeightParams(float baseHeight, float heightAmplitude);
+    void setWaterCausticsState(float waterLevel, bool waterEnabled);
 
     [[nodiscard]] bool queueHeightmapGeneration(
         const WorldGridQuadtreeLeafId& leafId,
@@ -75,7 +81,13 @@ public:
     void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents);
 
     // Issues the terrain draws for all queued leaf instances.
-    void render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection, const LightingSystem &lightingSystem) const;
+    void render(
+        SDL_GPURenderPass *renderPass,
+        SDL_GPUCommandBuffer *commandBuffer,
+        const glm::mat4 &viewProjection,
+        const LightingSystem &lightingSystem,
+        const QuadtreeWaterMeshRenderer& waterRenderer,
+        float timeSeconds) const;
     [[nodiscard]] SDL_GPUBuffer* heightmapBuffer() const { return m_heightmapBuffer; }
 
 private:
@@ -222,4 +234,6 @@ private:
     std::uint16_t m_nextReadbackSlot = 0;
     float m_terrainBaseHeight = 0.0f;
     float m_terrainHeightAmplitude = static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude);
+    float m_waterLevel = AppConfig::Water::kDefaultWaterLevel;
+    bool m_waterCausticsEnabled = AppConfig::Water::kEnabled;
 };

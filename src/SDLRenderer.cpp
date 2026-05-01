@@ -233,7 +233,13 @@ void SDLRenderer::renderFrame(
 
         {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderTerrain", ProfileScopeGroup::Renderer);
-            quadtreeMeshRenderer.render(renderPass, commandBuffer, viewProjection, lightingSystem);
+            quadtreeMeshRenderer.render(
+                renderPass,
+                commandBuffer,
+                viewProjection,
+                lightingSystem,
+                waterMeshRenderer,
+                timeSeconds);
         }
         if constexpr (AppConfig::Water::kEnabled)
         {

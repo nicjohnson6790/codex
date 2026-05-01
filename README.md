@@ -13,7 +13,7 @@ Water follows the same broad ownership split as terrain, but stays globally simu
 - `QuadtreeWaterMeshRenderer` owns the reusable water meshes, FFT compute resources, and water draw path
 - `SDLRenderer` orchestrates the terrain and water compute/render order each frame
 
-The current water path uses four shared FFT cascades at `512 x 512`, with one reusable interior water patch mesh plus reusable equal-LOD and `2:1` bridge meshes instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth for shallow-water displacement damping, depth-based color/transmission shaping, and a shallow refracted terrain lookup. Water shading is now driven by a sky/atmosphere-aware PBR-style surface model that samples the same cubemap and atmosphere LUT used by the skybox pass, with crest foam generated from wave compression and accumulated in a separate persistent foam history texture. The background sky and water reflection atmosphere probes both treat the atmosphere as a deep participating medium instead of cutting off at `y = 0`.
+The current water path uses four shared FFT cascades at `512 x 512`, with one reusable interior water patch mesh plus reusable equal-LOD and `2:1` bridge meshes instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth for shallow-water displacement damping, depth-based transparency shaping, and shoreline-aware transmission over the already rendered terrain. Water shading is now driven by a sky/atmosphere-aware PBR-style surface model that samples the same cubemap and atmosphere LUT used by the skybox pass, with crest foam generated from wave compression and accumulated in a separate persistent foam history texture. The terrain fragment path also samples the shared water displacement and slope maps to drive underwater caustics on submerged terrain. The background sky and water reflection atmosphere probes both treat the atmosphere as a deep participating medium instead of cutting off at `y = 0`.
 
 Core pieces:
 
@@ -58,11 +58,12 @@ The renderer then:
 5. renders terrain, water, triangles, and debug lines into the offscreen viewport
    - terrain uses an interior patch mesh plus equal-LOD and `2:1` bridge meshes to close cracks between quadtree nodes
    - terrain submits both bridge variants through one shared bridge indirect draw
+   - submerged terrain can add triplanar Worley-style caustics, with the caustic evolution warped and modulated from the shared water displacement/slope maps
    - water uses the same broad stitch strategy with a trimmed interior base patch plus equal-LOD and `2:1` bridge meshes
    - water also submits both bridge variants through one shared bridge indirect draw
    - the water vertex shader samples the matching resident terrain slice when available
    - local depth is used to damp wave motion in shallow water, with per-cascade damping strengths
-   - the water fragment shader blends sky/atmosphere reflection, depth-based absorption/scattering, shallow refracted terrain, and persistent crest foam
+   - the water fragment shader blends sky/atmosphere reflection, depth-based absorption/scattering, depth-driven transparency over terrain, and persistent crest foam
 6. renders the skybox as a fullscreen quad using the cubemap and the current time-of-day rotation
 7. renders ImGui
 
@@ -86,14 +87,15 @@ The renderer then:
 - Crest foam generated from local wave compression, with temporal persistence and decay in a dedicated ping-pong history texture
 - Terrain-aware shallow-water damping by sampling the resident terrain heightmap slice under each water patch
 - Per-cascade shallow-water damping strengths so small and large wave bands can fade differently near shore
+- Depth-driven water surface transparency over already rendered terrain instead of a local shallow-refraction raymarch
+- Underwater terrain caustics from a triplanar Worley-style pattern warped and modulated by the shared FFT water displacement/slope field
 - Tiered water cascade selection by patch size:
   - `256` and `512` meter patches use all 4 cascades
   - `1024` and `2048` meter patches use the top 3 cascades
   - `4096` and `8192` meter patches use the top 2 cascades
   - larger patches use only the top cascade
 - Sky/atmosphere-aware PBR-style water shading using the same cubemap and atmosphere LUT as the skybox pass
-- Depth-driven water color, absorption, and transmission beyond the shoreline band
-- Shallow refracted terrain lookup from resident terrain heightmap data, without screen-space scene color sampling
+- Depth-driven water color, absorption, transmission, and transparency beyond the shoreline band
 - Skybox cubemap rendering from `resources/skybox`
 - Deep-atmosphere sky and water reflection probes that do not clamp atmospheric traversal to a ground plane at `y = 0`
 - Time-of-day controls that rotate both the sun and skybox around a shared orbit axis
@@ -109,7 +111,7 @@ The renderer then:
   - compute dispatches per frame
 - Quadtree debug bounds using real extents when known, falling back to a flat square when not
 - Tree-based quadtree neighbor traversal for terrain and water stitching, including world-grid border handoff across the active `3 x 3` base-node set
-- Gouraud terrain shading with a tunable global sun light
+- Terrain shading with a tunable global sun light plus underwater caustic lighting on submerged terrain
 - Automatic day/night progression with configurable day length and time factor
 - Built-in frame graph and CPU flame graph
 - Water tuning UI for level, amplitude, cutoffs, per-cascade parameters including wind direction, terrain-height water culling, shallow-water damping, and crest-foam controls
@@ -234,7 +236,8 @@ Windows GPU preference:
 - Terrain and water both render trimmed interior base patches and add edge-specific bridge meshes where neighboring quadtree nodes would otherwise leave a crack.
 - Water visibility currently uses both expanded quadtree bounds and a terrain-height gate, so leaves that are clearly dry can skip water entirely while still allowing low terrain under the water plane to remain visible.
 - Water patch LOD also controls which shared wave cascades are sampled, so larger/farther quadtree patches shed the finest wave bands instead of always using all four maps.
-- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal now affects draw-time damping, water color/transmission, and a shallow refracted terrain lookup, but it still does not feed back into the shared FFT simulation itself.
+- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal now affects draw-time damping, water color/transmission, and surface transparency, but it still does not feed back into the shared FFT simulation itself.
+- Submerged terrain shading samples the shared water displacement and slope maps to drive triplanar Worley-style fake caustics, so the caustic motion evolves with the same FFT water field instead of using an unrelated scrolling overlay.
 - Crest foam is generated during the map-build pass from horizontal-displacement compression, then accumulated with decay in a separate foam history texture rather than being packed into displacement alpha.
 - The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction. Both the skybox path and the water reflection probe treat the atmosphere as a deep medium rather than intersecting a hard `y = 0` ground plane.
 - Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.
