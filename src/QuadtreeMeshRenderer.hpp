@@ -102,6 +102,12 @@ private:
         std::uint32_t indexCount = 0;
     };
 
+    struct MeshRange
+    {
+        std::uint32_t firstIndex = 0;
+        std::uint32_t indexCount = 0;
+    };
+
     struct alignas(16) HeightmapGenerationUniforms
     {
         glm::vec4 sampleOriginAndStep{ 0.0f };
@@ -174,23 +180,20 @@ private:
     // Static reusable terrain meshes plus their one-time upload buffers.
     MeshResources m_mainMesh{};
     MeshResources m_bridgeMesh{};
-    MeshResources m_coarseBridgeMesh{};
+    MeshRange m_bridgeMeshRange{};
+    MeshRange m_coarseBridgeMeshRange{};
 
     // Per-frame instance data buffer plus staging buffer.
     SDL_GPUBuffer* m_instanceBuffer = nullptr;
     SDL_GPUTransferBuffer* m_instanceTransferBuffer = nullptr;
     SDL_GPUBuffer* m_bridgeInstanceBuffer = nullptr;
     SDL_GPUTransferBuffer* m_bridgeInstanceTransferBuffer = nullptr;
-    SDL_GPUBuffer* m_coarseBridgeInstanceBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_coarseBridgeInstanceTransferBuffer = nullptr;
 
     // Indirect draw-command buffer plus staging buffer.
     SDL_GPUBuffer* m_indirectBuffer = nullptr;
     SDL_GPUTransferBuffer* m_indirectTransferBuffer = nullptr;
     SDL_GPUBuffer* m_bridgeIndirectBuffer = nullptr;
     SDL_GPUTransferBuffer* m_bridgeIndirectTransferBuffer = nullptr;
-    SDL_GPUBuffer* m_coarseBridgeIndirectBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_coarseBridgeIndirectTransferBuffer = nullptr;
 
     // GPU heightmap slice storage written directly by the compute shader.
     SDL_GPUBuffer* m_heightmapGenerationBuffer = nullptr;
@@ -202,6 +205,7 @@ private:
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_bridgeInstanceData{};
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_coarseBridgeInstanceData{};
+    std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
     std::array<HeightmapGenerationUniforms, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingHeightmapGenerations{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationLeafIds{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedLeafIds{};
@@ -211,6 +215,7 @@ private:
     std::uint16_t m_instanceCount = 0;
     std::uint16_t m_bridgeInstanceCount = 0;
     std::uint16_t m_coarseBridgeInstanceCount = 0;
+    std::uint16_t m_bridgeIndirectCommandCount = 0;
     std::uint16_t m_pendingHeightmapGenerationCount = 0;
     std::uint16_t m_lastDispatchedGenerationCount = 0;
     std::uint16_t m_pendingFenceReadbackSlot = UINT16_MAX;

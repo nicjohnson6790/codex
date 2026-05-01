@@ -127,6 +127,12 @@ private:
         std::uint32_t indexCount = 0;
     };
 
+    struct MeshRange
+    {
+        std::uint32_t firstIndex = 0;
+        std::uint32_t indexCount = 0;
+    };
+
     struct InstanceResources
     {
         SDL_GPUBuffer* instanceBuffer = nullptr;
@@ -225,10 +231,15 @@ private:
     SDL_GPUComputePipeline* m_buildMapsPipeline = nullptr;
     MeshResources m_mesh{};
     MeshResources m_bridgeMesh{};
-    MeshResources m_coarseBridgeMesh{};
+    MeshRange m_bridgeMeshRange{};
+    MeshRange m_coarseBridgeMeshRange{};
     InstanceResources m_instances{};
     InstanceResources m_bridgeInstances{};
     InstanceResources m_coarseBridgeInstances{};
+    SDL_GPUBuffer* m_bridgeIndirectBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_bridgeIndirectTransferBuffer = nullptr;
+    std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
+    std::uint32_t m_bridgeIndirectCommandCount = 0;
     WorkingBufferResources m_workingBuffers{};
     SDL_GPUTexture* m_displacementTexture = nullptr;
     SDL_GPUTexture* m_slopeTexture = nullptr;

@@ -57,7 +57,9 @@ The renderer then:
 4. queues an async terrain extents download
 5. renders terrain, water, triangles, and debug lines into the offscreen viewport
    - terrain uses an interior patch mesh plus equal-LOD and `2:1` bridge meshes to close cracks between quadtree nodes
+   - terrain submits both bridge variants through one shared bridge indirect draw
    - water uses the same broad stitch strategy with a trimmed interior base patch plus equal-LOD and `2:1` bridge meshes
+   - water also submits both bridge variants through one shared bridge indirect draw
    - the water vertex shader samples the matching resident terrain slice when available
    - local depth is used to damp wave motion in shallow water, with per-cascade damping strengths
    - the water fragment shader blends sky/atmosphere reflection, depth-based absorption/scattering, shallow refracted terrain, and persistent crest foam
@@ -74,8 +76,10 @@ The renderer then:
 - Quadtree terrain rendering with runtime residency and subdivision
 - `259 x 259` heightmap slices with halo samples and a reusable terrain patch mesh
 - Terrain crack stitching with reusable equal-LOD and `2:1` bridge meshes
+- Terrain equal-LOD and `2:1` bridge draws batched through one indirect bridge submission
 - GPU compute terrain generation with async GPU extents readback
 - Shared-cascade FFT water with an interior base mesh plus reusable equal-LOD and `2:1` bridge meshes
+- Water equal-LOD and `2:1` bridge draws batched through one indirect bridge submission
 - Four `512 x 512` water cascades sampled in world space across visible water leaves, with cascade usage reduced on larger quadtree patches
 - SSBO-backed FFT working set with shared-memory butterfly passes
 - Precomputed static water spectrum initialization, rebuilt only when water settings change
