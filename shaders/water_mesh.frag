@@ -256,7 +256,6 @@ void main()
     uint cascadeCount = uint(max(water.waterParams.w, 0.0));
 
     vec2 slope = vec2(0.0);
-    float displacementEnergy = 0.0;
     float foamCoverage = 0.0;
     float foamDetail = 0.0;
     float foamMicroSlope = 0.0;
@@ -270,10 +269,8 @@ void main()
 
         float worldSize = max(cascadeWorldSize(cascadeIndex), 1.0);
         vec2 uv = fract(worldXZ / worldSize);
-        vec4 displacementSample = texture(displacementTexture, vec3(uv, float(cascadeIndex)));
         vec4 slopeSample = texture(slopeTexture, vec3(uv, float(cascadeIndex)));
         slope += slopeSample.xy;
-        displacementEnergy += dot(displacementSample.xyz, displacementSample.xyz);
         float cascadeFoam = saturate(texture(foamTexture, vec3(uv, float(cascadeIndex))).r);
         float detailWeight = 1.0 - smoothstep(500.0, 8000.0, worldSize);
         float coverageWeight = 1.0 - (0.55 * detailWeight);
@@ -319,7 +316,6 @@ void main()
     vec3 waterBodyColor = mix(shallowColor, midColor, midDepthFactor);
     waterBodyColor = mix(waterBodyColor, deepColor, deepDepthFactor);
     waterBodyColor = mix(waterBodyColor, shoreColor, clamp(fragShoreFactor, 0.0, 1.0) * 0.65);
-    waterBodyColor += vec3(0.015, 0.02, 0.025) * clamp(displacementEnergy * 0.015, 0.0, 1.0);
     if (water.debugParams.x > 0.5)
     {
         vec3 lodTint = vec3(0.10, 0.20, 0.28);
@@ -372,9 +368,6 @@ void main()
         waterBodyColor *
         transmission *
         (water.sunColorAmbient.a * mix(1.1, 0.55, deepDepthFactor));
-    vec3 refractedTerrainColor = vec3(0.0);
-    vec2 refractedLocalMeters = fragLocalMeters;
-    bool hasRefractedTerrain = traceShallowRefraction(normal, viewDir, refractedLocalMeters, refractedTerrainColor);
     float shallowRefractionStart = water.refractionParams.x;
     float shallowRefractionEnd = max(water.refractionParams.y, shallowRefractionStart + 0.01);
     float shallowRefractionBlend = 0.0;
@@ -387,6 +380,13 @@ void main()
         float depthT = (opticalDepth - shallowRefractionStart) / (shallowRefractionEnd - shallowRefractionStart);
         float exponentialT = (exp(2.0 * depthT) - 1.0) / (exp(2.0) - 1.0);
         shallowRefractionBlend = 1.0 - exponentialT;
+    }
+    vec3 refractedTerrainColor = vec3(0.0);
+    vec2 refractedLocalMeters = fragLocalMeters;
+    bool hasRefractedTerrain = false;
+    if (shallowRefractionBlend > 0.0 && fragHasTerrainSlice != 0u)
+    {
+        hasRefractedTerrain = traceShallowRefraction(normal, viewDir, refractedLocalMeters, refractedTerrainColor);
     }
     vec3 shallowTransmission =
         refractedTerrainColor *
