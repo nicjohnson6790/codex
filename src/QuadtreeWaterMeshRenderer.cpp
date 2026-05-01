@@ -586,14 +586,8 @@ void QuadtreeWaterMeshRenderer::createWaterComputePipelines(const std::filesyste
 
 void QuadtreeWaterMeshRenderer::createMesh()
 {
-    createMeshGeometry(AppConfig::Water::kMeshVertexResolution);
+    createMeshGeometry(AppConfig::Water::kMeshVertexResolution - 2u);
 
-    const auto mainGridCoord = [](std::uint32_t index)
-    {
-        const float normalized = static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
-        const float usableSpan = 1.0f - (kWaterMeshInset * 2.0f);
-        return kWaterMeshInset + (normalized * usableSpan);
-    };
     const auto bridgeEdgeCoord = [](std::uint32_t index)
     {
         return static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
@@ -728,6 +722,8 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
 
     const std::uint32_t n = resources.vertexResolution;
     const std::uint32_t quadCount = n - 1;
+    const std::uint32_t fullResolution = AppConfig::Water::kMeshVertexResolution;
+    const std::uint32_t fullIntervalCount = fullResolution - 1u;
 
     std::vector<Vertex> vertices;
     vertices.reserve(static_cast<std::size_t>(n) * static_cast<std::size_t>(n));
@@ -736,12 +732,8 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
         for (std::uint32_t x = 0; x < n; ++x)
         {
             Vertex vertex{};
-            const float inset = 1.0f / static_cast<float>(n - 1);
-            const float usableSpan = 1.0f - (inset * 2.0f);
-            const float normalizedX = static_cast<float>(x) / static_cast<float>(n - 1);
-            const float normalizedY = static_cast<float>(y) / static_cast<float>(n - 1);
-            vertex.localCoord[0] = inset + (normalizedX * usableSpan);
-            vertex.localCoord[1] = inset + (normalizedY * usableSpan);
+            vertex.localCoord[0] = static_cast<float>(x + 1u) / static_cast<float>(fullIntervalCount);
+            vertex.localCoord[1] = static_cast<float>(y + 1u) / static_cast<float>(fullIntervalCount);
             vertices.push_back(vertex);
         }
     }

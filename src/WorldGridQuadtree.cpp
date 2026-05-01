@@ -354,20 +354,32 @@ void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManag
         const std::uint32_t bandMask = waterManager.computeBandMaskForLeaf(minCorner, leafSizeMeters);
         for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
         {
-            if (!edgeHasWaterNeighborCoverage(node, edgeIndex))
+            if (edgeHasWaterNeighborCoverage(node, edgeIndex))
             {
+                waterManager.requestBridge(
+                    node.nodeId,
+                    minCorner,
+                    leafSizeMeters,
+                    hasTerrainSlice,
+                    terrainSliceIndex,
+                    quadtreeLodHint,
+                    bandMask,
+                    edgeIndex);
                 continue;
             }
 
-            waterManager.requestBridge(
-                node.nodeId,
-                minCorner,
-                leafSizeMeters,
-                hasTerrainSlice,
-                terrainSliceIndex,
-                quadtreeLodHint,
-                bandMask,
-                edgeIndex);
+            if (edgeHasWaterCoarserNeighbor(node, edgeIndex))
+            {
+                waterManager.requestCoarseBridge(
+                    node.nodeId,
+                    minCorner,
+                    leafSizeMeters,
+                    hasTerrainSlice,
+                    terrainSliceIndex,
+                    quadtreeLodHint,
+                    bandMask,
+                    edgeIndex);
+            }
         }
     }
 }
@@ -936,6 +948,72 @@ bool WorldGridQuadtree::edgeHasWaterNeighborCoverage(const QuadtreeNode& node, s
         if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
         {
             return true;
+        }
+    }
+
+    return false;
+}
+
+bool WorldGridQuadtree::edgeHasWaterCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const
+{
+    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
+    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
+    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
+    const double nodeSize = nodeMax.x - nodeMin.x;
+    const double expectedNeighborSize = nodeSize * 2.0;
+
+    for (const QuadtreeNode& candidate : m_nodes)
+    {
+        if (&candidate == &node || !nodeHasWaterSurface(candidate))
+        {
+            continue;
+        }
+
+        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
+        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
+        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
+        const double candidateSize = candidateMax.x - candidateMin.x;
+        if (std::abs(candidateSize - expectedNeighborSize) > kEdgeCoverageEpsilon)
+        {
+            continue;
+        }
+
+        switch (edgeIndex)
+        {
+        case 0:
+            if (std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon &&
+                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
+                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        case 1:
+            if (std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon &&
+                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
+                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        case 2:
+            if (std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon &&
+                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
+                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        case 3:
+            if (std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon &&
+                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
+                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
+            {
+                return true;
+            }
+            break;
+        default:
+            return false;
         }
     }
 

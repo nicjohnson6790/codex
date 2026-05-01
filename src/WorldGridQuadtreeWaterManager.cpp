@@ -109,6 +109,33 @@ void WorldGridQuadtreeWaterManager::requestBridge(
     request.hasTerrainSlice = hasTerrainSlice;
 }
 
+void WorldGridQuadtreeWaterManager::requestCoarseBridge(
+    const WorldGridQuadtreeLeafId& leafId,
+    const Position& leafOrigin,
+    double leafSizeMeters,
+    bool hasTerrainSlice,
+    std::uint16_t terrainSliceIndex,
+    std::uint8_t quadtreeLodHint,
+    std::uint32_t bandMask,
+    std::uint8_t edgeIndex)
+{
+    if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
+    {
+        return;
+    }
+
+    WaterLeafDrawRequest& request = m_requests[m_requestCount++];
+    request.type = WaterLeafDrawRequest::Type::CoarseBridge;
+    request.leafId = leafId;
+    request.origin = leafOrigin;
+    request.sizeMeters = leafSizeMeters;
+    request.quadtreeLodHint = quadtreeLodHint;
+    request.edgeIndex = edgeIndex;
+    request.bandMask = bandMask;
+    request.terrainSliceIndex = terrainSliceIndex;
+    request.hasTerrainSlice = hasTerrainSlice;
+}
+
 void WorldGridQuadtreeWaterManager::flushToRenderer(QuadtreeWaterMeshRenderer& renderer) const
 {
     renderer.clear();

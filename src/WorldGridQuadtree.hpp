@@ -98,6 +98,7 @@ private:
     [[nodiscard]] bool edgeHasDrawableNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasWaterNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool edgeHasWaterCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool shouldSubdivide(const QuadtreeNode& node, const Position& cameraPosition) const;
     [[nodiscard]] static bool nodeHasFlag(const QuadtreeNode& node, std::uint8_t mask);
     static void setNodeFlag(QuadtreeNode& node, std::uint8_t mask, bool enabled);
