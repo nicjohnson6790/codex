@@ -127,7 +127,7 @@ bool shouldDrawNodeFrustum(
         !allAboveFrustum;
 }
 
-bool nodeHasFlag(const QuadtreeNode& node, std::uint8_t mask)
+bool quadtreeNodeHasFlag(const QuadtreeNode& node, std::uint8_t mask)
 {
     return (node.flags & mask) != 0;
 }
@@ -136,19 +136,19 @@ bool subtreeCanRenderWithoutParentFallback(
     const std::array<QuadtreeNode, WorldGridQuadtree::kNodeCapacity>& nodes,
     const QuadtreeNode& node)
 {
-    if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask))
+    if (!quadtreeNodeHasFlag(node, QuadtreeNode::IsUsedMask))
     {
         return true;
     }
 
-    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
+    if (quadtreeNodeHasFlag(node, QuadtreeNode::IsLeafMask))
     {
-        return !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
+        return !quadtreeNodeHasFlag(node, QuadtreeNode::IsUploadingMask);
     }
 
-    if (nodeHasFlag(node, QuadtreeNode::IsSubdividingMask))
+    if (quadtreeNodeHasFlag(node, QuadtreeNode::IsSubdividingMask))
     {
-        return !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
+        return !quadtreeNodeHasFlag(node, QuadtreeNode::IsUploadingMask);
     }
 
     for (const std::uint16_t childIndex : node.children)
@@ -171,7 +171,7 @@ bool nodeIsParentOfLeaves(
     const std::array<QuadtreeNode, WorldGridQuadtree::kNodeCapacity>& nodes,
     const QuadtreeNode& node)
 {
-    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
+    if (quadtreeNodeHasFlag(node, QuadtreeNode::IsLeafMask))
     {
         return false;
     }
@@ -184,8 +184,8 @@ bool nodeIsParentOfLeaves(
         }
 
         const QuadtreeNode& child = nodes[childIndex];
-        if (!nodeHasFlag(child, QuadtreeNode::IsUsedMask) ||
-            !nodeHasFlag(child, QuadtreeNode::IsLeafMask))
+        if (!quadtreeNodeHasFlag(child, QuadtreeNode::IsUsedMask) ||
+            !quadtreeNodeHasFlag(child, QuadtreeNode::IsLeafMask))
         {
             return false;
         }
@@ -277,6 +277,41 @@ std::array<std::uint8_t, 2> edgeChildQuadrants(std::uint8_t edgeIndex)
     default:
         return { 0u, 0u };
     }
+}
+
+template<typename SurfacePredicate>
+bool subtreeEdgeCoveredBy(
+    const std::array<QuadtreeNode, WorldGridQuadtree::kNodeCapacity>& nodes,
+    std::uint16_t nodeIndex,
+    std::uint8_t edgeIndex,
+    SurfacePredicate&& nodeHasSurface)
+{
+    if (nodeIndex == QuadtreeNode::NullNodeIndex)
+    {
+        return false;
+    }
+
+    const QuadtreeNode& node = nodes[nodeIndex];
+    if (nodeHasSurface(node))
+    {
+        return true;
+    }
+
+    if (quadtreeNodeHasFlag(node, QuadtreeNode::IsLeafMask))
+    {
+        return false;
+    }
+
+    const auto childQuadrants = edgeChildQuadrants(edgeIndex);
+    for (const std::uint8_t childQuadrant : childQuadrants)
+    {
+        if (!subtreeEdgeCoveredBy(nodes, node.children[childQuadrant], edgeIndex, nodeHasSurface))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 }
 
@@ -837,90 +872,36 @@ std::uint16_t WorldGridQuadtree::findNeighborSubtreeRoot(std::uint16_t nodeIndex
 
 std::uint16_t WorldGridQuadtree::findBaseNode(std::int64_t gridX, std::int64_t gridY) const
 {
-    for (const std::uint16_t nodeIndex : m_baseNodes)
+    const std::int64_t radius = AppConfig::Quadtree::kNeighborRadius;
+    const std::int64_t offsetX = gridX - m_baseGridX;
+    const std::int64_t offsetY = gridY - m_baseGridY;
+    if (offsetX < -radius || offsetX > radius || offsetY < -radius || offsetY > radius)
     {
-        if (nodeIndex == QuadtreeNode::NullNodeIndex)
-        {
-            continue;
-        }
-
-        const QuadtreeNode& node = m_nodes[nodeIndex];
-        if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask))
-        {
-            continue;
-        }
-
-        if (node.nodeId.gridX == gridX &&
-            node.nodeId.gridY == gridY &&
-            node.nodeId.subdivisionPath == 0)
-        {
-            return nodeIndex;
-        }
+        return QuadtreeNode::NullNodeIndex;
     }
 
-    return QuadtreeNode::NullNodeIndex;
+    const std::size_t sideLength = static_cast<std::size_t>((radius * 2) + 1);
+    const std::size_t row = static_cast<std::size_t>(offsetY + radius);
+    const std::size_t column = static_cast<std::size_t>(offsetX + radius);
+    return m_baseNodes[(row * sideLength) + column];
 }
 
 bool WorldGridQuadtree::subtreeEdgeCoveredByTerrain(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
 {
-    if (nodeIndex == QuadtreeNode::NullNodeIndex)
-    {
-        return false;
-    }
-
-    const QuadtreeNode& node = m_nodes[nodeIndex];
-    if (nodeContributesTerrainDraw(node))
-    {
-        return true;
-    }
-
-    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
-    {
-        return false;
-    }
-
-    const auto childQuadrants = edgeChildQuadrants(edgeIndex);
-    for (const std::uint8_t childQuadrant : childQuadrants)
-    {
-        const std::uint16_t childIndex = node.children[childQuadrant];
-        if (!subtreeEdgeCoveredByTerrain(childIndex, edgeIndex))
-        {
-            return false;
-        }
-    }
-
-    return true;
+    return subtreeEdgeCoveredBy(
+        m_nodes,
+        nodeIndex,
+        edgeIndex,
+        [](const QuadtreeNode& node) { return WorldGridQuadtree::nodeContributesTerrainDraw(node); });
 }
 
 bool WorldGridQuadtree::subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
 {
-    if (nodeIndex == QuadtreeNode::NullNodeIndex)
-    {
-        return false;
-    }
-
-    const QuadtreeNode& node = m_nodes[nodeIndex];
-    if (nodeHasWaterSurface(node))
-    {
-        return true;
-    }
-
-    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
-    {
-        return false;
-    }
-
-    const auto childQuadrants = edgeChildQuadrants(edgeIndex);
-    for (const std::uint8_t childQuadrant : childQuadrants)
-    {
-        const std::uint16_t childIndex = node.children[childQuadrant];
-        if (!subtreeEdgeCoveredByWater(childIndex, edgeIndex))
-        {
-            return false;
-        }
-    }
-
-    return true;
+    return subtreeEdgeCoveredBy(
+        m_nodes,
+        nodeIndex,
+        edgeIndex,
+        [](const QuadtreeNode& node) { return WorldGridQuadtree::nodeHasWaterSurface(node); });
 }
 
 bool WorldGridQuadtree::edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
