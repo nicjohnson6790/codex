@@ -11,7 +11,7 @@ struct WaterCascadeSettings
 {
     float worldSizeMeters = static_cast<float>(AppConfig::Water::kDefaultCascadeSizesMeters[0]);
     float amplitude = AppConfig::Water::kDefaultCascadeAmplitudes[0];
-    float windDirectionRadians = AppConfig::Water::kDefaultWindDirectionRadians;
+    float windDirectionRadians = AppConfig::Water::kDefaultCascadeWindDirectionsRadians[0];
     float windSpeed = AppConfig::Water::kDefaultCascadeWindSpeeds[0];
     float fetchMeters = AppConfig::Water::kDefaultCascadeFetchMeters[0];
     float spreadBlend = AppConfig::Water::kDefaultCascadeSpreadBlend[0];

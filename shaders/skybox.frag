@@ -58,18 +58,16 @@ float backgroundAtmosphereDistance(vec3 worldDirection)
     const vec3 worldUp = vec3(0.0, 1.0, 0.0);
     float cameraAltitude = uniforms.atmosphereParams.w;
     float topPlaneHeight = uniforms.atmosphereParams.x - cameraAltitude;
+    float maxDistance = max(uniforms.atmosphereParams.y, 0.00001);
     float upDenominator = dot(worldDirection, worldUp);
     if (topPlaneHeight > 0.0 && upDenominator > 0.00001)
     {
-        return topPlaneHeight / upDenominator;
+        return min(topPlaneHeight / upDenominator, maxDistance);
     }
 
-    if (cameraAltitude > 0.0 && upDenominator < -0.00001)
-    {
-        return cameraAltitude / -upDenominator;
-    }
-
-    return min(max(topPlaneHeight, 0.0), uniforms.atmosphereParams.y);
+    // Treat the atmosphere as a deep medium below the camera instead of
+    // intersecting a hard ground plane at y = 0.
+    return maxDistance;
 }
 
 void main()

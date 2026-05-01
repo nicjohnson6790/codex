@@ -28,7 +28,7 @@ inline WaterSettings makeDefaultWaterSettings()
     {
         settings.cascades[i].worldSizeMeters = static_cast<float>(AppConfig::Water::kDefaultCascadeSizesMeters[i]);
         settings.cascades[i].amplitude = AppConfig::Water::kDefaultCascadeAmplitudes[i];
-        settings.cascades[i].windDirectionRadians = AppConfig::Water::kDefaultWindDirectionRadians;
+        settings.cascades[i].windDirectionRadians = AppConfig::Water::kDefaultCascadeWindDirectionsRadians[i];
         settings.cascades[i].windSpeed = AppConfig::Water::kDefaultCascadeWindSpeeds[i];
         settings.cascades[i].fetchMeters = AppConfig::Water::kDefaultCascadeFetchMeters[i];
         settings.cascades[i].spreadBlend = AppConfig::Water::kDefaultCascadeSpreadBlend[i];

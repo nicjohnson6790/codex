@@ -425,6 +425,30 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
 
     if (m_instanceCount > 0)
     {
+        if (m_instanceCount > 1)
+        {
+            std::sort(
+                m_instanceData.begin(),
+                m_instanceData.begin() + m_instanceCount,
+                [](const InstanceData& left, const InstanceData& right)
+                {
+                    const auto distanceSquared = [](const InstanceData& instance)
+                    {
+                        const std::uint8_t scalePow = static_cast<std::uint8_t>((instance.packedMetadata >> 16U) & 0xFFU);
+                        const float leafSize = static_cast<float>(
+                            AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(1ULL << scalePow));
+                        const float centerX = instance.position[0] + (leafSize * 0.5f);
+                        const float centerY = instance.position[1];
+                        const float centerZ = instance.position[2] + (leafSize * 0.5f);
+                        return
+                            (centerX * centerX) +
+                            (centerY * centerY) +
+                            (centerZ * centerZ);
+                    };
+                    return distanceSquared(left) < distanceSquared(right);
+                });
+        }
+
         void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_instanceTransferBuffer, true);
         std::memcpy(mappedInstances, m_instanceData.data(), sizeof(InstanceData) * m_instanceCount);
         SDL_UnmapGPUTransferBuffer(m_device, m_instanceTransferBuffer);

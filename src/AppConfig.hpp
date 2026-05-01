@@ -115,23 +115,29 @@ inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascade
 };
 
 inline constexpr float kDefaultWaterLevel = 250.0f;
-inline constexpr float kDefaultWindDirectionRadians = 0.0f;
 inline constexpr float kDefaultGlobalAmplitude = 1.1f;
 inline constexpr float kDefaultGlobalChoppiness = 1.2f;
 inline constexpr float kDefaultDepthMeters = 20.0f;
 inline constexpr float kDefaultLowCutoff = 0.0001f;
 inline constexpr float kDefaultHighCutoff = 9000.0f;
 
+inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeWindDirectionsRadians{
+    1.0f,
+    2.0f,
+    3.0f,
+    4.0f,
+};
+
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeAmplitudes{
     0.55f,
-    2.05f,
+    2.20f,
     0.20f,
     0.25f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeWindSpeeds{
     0.80f,
-    4.0f,
+    7.0f,
     1.00f,
     10.00f,
 };
@@ -172,8 +178,8 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShortWav
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeChoppiness{
-    4.05f,
-    4.75f,
+    3.30f,
+    7.25f,
     2.85f,
     1.0f,
 };

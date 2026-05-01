@@ -181,6 +181,28 @@ void QuadtreeWaterMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
         return;
     }
 
+    if (m_instances.instanceCount > 1)
+    {
+        std::sort(
+            m_instances.instances.begin(),
+            m_instances.instances.begin() + m_instances.instanceCount,
+            [](const InstanceData& left, const InstanceData& right)
+            {
+                const auto distanceSquared = [](const InstanceData& instance)
+                {
+                    const float leafSize = instance.leafParams.x;
+                    const float centerX = instance.position[0] + (leafSize * 0.5f);
+                    const float centerY = instance.leafParams.y;
+                    const float centerZ = instance.position[2] + (leafSize * 0.5f);
+                    return
+                        (centerX * centerX) +
+                        (centerY * centerY) +
+                        (centerZ * centerZ);
+                };
+                return distanceSquared(left) < distanceSquared(right);
+            });
+    }
+
     void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_instances.instanceTransferBuffer, true);
     std::memcpy(
         mappedInstances,

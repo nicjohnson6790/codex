@@ -133,7 +133,6 @@ std::uint32_t WorldGridQuadtreeWaterManager::computeBandMask(
     double leafSizeMeters,
     double distanceMeters) const
 {
-    (void)leafSizeMeters;
     (void)distanceMeters;
 
     const std::uint32_t count = m_settings.cascadeCount;
@@ -142,10 +141,19 @@ std::uint32_t WorldGridQuadtreeWaterManager::computeBandMask(
         return 0;
     }
 
-    if (count >= 32)
+    const std::uint32_t activeCount =
+        (leafSizeMeters <= 512.0) ? 4u :
+        (leafSizeMeters <= 2048.0) ? 3u :
+        (leafSizeMeters <= 8192.0) ? 2u :
+        1u;
+
+    const std::uint32_t clampedActiveCount = std::min(activeCount, count);
+    const std::uint32_t firstCascadeIndex = count - clampedActiveCount;
+    std::uint32_t mask = 0;
+    for (std::uint32_t cascadeIndex = firstCascadeIndex; cascadeIndex < count; ++cascadeIndex)
     {
-        return 0xFFFFFFFFu;
+        mask |= (1u << cascadeIndex);
     }
 
-    return (1u << count) - 1u;
+    return mask;
 }
