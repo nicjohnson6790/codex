@@ -23,10 +23,17 @@ constexpr std::uint32_t kWaterFftThreadCountY = 1;
 constexpr std::uint32_t kWaterFftThreadCountZ = 1;
 constexpr SDL_GPUTextureFormat kWaterTextureFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 constexpr std::uint32_t kWaterMeshIntervalCount = AppConfig::Water::kMeshVertexResolution - 1u;
+constexpr std::uint32_t kWaterBaseMeshVertexResolution = AppConfig::Water::kMeshVertexResolution - 2u;
 constexpr float kWaterMeshInset = 1.0f / static_cast<float>(kWaterMeshIntervalCount);
 constexpr std::uint32_t kWaterBridgeOuterVertexCount = AppConfig::Water::kMeshVertexResolution;
 constexpr std::uint32_t kWaterBridgeInnerVertexCount = kWaterMeshIntervalCount - 1u;
 constexpr std::uint32_t kWaterCoarseBridgeOuterVertexCount = (kWaterMeshIntervalCount / 2u) + 1u;
+constexpr std::uint32_t kWaterEqualBridgeQuadCount = kWaterBridgeInnerVertexCount - 1u;
+
+float normalizedWaterCoord(std::uint32_t index)
+{
+    return static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
+}
 
 std::uint32_t fftStageCountForResolution(std::uint32_t resolution)
 {
@@ -171,7 +178,6 @@ void QuadtreeWaterMeshRenderer::addLeaf(
     }
 
     const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
-
     InstanceData& instance = m_instances.instances[m_instances.instanceCount++];
     instance.position[0] = localOrigin.x;
     instance.position[1] = localOrigin.y;
@@ -202,7 +208,6 @@ void QuadtreeWaterMeshRenderer::addBridge(
     }
 
     const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
-
     InstanceData& instance = m_bridgeInstances.instances[m_bridgeInstances.instanceCount++];
     instance.position[0] = localOrigin.x;
     instance.position[1] = localOrigin.y;
@@ -233,7 +238,6 @@ void QuadtreeWaterMeshRenderer::addCoarseBridge(
     }
 
     const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
-
     InstanceData& instance = m_coarseBridgeInstances.instances[m_coarseBridgeInstances.instanceCount++];
     instance.position[0] = localOrigin.x;
     instance.position[1] = localOrigin.y;
@@ -586,52 +590,41 @@ void QuadtreeWaterMeshRenderer::createWaterComputePipelines(const std::filesyste
 
 void QuadtreeWaterMeshRenderer::createMesh()
 {
-    createMeshGeometry(AppConfig::Water::kMeshVertexResolution - 2u);
-
-    const auto bridgeEdgeCoord = [](std::uint32_t index)
-    {
-        return static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
-    };
+    createMeshGeometry(kWaterBaseMeshVertexResolution);
 
     std::vector<Vertex> bridgeVertices;
     bridgeVertices.reserve(kWaterBridgeOuterVertexCount + kWaterBridgeInnerVertexCount);
     std::array<std::uint32_t, kWaterBridgeOuterVertexCount> outerVertexIndices{};
     std::array<std::uint32_t, kWaterBridgeInnerVertexCount> innerVertexIndices{};
+    const auto appendBridgeVertex = [&bridgeVertices](float x, float y)
+    {
+        const std::uint32_t vertexIndex = static_cast<std::uint32_t>(bridgeVertices.size());
+        bridgeVertices.push_back(Vertex{ { x, y } });
+        return vertexIndex;
+    };
 
-    outerVertexIndices[0] = static_cast<std::uint32_t>(bridgeVertices.size());
-    bridgeVertices.push_back({
-        { 0.0f, bridgeEdgeCoord(0u) },
-    });
+    outerVertexIndices[0] = appendBridgeVertex(0.0f, normalizedWaterCoord(0u));
 
     for (std::uint32_t y = 1; y < kWaterMeshIntervalCount; ++y)
     {
-        outerVertexIndices[y] = static_cast<std::uint32_t>(bridgeVertices.size());
-        bridgeVertices.push_back({
-            { 0.0f, bridgeEdgeCoord(y) },
-        });
+        outerVertexIndices[y] = appendBridgeVertex(0.0f, normalizedWaterCoord(y));
     }
 
-    outerVertexIndices[kWaterBridgeOuterVertexCount - 1u] = static_cast<std::uint32_t>(bridgeVertices.size());
-    bridgeVertices.push_back({
-        { 0.0f, bridgeEdgeCoord(kWaterMeshIntervalCount) },
-    });
+    outerVertexIndices[kWaterBridgeOuterVertexCount - 1u] = appendBridgeVertex(0.0f, normalizedWaterCoord(kWaterMeshIntervalCount));
 
     for (std::uint32_t y = 1; y < kWaterMeshIntervalCount; ++y)
     {
-        innerVertexIndices[y - 1u] = static_cast<std::uint32_t>(bridgeVertices.size());
-        bridgeVertices.push_back({
-            { kWaterMeshInset, bridgeEdgeCoord(y) },
-        });
+        innerVertexIndices[y - 1u] = appendBridgeVertex(kWaterMeshInset, normalizedWaterCoord(y));
     }
 
     std::vector<std::uint32_t> bridgeIndices;
-    bridgeIndices.reserve((126u * 6u) + 6u);
+    bridgeIndices.reserve((kWaterEqualBridgeQuadCount * 6u) + 6u);
 
     bridgeIndices.push_back(outerVertexIndices[0]);
     bridgeIndices.push_back(outerVertexIndices[1]);
     bridgeIndices.push_back(innerVertexIndices[0]);
 
-    for (std::uint32_t y = 0; y < 126u; ++y)
+    for (std::uint32_t y = 0; y < kWaterEqualBridgeQuadCount; ++y)
     {
         const std::uint32_t outerTop = outerVertexIndices[y + 1u];
         const std::uint32_t outerBottom = outerVertexIndices[y + 2u];
@@ -661,9 +654,7 @@ void QuadtreeWaterMeshRenderer::createMesh()
     for (std::uint32_t y = 0; y < kWaterCoarseBridgeOuterVertexCount; ++y)
     {
         coarseOuterVertexIndices[y] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
-        coarseBridgeVertices.push_back({
-            { 0.0f, bridgeEdgeCoord(y * 2u) },
-        });
+        coarseBridgeVertices.push_back(Vertex{ { 0.0f, normalizedWaterCoord(y * 2u) } });
     }
 
     for (std::uint32_t innerIndex = 0; innerIndex < kWaterBridgeInnerVertexCount; ++innerIndex)
@@ -722,8 +713,6 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
 
     const std::uint32_t n = resources.vertexResolution;
     const std::uint32_t quadCount = n - 1;
-    const std::uint32_t fullResolution = AppConfig::Water::kMeshVertexResolution;
-    const std::uint32_t fullIntervalCount = fullResolution - 1u;
 
     std::vector<Vertex> vertices;
     vertices.reserve(static_cast<std::size_t>(n) * static_cast<std::size_t>(n));
@@ -731,10 +720,9 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
     {
         for (std::uint32_t x = 0; x < n; ++x)
         {
-            Vertex vertex{};
-            vertex.localCoord[0] = static_cast<float>(x + 1u) / static_cast<float>(fullIntervalCount);
-            vertex.localCoord[1] = static_cast<float>(y + 1u) / static_cast<float>(fullIntervalCount);
-            vertices.push_back(vertex);
+            vertices.push_back(Vertex{
+                { normalizedWaterCoord(x + 1u), normalizedWaterCoord(y + 1u) }
+            });
         }
     }
 

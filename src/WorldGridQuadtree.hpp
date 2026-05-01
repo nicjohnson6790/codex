@@ -18,12 +18,14 @@ class WorldGridQuadtreeWaterManager;
 struct QuadtreeNode
 {
     WorldGridQuadtreeLeafId nodeId{};
+    std::uint16_t parentIndex = std::uint16_t{0xFFFF};
     std::array<std::uint16_t, 4> children{
         std::uint16_t{0xFFFF},
         std::uint16_t{0xFFFF},
         std::uint16_t{0xFFFF},
         std::uint16_t{0xFFFF},
     };
+    std::uint8_t quadrantInParent = 0;
     std::uint8_t flags = 0;
     float minHeight = 0.0f;
     float maxHeight = 0.0f;
@@ -95,10 +97,14 @@ private:
     [[nodiscard]] static bool nodeHasResidentTerrainSurface(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeContributesWaterDraw(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeHasWaterSurface(const QuadtreeNode& node);
-    [[nodiscard]] bool edgeHasDrawableNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
-    [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
-    [[nodiscard]] bool edgeHasWaterNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
-    [[nodiscard]] bool edgeHasWaterCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool edgeHasWaterNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool edgeHasWaterCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
+    [[nodiscard]] std::uint16_t findBaseNode(std::int64_t gridX, std::int64_t gridY) const;
+    [[nodiscard]] std::uint16_t findNeighborSubtreeRoot(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool subtreeEdgeCoveredByTerrain(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
+    [[nodiscard]] bool subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool shouldSubdivide(const QuadtreeNode& node, const Position& cameraPosition) const;
     [[nodiscard]] static bool nodeHasFlag(const QuadtreeNode& node, std::uint8_t mask);
     static void setNodeFlag(QuadtreeNode& node, std::uint8_t mask, bool enabled);

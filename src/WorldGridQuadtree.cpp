@@ -14,6 +14,10 @@ namespace
 {
 constexpr double kVisibilityBoundsHalfHeight = 10000.0;
 constexpr double kEdgeCoverageEpsilon = 1.0e-4;
+constexpr std::uint8_t kEdgeWest = 0;
+constexpr std::uint8_t kEdgeSouth = 1;
+constexpr std::uint8_t kEdgeEast = 2;
+constexpr std::uint8_t kEdgeNorth = 3;
 
 void initializeBaseNode(
     QuadtreeNode& node,
@@ -25,7 +29,9 @@ void initializeBaseNode(
         .gridY = gridY,
         .subdivisionPath = 0,
     };
+    node.parentIndex = QuadtreeNode::NullNodeIndex;
     node.children.fill(QuadtreeNode::NullNodeIndex);
+    node.quadrantInParent = 0;
     node.flags = QuadtreeNode::IsUsedMask | QuadtreeNode::IsLeafMask;
 }
 
@@ -187,6 +193,91 @@ bool nodeIsParentOfLeaves(
 
     return true;
 }
+
+bool quadrantTouchesEdge(std::uint8_t quadrant, std::uint8_t edgeIndex)
+{
+    switch (edgeIndex)
+    {
+    case kEdgeWest:
+        return quadrant == 1u || quadrant == 3u;
+    case kEdgeSouth:
+        return quadrant == 2u || quadrant == 3u;
+    case kEdgeEast:
+        return quadrant == 0u || quadrant == 2u;
+    case kEdgeNorth:
+        return quadrant == 0u || quadrant == 1u;
+    default:
+        return false;
+    }
+}
+
+std::uint8_t oppositeEdge(std::uint8_t edgeIndex)
+{
+    switch (edgeIndex)
+    {
+    case kEdgeWest:
+        return kEdgeEast;
+    case kEdgeSouth:
+        return kEdgeNorth;
+    case kEdgeEast:
+        return kEdgeWest;
+    case kEdgeNorth:
+        return kEdgeSouth;
+    default:
+        return edgeIndex;
+    }
+}
+
+std::uint16_t adjacentSiblingQuadrant(std::uint8_t quadrant, std::uint8_t edgeIndex)
+{
+    switch (edgeIndex)
+    {
+    case kEdgeWest:
+        return quadrant == 0u ? 1u : 3u;
+    case kEdgeSouth:
+        return quadrant == 0u ? 2u : 3u;
+    case kEdgeEast:
+        return quadrant == 1u ? 0u : 2u;
+    case kEdgeNorth:
+        return quadrant == 2u ? 0u : 1u;
+    default:
+        return QuadtreeNode::NullNodeIndex;
+    }
+}
+
+std::uint8_t descendantQuadrantForNeighbor(std::uint8_t sourceQuadrant, std::uint8_t edgeIndex)
+{
+    switch (edgeIndex)
+    {
+    case kEdgeWest:
+        return (sourceQuadrant == 0u || sourceQuadrant == 1u) ? 0u : 2u;
+    case kEdgeSouth:
+        return (sourceQuadrant == 0u || sourceQuadrant == 2u) ? 0u : 1u;
+    case kEdgeEast:
+        return (sourceQuadrant == 0u || sourceQuadrant == 1u) ? 1u : 3u;
+    case kEdgeNorth:
+        return (sourceQuadrant == 0u || sourceQuadrant == 2u) ? 2u : 3u;
+    default:
+        return 0u;
+    }
+}
+
+std::array<std::uint8_t, 2> edgeChildQuadrants(std::uint8_t edgeIndex)
+{
+    switch (edgeIndex)
+    {
+    case kEdgeWest:
+        return { 1u, 3u };
+    case kEdgeSouth:
+        return { 2u, 3u };
+    case kEdgeEast:
+        return { 0u, 2u };
+    case kEdgeNorth:
+        return { 0u, 1u };
+    default:
+        return { 0u, 0u };
+    }
+}
 }
 
 WorldGridQuadtree::WorldGridQuadtree() { reset(); }
@@ -251,8 +342,9 @@ void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
         return;
     }
 
-    for (const QuadtreeNode& node : m_nodes)
+    for (std::uint16_t nodeIndex = 0; nodeIndex < static_cast<std::uint16_t>(m_nodes.size()); ++nodeIndex)
     {
+        const QuadtreeNode& node = m_nodes[nodeIndex];
         if (!nodeContributesTerrainDraw(node))
         {
             continue;
@@ -268,13 +360,13 @@ void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
 
         for (std::uint8_t edgeIndex = 0; edgeIndex < 4; ++edgeIndex)
         {
-            if (edgeHasDrawableNeighborCoverage(node, edgeIndex))
+            if (edgeHasDrawableNeighborCoverage(nodeIndex, edgeIndex))
             {
                 renderEngines.quadtreeMeshRenderer->addBridge(node.nodeId, sliceIndex, edgeIndex);
                 continue;
             }
 
-            if (edgeHasDrawableCoarserNeighbor(node, edgeIndex))
+            if (edgeHasDrawableCoarserNeighbor(nodeIndex, edgeIndex))
             {
                 renderEngines.quadtreeMeshRenderer->addCoarseBridge(node.nodeId, sliceIndex, edgeIndex);
             }
@@ -324,8 +416,9 @@ void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManag
 {
     HELLO_PROFILE_SCOPE("WorldGridQuadtree::EmitWaterDraws");
 
-    for (const QuadtreeNode& node : m_nodes)
+    for (std::uint16_t nodeIndex = 0; nodeIndex < static_cast<std::uint16_t>(m_nodes.size()); ++nodeIndex)
     {
+        const QuadtreeNode& node = m_nodes[nodeIndex];
         if (!nodeContributesWaterDraw(node))
         {
             continue;
@@ -354,7 +447,7 @@ void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManag
         const std::uint32_t bandMask = waterManager.computeBandMaskForLeaf(minCorner, leafSizeMeters);
         for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
         {
-            if (edgeHasWaterNeighborCoverage(node, edgeIndex))
+            if (edgeHasWaterNeighborCoverage(nodeIndex, edgeIndex))
             {
                 waterManager.requestBridge(
                     node.nodeId,
@@ -368,7 +461,7 @@ void WorldGridQuadtree::emitWaterDraws(WorldGridQuadtreeWaterManager& waterManag
                 continue;
             }
 
-            if (edgeHasWaterCoarserNeighbor(node, edgeIndex))
+            if (edgeHasWaterCoarserNeighbor(nodeIndex, edgeIndex))
             {
                 waterManager.requestCoarseBridge(
                     node.nodeId,
@@ -525,6 +618,7 @@ std::uint16_t WorldGridQuadtree::allocateNode()
 
     const std::uint16_t nodeIndex = m_freeNodes[--m_freeNodeCount];
     m_nodes[nodeIndex] = {};
+    m_nodes[nodeIndex].parentIndex = QuadtreeNode::NullNodeIndex;
     m_nodes[nodeIndex].children.fill(QuadtreeNode::NullNodeIndex);
     return nodeIndex;
 }
@@ -537,6 +631,7 @@ void WorldGridQuadtree::freeNode(std::uint16_t nodeIndex)
     }
 
     m_nodes[nodeIndex] = {};
+    m_nodes[nodeIndex].parentIndex = QuadtreeNode::NullNodeIndex;
     m_nodes[nodeIndex].children.fill(QuadtreeNode::NullNodeIndex);
     m_freeNodes[m_freeNodeCount++] = nodeIndex;
 }
@@ -590,7 +685,9 @@ void WorldGridQuadtree::ensureChildren(std::uint16_t nodeIndex)
             .gridY = node.nodeId.gridY,
             .subdivisionPath = WorldGridQuadtreeLeafId::appendChild(node.nodeId.subdivisionPath, quadrant),
         };
+        child.parentIndex = nodeIndex;
         child.children.fill(QuadtreeNode::NullNodeIndex);
+        child.quadrantInParent = static_cast<std::uint8_t>(quadrant);
         child.flags = QuadtreeNode::IsUsedMask | QuadtreeNode::IsLeafMask;
         childIndices[quadrant] = childIndex;
     }
@@ -686,338 +783,214 @@ bool WorldGridQuadtree::nodeHasWaterSurface(const QuadtreeNode& node)
         !nodeHasFlag(node, QuadtreeNode::IsUploadingMask);
 }
 
-bool WorldGridQuadtree::edgeHasDrawableNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const
+std::uint16_t WorldGridQuadtree::findNeighborSubtreeRoot(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
 {
-    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
-    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
-    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
-    const double nodeSize = nodeMax.x - nodeMin.x;
-
-    std::vector<std::pair<double, double>> coverageIntervals;
-    coverageIntervals.reserve(8);
-
-    for (const QuadtreeNode& candidate : m_nodes)
+    const QuadtreeNode& node = m_nodes[nodeIndex];
+    const std::uint16_t parentIndex = node.parentIndex;
+    if (parentIndex == QuadtreeNode::NullNodeIndex)
     {
-        if (&candidate == &node || !nodeHasResidentTerrainSurface(candidate))
-        {
-            continue;
-        }
-
-        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
-        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
-        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
-        const double candidateSize = candidateMax.x - candidateMin.x;
-        if (candidateSize > nodeSize + kEdgeCoverageEpsilon)
-        {
-            continue;
-        }
-
-        double intervalStart = 0.0;
-        double intervalEnd = 0.0;
-        bool touchesEdge = false;
-
+        std::int64_t neighborGridX = node.nodeId.gridX;
+        std::int64_t neighborGridY = node.nodeId.gridY;
         switch (edgeIndex)
         {
-        case 0:
-            touchesEdge = std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.z, candidateMin.z);
-            intervalEnd = std::min(nodeMax.z, candidateMax.z);
+        case kEdgeWest:
+            --neighborGridX;
             break;
-        case 1:
-            touchesEdge = std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.x, candidateMin.x);
-            intervalEnd = std::min(nodeMax.x, candidateMax.x);
+        case kEdgeSouth:
+            --neighborGridY;
             break;
-        case 2:
-            touchesEdge = std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.z, candidateMin.z);
-            intervalEnd = std::min(nodeMax.z, candidateMax.z);
+        case kEdgeEast:
+            ++neighborGridX;
             break;
-        case 3:
-            touchesEdge = std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.x, candidateMin.x);
-            intervalEnd = std::min(nodeMax.x, candidateMax.x);
+        case kEdgeNorth:
+            ++neighborGridY;
             break;
         default:
-            return false;
+            return QuadtreeNode::NullNodeIndex;
         }
+        return findBaseNode(neighborGridX, neighborGridY);
+    }
 
-        if (!touchesEdge || intervalEnd <= intervalStart + kEdgeCoverageEpsilon)
+    const std::uint8_t quadrant = node.quadrantInParent;
+    if (!quadrantTouchesEdge(quadrant, edgeIndex))
+    {
+        const std::uint16_t siblingQuadrant = adjacentSiblingQuadrant(quadrant, edgeIndex);
+        return m_nodes[parentIndex].children[siblingQuadrant];
+    }
+
+    const std::uint16_t parentNeighborIndex = findNeighborSubtreeRoot(parentIndex, edgeIndex);
+    if (parentNeighborIndex == QuadtreeNode::NullNodeIndex)
+    {
+        return QuadtreeNode::NullNodeIndex;
+    }
+
+    const QuadtreeNode& parentNeighbor = m_nodes[parentNeighborIndex];
+    if (nodeHasFlag(parentNeighbor, QuadtreeNode::IsLeafMask))
+    {
+        return parentNeighborIndex;
+    }
+
+    const std::uint8_t childQuadrant = descendantQuadrantForNeighbor(quadrant, edgeIndex);
+    const std::uint16_t childIndex = parentNeighbor.children[childQuadrant];
+    return childIndex;
+}
+
+std::uint16_t WorldGridQuadtree::findBaseNode(std::int64_t gridX, std::int64_t gridY) const
+{
+    for (const std::uint16_t nodeIndex : m_baseNodes)
+    {
+        if (nodeIndex == QuadtreeNode::NullNodeIndex)
         {
             continue;
         }
 
-        coverageIntervals.emplace_back(intervalStart, intervalEnd);
+        const QuadtreeNode& node = m_nodes[nodeIndex];
+        if (!nodeHasFlag(node, QuadtreeNode::IsUsedMask))
+        {
+            continue;
+        }
+
+        if (node.nodeId.gridX == gridX &&
+            node.nodeId.gridY == gridY &&
+            node.nodeId.subdivisionPath == 0)
+        {
+            return nodeIndex;
+        }
     }
 
-    if (coverageIntervals.empty())
+    return QuadtreeNode::NullNodeIndex;
+}
+
+bool WorldGridQuadtree::subtreeEdgeCoveredByTerrain(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
+{
+    if (nodeIndex == QuadtreeNode::NullNodeIndex)
     {
         return false;
     }
 
-    std::sort(coverageIntervals.begin(), coverageIntervals.end());
-    const double targetStart = (edgeIndex == 0 || edgeIndex == 2) ? nodeMin.z : nodeMin.x;
-    const double targetEnd = (edgeIndex == 0 || edgeIndex == 2) ? nodeMax.z : nodeMax.x;
-    if (coverageIntervals.front().first > targetStart + kEdgeCoverageEpsilon)
-    {
-        return false;
-    }
-
-    double coveredEnd = coverageIntervals.front().second;
-    if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
+    const QuadtreeNode& node = m_nodes[nodeIndex];
+    if (nodeContributesTerrainDraw(node))
     {
         return true;
     }
 
-    for (std::size_t intervalIndex = 1; intervalIndex < coverageIntervals.size(); ++intervalIndex)
-    {
-        const auto& [intervalStart, intervalEnd] = coverageIntervals[intervalIndex];
-        if (intervalStart > coveredEnd + kEdgeCoverageEpsilon)
-        {
-            return false;
-        }
-
-        coveredEnd = std::max(coveredEnd, intervalEnd);
-        if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool WorldGridQuadtree::edgeHasDrawableCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const
-{
-    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
-    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
-    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
-    const double nodeSize = nodeMax.x - nodeMin.x;
-    const double expectedNeighborSize = nodeSize * 2.0;
-
-    for (const QuadtreeNode& candidate : m_nodes)
-    {
-        if (&candidate == &node || !nodeHasResidentTerrainSurface(candidate))
-        {
-            continue;
-        }
-
-        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
-        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
-        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
-        const double candidateSize = candidateMax.x - candidateMin.x;
-        if (std::abs(candidateSize - expectedNeighborSize) > kEdgeCoverageEpsilon)
-        {
-            continue;
-        }
-
-        switch (edgeIndex)
-        {
-        case 0:
-            if (std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon &&
-                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
-                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        case 1:
-            if (std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon &&
-                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
-                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        case 2:
-            if (std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon &&
-                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
-                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        case 3:
-            if (std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon &&
-                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
-                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        default:
-            return false;
-        }
-    }
-
-    return false;
-}
-
-bool WorldGridQuadtree::edgeHasWaterNeighborCoverage(const QuadtreeNode& node, std::uint8_t edgeIndex) const
-{
-    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
-    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
-    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
-    const double nodeSize = nodeMax.x - nodeMin.x;
-
-    std::vector<std::pair<double, double>> coverageIntervals;
-    coverageIntervals.reserve(8);
-
-    for (const QuadtreeNode& candidate : m_nodes)
-    {
-        if (&candidate == &node || !nodeHasWaterSurface(candidate))
-        {
-            continue;
-        }
-
-        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
-        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
-        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
-        const double candidateSize = candidateMax.x - candidateMin.x;
-        if (candidateSize > nodeSize + kEdgeCoverageEpsilon)
-        {
-            continue;
-        }
-
-        double intervalStart = 0.0;
-        double intervalEnd = 0.0;
-        bool touchesEdge = false;
-
-        switch (edgeIndex)
-        {
-        case 0:
-            touchesEdge = std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.z, candidateMin.z);
-            intervalEnd = std::min(nodeMax.z, candidateMax.z);
-            break;
-        case 1:
-            touchesEdge = std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.x, candidateMin.x);
-            intervalEnd = std::min(nodeMax.x, candidateMax.x);
-            break;
-        case 2:
-            touchesEdge = std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.z, candidateMin.z);
-            intervalEnd = std::min(nodeMax.z, candidateMax.z);
-            break;
-        case 3:
-            touchesEdge = std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon;
-            intervalStart = std::max(nodeMin.x, candidateMin.x);
-            intervalEnd = std::min(nodeMax.x, candidateMax.x);
-            break;
-        default:
-            return false;
-        }
-
-        if (!touchesEdge || intervalEnd <= intervalStart + kEdgeCoverageEpsilon)
-        {
-            continue;
-        }
-
-        coverageIntervals.emplace_back(intervalStart, intervalEnd);
-    }
-
-    if (coverageIntervals.empty())
+    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
     {
         return false;
     }
 
-    std::sort(coverageIntervals.begin(), coverageIntervals.end());
-    const double targetStart = (edgeIndex == 0 || edgeIndex == 2) ? nodeMin.z : nodeMin.x;
-    const double targetEnd = (edgeIndex == 0 || edgeIndex == 2) ? nodeMax.z : nodeMax.x;
-    if (coverageIntervals.front().first > targetStart + kEdgeCoverageEpsilon)
+    const auto childQuadrants = edgeChildQuadrants(edgeIndex);
+    for (const std::uint8_t childQuadrant : childQuadrants)
+    {
+        const std::uint16_t childIndex = node.children[childQuadrant];
+        if (!subtreeEdgeCoveredByTerrain(childIndex, edgeIndex))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool WorldGridQuadtree::subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
+{
+    if (nodeIndex == QuadtreeNode::NullNodeIndex)
     {
         return false;
     }
 
-    double coveredEnd = coverageIntervals.front().second;
-    if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
+    const QuadtreeNode& node = m_nodes[nodeIndex];
+    if (nodeHasWaterSurface(node))
     {
         return true;
     }
 
-    for (std::size_t intervalIndex = 1; intervalIndex < coverageIntervals.size(); ++intervalIndex)
+    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
     {
-        const auto& [intervalStart, intervalEnd] = coverageIntervals[intervalIndex];
-        if (intervalStart > coveredEnd + kEdgeCoverageEpsilon)
+        return false;
+    }
+
+    const auto childQuadrants = edgeChildQuadrants(edgeIndex);
+    for (const std::uint8_t childQuadrant : childQuadrants)
+    {
+        const std::uint16_t childIndex = node.children[childQuadrant];
+        if (!subtreeEdgeCoveredByWater(childIndex, edgeIndex))
         {
             return false;
         }
-
-        coveredEnd = std::max(coveredEnd, intervalEnd);
-        if (coveredEnd >= targetEnd - kEdgeCoverageEpsilon)
-        {
-            return true;
-        }
     }
 
-    return false;
+    return true;
 }
 
-bool WorldGridQuadtree::edgeHasWaterCoarserNeighbor(const QuadtreeNode& node, std::uint8_t edgeIndex) const
+bool WorldGridQuadtree::edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
 {
-    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
-    const glm::dvec3 nodeMin = nodeMinCorner.worldPosition();
-    const glm::dvec3 nodeMax = nodeMaxCorner.worldPosition();
-    const double nodeSize = nodeMax.x - nodeMin.x;
-    const double expectedNeighborSize = nodeSize * 2.0;
-
-    for (const QuadtreeNode& candidate : m_nodes)
+    const std::uint16_t neighborRootIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
+    if (neighborRootIndex == QuadtreeNode::NullNodeIndex)
     {
-        if (&candidate == &node || !nodeHasWaterSurface(candidate))
-        {
-            continue;
-        }
-
-        const auto [candidateMinCorner, candidateMaxCorner] = worldGridQuadtreeLeafBounds(candidate.nodeId);
-        const glm::dvec3 candidateMin = candidateMinCorner.worldPosition();
-        const glm::dvec3 candidateMax = candidateMaxCorner.worldPosition();
-        const double candidateSize = candidateMax.x - candidateMin.x;
-        if (std::abs(candidateSize - expectedNeighborSize) > kEdgeCoverageEpsilon)
-        {
-            continue;
-        }
-
-        switch (edgeIndex)
-        {
-        case 0:
-            if (std::abs(candidateMax.x - nodeMin.x) <= kEdgeCoverageEpsilon &&
-                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
-                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        case 1:
-            if (std::abs(candidateMax.z - nodeMin.z) <= kEdgeCoverageEpsilon &&
-                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
-                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        case 2:
-            if (std::abs(candidateMin.x - nodeMax.x) <= kEdgeCoverageEpsilon &&
-                candidateMin.z <= nodeMin.z + kEdgeCoverageEpsilon &&
-                candidateMax.z >= nodeMax.z - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        case 3:
-            if (std::abs(candidateMin.z - nodeMax.z) <= kEdgeCoverageEpsilon &&
-                candidateMin.x <= nodeMin.x + kEdgeCoverageEpsilon &&
-                candidateMax.x >= nodeMax.x - kEdgeCoverageEpsilon)
-            {
-                return true;
-            }
-            break;
-        default:
-            return false;
-        }
+        return false;
     }
 
-    return false;
+    const QuadtreeNode& node = m_nodes[nodeIndex];
+    const QuadtreeNode& neighborRoot = m_nodes[neighborRootIndex];
+    if (worldGridQuadtreeLeafSize(neighborRoot.nodeId) > worldGridQuadtreeLeafSize(node.nodeId) + kEdgeCoverageEpsilon)
+    {
+        return false;
+    }
+
+    return subtreeEdgeCoveredByTerrain(neighborRootIndex, oppositeEdge(edgeIndex));
+}
+
+bool WorldGridQuadtree::edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
+{
+    const std::uint16_t neighborRootIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
+    if (neighborRootIndex == QuadtreeNode::NullNodeIndex)
+    {
+        return false;
+    }
+
+    const QuadtreeNode& node = m_nodes[nodeIndex];
+    const QuadtreeNode& neighborRoot = m_nodes[neighborRootIndex];
+    const double nodeSize = worldGridQuadtreeLeafSize(node.nodeId);
+    const double neighborSize = worldGridQuadtreeLeafSize(neighborRoot.nodeId);
+    return
+        std::abs(neighborSize - (nodeSize * 2.0)) <= kEdgeCoverageEpsilon &&
+        nodeHasResidentTerrainSurface(neighborRoot);
+}
+
+bool WorldGridQuadtree::edgeHasWaterNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
+{
+    const std::uint16_t neighborRootIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
+    if (neighborRootIndex == QuadtreeNode::NullNodeIndex)
+    {
+        return false;
+    }
+
+    const QuadtreeNode& node = m_nodes[nodeIndex];
+    const QuadtreeNode& neighborRoot = m_nodes[neighborRootIndex];
+    if (worldGridQuadtreeLeafSize(neighborRoot.nodeId) > worldGridQuadtreeLeafSize(node.nodeId) + kEdgeCoverageEpsilon)
+    {
+        return false;
+    }
+
+    return subtreeEdgeCoveredByWater(neighborRootIndex, oppositeEdge(edgeIndex));
+}
+
+bool WorldGridQuadtree::edgeHasWaterCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
+{
+    const std::uint16_t neighborRootIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
+    if (neighborRootIndex == QuadtreeNode::NullNodeIndex)
+    {
+        return false;
+    }
+
+    const QuadtreeNode& node = m_nodes[nodeIndex];
+    const QuadtreeNode& neighborRoot = m_nodes[neighborRootIndex];
+    const double nodeSize = worldGridQuadtreeLeafSize(node.nodeId);
+    const double neighborSize = worldGridQuadtreeLeafSize(neighborRoot.nodeId);
+    return
+        std::abs(neighborSize - (nodeSize * 2.0)) <= kEdgeCoverageEpsilon &&
+        nodeHasWaterSurface(neighborRoot);
 }
 
 void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager::Camera& activeCamera)
