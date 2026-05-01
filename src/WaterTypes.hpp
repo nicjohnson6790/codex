@@ -20,14 +20,17 @@ struct WaterCascadeSettings
     float shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[0];
     float choppiness = AppConfig::Water::kDefaultCascadeChoppiness[0];
     float shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[0];
+    float foamDetailScale = AppConfig::Water::kDefaultCascadeFoamDetailScales[0];
     std::uint32_t updateModulo = 1;
 };
 
 struct WaterSettings
 {
     bool enabled = true;
-    bool showLodTint = true;
+    bool showLodTint = false;
     bool crestFoamEnabled = AppConfig::Water::kDefaultCrestFoamEnabled;
+    bool drawFoam = AppConfig::Water::kDefaultDrawFoam;
+    bool drawTerrainCaustics = AppConfig::Water::kDefaultDrawTerrainCaustics;
     float waterLevel = AppConfig::Water::kDefaultWaterLevel;
     float globalAmplitude = AppConfig::Water::kDefaultGlobalAmplitude;
     float globalChoppiness = AppConfig::Water::kDefaultGlobalChoppiness;
@@ -40,6 +43,20 @@ struct WaterSettings
     float crestFoamSlopeStart = AppConfig::Water::kDefaultCrestFoamSlopeStart;
     float crestFoamDecayRate = AppConfig::Water::kDefaultCrestFoamDecayRate;
     float crestFoamBrightness = AppConfig::Water::kDefaultCrestFoamBrightness;
+    float causticsIntensity = AppConfig::Water::kDefaultCausticsIntensity;
+    float causticsPatternScaleA = AppConfig::Water::kDefaultCausticsPatternScaleA;
+    float causticsPatternScaleB = AppConfig::Water::kDefaultCausticsPatternScaleB;
+    float causticsRotationA = AppConfig::Water::kDefaultCausticsRotationA;
+    float causticsRotationB = AppConfig::Water::kDefaultCausticsRotationB;
+    float causticsDisplacementWarpStrength = AppConfig::Water::kDefaultCausticsDisplacementWarp;
+    float causticsSlopeWarpStrength = AppConfig::Water::kDefaultCausticsSlopeWarp;
+    float causticsRidgeMinA = AppConfig::Water::kDefaultCausticsRidgeMinA;
+    float causticsRidgeMaxA = AppConfig::Water::kDefaultCausticsRidgeMaxA;
+    float causticsRidgeMinB = AppConfig::Water::kDefaultCausticsRidgeMinB;
+    float causticsRidgeMaxB = AppConfig::Water::kDefaultCausticsRidgeMaxB;
+    float causticsFocusMin = AppConfig::Water::kDefaultCausticsFocusMin;
+    float causticsFocusMax = AppConfig::Water::kDefaultCausticsFocusMax;
+    float causticsMinSurfaceUp = AppConfig::Water::kDefaultCausticsMinSurfaceUp;
     float maxTerrainMinHeightAboveWaterToDraw = AppConfig::Water::kMaxTerrainMinHeightAboveWaterToDraw;
     std::uint32_t cascadeCount = AppConfig::Water::kDefaultCascadeCount;
     std::array<WaterCascadeSettings, AppConfig::Water::kMaxCascadeCount> cascades{};

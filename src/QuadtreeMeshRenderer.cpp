@@ -33,6 +33,182 @@ constexpr std::int32_t kInitialMaxHeightCentimeters = std::numeric_limits<std::i
 constexpr std::uint32_t kBridgeOuterVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount + 1;
 constexpr std::uint32_t kBridgeInnerVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount - 1;
 constexpr std::uint32_t kCoarseBridgeOuterVertexCount = (AppConfig::Terrain::kHeightmapLeafIntervalCount / 2) + 1;
+constexpr std::uint32_t kCausticsTextureResolution = 256;
+
+struct GeneratedImage
+{
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::vector<std::uint8_t> pixels;
+    float decodeScale = 1.0f;
+};
+
+float fractf(float value)
+{
+    return value - std::floor(value);
+}
+
+float saturatef(float value)
+{
+    return std::clamp(value, 0.0f, 1.0f);
+}
+
+float smoothstep01(float value)
+{
+    const float t = saturatef(value);
+    return t * t * (3.0f - (2.0f * t));
+}
+
+float lerpf(float a, float b, float t)
+{
+    return a + ((b - a) * t);
+}
+
+float hash11(float x, float y, float seed)
+{
+    const float value = std::sin((x * 127.1f) + (y * 311.7f) + (seed * 74.7f)) * 43758.5453f;
+    return fractf(value);
+}
+
+float periodicValueNoise(float x, float y, std::uint32_t grid, float seed)
+{
+    const float scaledX = x * static_cast<float>(grid);
+    const float scaledY = y * static_cast<float>(grid);
+    const float cellX = std::floor(scaledX);
+    const float cellY = std::floor(scaledY);
+    const std::uint32_t ix = static_cast<std::uint32_t>(cellX) % grid;
+    const std::uint32_t iy = static_cast<std::uint32_t>(cellY) % grid;
+    const std::uint32_t ix1 = (ix + 1u) % grid;
+    const std::uint32_t iy1 = (iy + 1u) % grid;
+    const float fx = smoothstep01(scaledX - cellX);
+    const float fy = smoothstep01(scaledY - cellY);
+
+    const float v00 = hash11(static_cast<float>(ix), static_cast<float>(iy), seed);
+    const float v10 = hash11(static_cast<float>(ix1), static_cast<float>(iy), seed);
+    const float v01 = hash11(static_cast<float>(ix), static_cast<float>(iy1), seed);
+    const float v11 = hash11(static_cast<float>(ix1), static_cast<float>(iy1), seed);
+    return lerpf(lerpf(v00, v10, fx), lerpf(v01, v11, fx), fy);
+}
+
+float periodicFbm(float x, float y, std::uint32_t octaves, std::uint32_t baseGrid, float seed)
+{
+    float amplitude = 1.0f;
+    float total = 0.0f;
+    float normalization = 0.0f;
+    for (std::uint32_t octave = 0; octave < octaves; ++octave)
+    {
+        total += periodicValueNoise(x, y, baseGrid << octave, seed + static_cast<float>(octave * 17u)) * amplitude;
+        normalization += amplitude;
+        amplitude *= 0.5f;
+    }
+
+    return normalization > 0.0f ? (total / normalization) : 0.0f;
+}
+
+float wrapDistance(float a, float b)
+{
+    const float distance = std::fabs(a - b);
+    return std::min(distance, 1.0f - distance);
+}
+
+std::pair<float, float> worleyF1F2(float x, float y, std::uint32_t cellCount, float seed)
+{
+    const float scaledX = x * static_cast<float>(cellCount);
+    const float scaledY = y * static_cast<float>(cellCount);
+    const int baseCellX = static_cast<int>(std::floor(scaledX));
+    const int baseCellY = static_cast<int>(std::floor(scaledY));
+    float f1 = 1.0e9f;
+    float f2 = 1.0e9f;
+
+    for (int oy = -1; oy <= 1; ++oy)
+    {
+        for (int ox = -1; ox <= 1; ++ox)
+        {
+            const std::uint32_t cx = static_cast<std::uint32_t>((baseCellX + ox + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
+            const std::uint32_t cy = static_cast<std::uint32_t>((baseCellY + oy + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
+            const float featureX = (static_cast<float>(cx) + hash11(static_cast<float>(cx), static_cast<float>(cy), seed)) / static_cast<float>(cellCount);
+            const float featureY = (static_cast<float>(cy) + hash11(static_cast<float>(cy), static_cast<float>(cx), seed + 19.0f)) / static_cast<float>(cellCount);
+            const float dx = wrapDistance(x, featureX);
+            const float dy = wrapDistance(y, featureY);
+            const float distanceSquared = (dx * dx) + (dy * dy);
+            if (distanceSquared < f1)
+            {
+                f2 = f1;
+                f1 = distanceSquared;
+            }
+            else if (distanceSquared < f2)
+            {
+                f2 = distanceSquared;
+            }
+        }
+    }
+
+    return { std::sqrt(f1), std::sqrt(f2) };
+}
+
+GeneratedImage buildCausticsTexture(bool streaks)
+{
+    GeneratedImage image{};
+    image.width = kCausticsTextureResolution;
+    image.height = kCausticsTextureResolution;
+    image.pixels.resize(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u);
+    std::vector<float> sdfValues;
+    sdfValues.resize(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height));
+    float maxAbsSdf = 1.0e-5f;
+
+    for (std::uint32_t y = 0; y < image.height; ++y)
+    {
+        const float v = static_cast<float>(y) / static_cast<float>(image.height);
+        for (std::uint32_t x = 0; x < image.width; ++x)
+        {
+            const float u = static_cast<float>(x) / static_cast<float>(image.width);
+            float sdf = 0.0f;
+
+            if (!streaks)
+            {
+                const auto [f1, f2] = worleyF1F2(u, v, 10u, 77.0f);
+                sdf = (f2 - f1) - 0.055f;
+                sdf += (periodicFbm(u + 0.12f, v - 0.04f, 4u, 4u, 211.0f) - 0.5f) * 0.022f;
+            }
+            else
+            {
+                constexpr float angle = 0.68f;
+                const float rotatedU = (u * std::cos(angle)) - (v * std::sin(angle));
+                const float rotatedV = (u * std::sin(angle)) + (v * std::cos(angle));
+                const float warp = periodicFbm(rotatedU * 0.9f, rotatedV * 1.3f, 4u, 5u, 401.0f);
+                const float phase = (rotatedU * 13.0f) + ((warp - 0.5f) * 1.7f);
+                const float phaseWrapped = fractf(phase);
+                const float distanceToBand = std::fabs(phaseWrapped - 0.5f);
+                sdf = distanceToBand - 0.12f;
+                sdf += (periodicFbm((u * 1.7f) + 0.23f, (v * 1.9f) + 0.11f, 3u, 7u, 911.0f) - 0.5f) * 0.045f;
+            }
+
+            const std::size_t sampleIndex = static_cast<std::size_t>(y) * image.width + x;
+            sdfValues[sampleIndex] = sdf;
+            maxAbsSdf = std::max(maxAbsSdf, std::fabs(sdf));
+        }
+    }
+
+    const float encodeScale = 0.48f / maxAbsSdf;
+    image.decodeScale = 1.0f / encodeScale;
+
+    for (std::uint32_t y = 0; y < image.height; ++y)
+    {
+        for (std::uint32_t x = 0; x < image.width; ++x)
+        {
+            const std::size_t sampleIndex = static_cast<std::size_t>(y) * image.width + x;
+            const float encoded = saturatef(0.5f + (sdfValues[sampleIndex] * encodeScale));
+            const std::uint8_t channel = static_cast<std::uint8_t>(std::round(encoded * 255.0f));
+            const std::size_t index = (static_cast<std::size_t>(y) * image.width + x) * 4u;
+            image.pixels[index + 0u] = channel;
+            image.pixels[index + 1u] = channel;
+            image.pixels[index + 2u] = channel;
+            image.pixels[index + 3u] = 255u;
+        }
+    }
+
+    return image;
+}
 }
 
 void QuadtreeMeshRenderer::initialize(
@@ -44,6 +220,8 @@ void QuadtreeMeshRenderer::initialize(
 {
     initializeRendererBase(device, colorFormat, depthFormat);
     createStaticMeshResources();
+    createCausticsTextures();
+    createCausticsSampler();
     createPipelines(shaderDirectory);
     createHeightmapComputePipeline(shaderDirectory);
 
@@ -183,6 +361,8 @@ void QuadtreeMeshRenderer::initialize(
 
 void QuadtreeMeshRenderer::shutdown()
 {
+    destroyCausticsSampler();
+    destroyCausticsTextures();
     for (PendingExtentsReadback& readback : m_pendingExtentsReadbacks)
     {
         if (readback.fence != nullptr)
@@ -332,10 +512,9 @@ void QuadtreeMeshRenderer::setTerrainHeightParams(float baseHeight, float height
     m_terrainHeightAmplitude = heightAmplitude;
 }
 
-void QuadtreeMeshRenderer::setWaterCausticsState(float waterLevel, bool waterEnabled)
+void QuadtreeMeshRenderer::setWaterCausticsState(const WaterSettings& settings)
 {
-    m_waterLevel = waterLevel;
-    m_waterCausticsEnabled = waterEnabled;
+    m_waterSettings = settings;
 }
 
 bool QuadtreeMeshRenderer::queueHeightmapGeneration(
@@ -833,14 +1012,40 @@ void QuadtreeMeshRenderer::render(
         static_cast<float>(cameraWorld.y),
         static_cast<float>(cameraWorld.z),
         timeSeconds);
+    const bool causticsEnabled = m_waterSettings.enabled && m_waterSettings.drawTerrainCaustics;
     uniforms.waterCausticsParams = glm::vec4(
-        m_waterLevel,
-        m_waterCausticsEnabled ? 1.0f : 0.0f,
-        static_cast<float>(waterRenderer.settings().cascadeCount),
+        m_waterSettings.waterLevel,
+        causticsEnabled ? 1.0f : 0.0f,
+        static_cast<float>(m_waterSettings.cascadeCount),
+        std::max(m_waterSettings.causticsIntensity, 0.0f));
+    uniforms.waterCausticsPatternParams = glm::vec4(
+        std::max(m_waterSettings.causticsPatternScaleA, 0.0001f),
+        std::max(m_waterSettings.causticsPatternScaleB, 0.0001f),
+        std::max(m_waterSettings.causticsDisplacementWarpStrength, 0.0f),
+        std::max(m_waterSettings.causticsSlopeWarpStrength, 0.0f));
+    uniforms.waterCausticsRidgeParamsA = glm::vec4(
+        m_waterSettings.causticsRidgeMinA,
+        m_waterSettings.causticsRidgeMaxA,
+        m_waterSettings.causticsFocusMin,
+        m_waterSettings.causticsFocusMax);
+    uniforms.waterCausticsRidgeParamsB = glm::vec4(
+        m_waterSettings.causticsRidgeMinB,
+        m_waterSettings.causticsRidgeMaxB,
+        std::clamp(m_waterSettings.causticsMinSurfaceUp, 0.0f, 1.0f),
         0.0f);
-    for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(waterRenderer.settings().cascadeCount, AppConfig::Water::kMaxCascadeCount); ++cascadeIndex)
+    uniforms.waterCausticsDecodeParams = glm::vec4(
+        m_causticsDecodeScaleA,
+        m_causticsDecodeScaleA,
+        0.0f,
+        0.0f);
+    uniforms.waterCausticsRotationParams = glm::vec4(
+        std::cos(m_waterSettings.causticsRotationA),
+        std::sin(m_waterSettings.causticsRotationA),
+        std::cos(m_waterSettings.causticsRotationB),
+        std::sin(m_waterSettings.causticsRotationB));
+    for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(m_waterSettings.cascadeCount, AppConfig::Water::kMaxCascadeCount); ++cascadeIndex)
     {
-        const float worldSize = std::max(waterRenderer.settings().cascades[cascadeIndex].worldSizeMeters, 1.0f);
+        const float worldSize = std::max(m_waterSettings.cascades[cascadeIndex].worldSizeMeters, 1.0f);
         if (cascadeIndex < 4u)
         {
             (&uniforms.waterCascadeWorldSizesA.x)[cascadeIndex] = worldSize;
@@ -865,11 +1070,12 @@ void QuadtreeMeshRenderer::render(
 
         SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_instanceBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[2]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[3]{
             { waterRenderer.displacementTexture(), waterRenderer.waterSampler() },
             { waterRenderer.slopeTexture(), waterRenderer.waterSampler() },
+            { m_causticsTextureA, m_causticsSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 2);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 3);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
     }
 
@@ -885,11 +1091,12 @@ void QuadtreeMeshRenderer::render(
 
         SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_bridgeInstanceBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[2]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[3]{
             { waterRenderer.displacementTexture(), waterRenderer.waterSampler() },
             { waterRenderer.slopeTexture(), waterRenderer.waterSampler() },
+            { m_causticsTextureA, m_causticsSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 2);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 3);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, m_bridgeIndirectCommandCount);
     }
 }
@@ -956,7 +1163,7 @@ void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path& shaderDi
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             1,
             0,
-            2);
+            3);
 
         pipelineInfo.vertex_shader = vertexShader;
         pipelineInfo.fragment_shader = fragmentShader;
@@ -1283,6 +1490,111 @@ float QuadtreeMeshRenderer::instanceDistanceSquared(const InstanceData& instance
         (centerX * centerX) +
         (centerY * centerY) +
         (centerZ * centerZ);
+}
+
+void QuadtreeMeshRenderer::createCausticsTextures()
+{
+    const GeneratedImage image = buildCausticsTexture(false);
+    if (image.width == 0 || image.height == 0)
+    {
+        throw std::runtime_error("Terrain caustics texture must be non-empty.");
+    }
+
+    SDL_GPUTextureCreateInfo textureInfo{};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    textureInfo.width = image.width;
+    textureInfo.height = image.height;
+    textureInfo.layer_count_or_depth = 1;
+    textureInfo.num_levels = 1;
+    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    m_causticsTextureA = SDL_CreateGPUTexture(m_device, &textureInfo);
+    if (m_causticsTextureA == nullptr)
+    {
+        throwSdlError("Failed to create terrain caustics texture.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo transferInfo{};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = static_cast<Uint32>(image.pixels.size());
+    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+    if (transferBuffer == nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_causticsTextureA);
+        m_causticsTextureA = nullptr;
+        throwSdlError("Failed to create terrain caustics upload transfer buffer.");
+    }
+
+    void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
+    std::memcpy(mapped, image.pixels.data(), image.pixels.size());
+    SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
+
+    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+
+    SDL_GPUTextureTransferInfo source{};
+    source.transfer_buffer = transferBuffer;
+    source.offset = 0;
+    source.pixels_per_row = image.width;
+    source.rows_per_layer = image.height;
+
+    SDL_GPUTextureRegion destination{};
+    destination.texture = m_causticsTextureA;
+    destination.w = image.width;
+    destination.h = image.height;
+    destination.d = 1;
+    SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
+
+    SDL_EndGPUCopyPass(copyPass);
+    if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+        SDL_ReleaseGPUTexture(m_device, m_causticsTextureA);
+        m_causticsTextureA = nullptr;
+        throwSdlError("Failed to upload terrain caustics texture.");
+    }
+
+    SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+    m_causticsDecodeScaleA = image.decodeScale;
+}
+
+void QuadtreeMeshRenderer::destroyCausticsTextures()
+{
+    m_causticsDecodeScaleA = 1.0f;
+    if (m_causticsTextureA != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_causticsTextureA);
+        m_causticsTextureA = nullptr;
+    }
+}
+
+void QuadtreeMeshRenderer::createCausticsSampler()
+{
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.min_lod = 0.0f;
+    samplerInfo.max_lod = 0.0f;
+    m_causticsSampler = SDL_CreateGPUSampler(m_device, &samplerInfo);
+    if (m_causticsSampler == nullptr)
+    {
+        throwSdlError("Failed to create terrain caustics sampler.");
+    }
+}
+
+void QuadtreeMeshRenderer::destroyCausticsSampler()
+{
+    if (m_causticsSampler != nullptr)
+    {
+        SDL_ReleaseGPUSampler(m_device, m_causticsSampler);
+        m_causticsSampler = nullptr;
+    }
 }
 
 void QuadtreeMeshRenderer::sortInstances(InstanceData* instances, std::uint16_t instanceCount)

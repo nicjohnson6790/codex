@@ -21,4 +21,6 @@ if exist "%VS_ROOT%\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team E
 for /d %%D in ("%VS_ROOT%\VC\Tools\MSVC\*") do set "MSVC_VERSION=%%~nxD"
 if defined MSVC_VERSION set "PATH=%VS_ROOT%\VC\Tools\MSVC\%MSVC_VERSION%\bin\Hostx64\x64;%PATH%"
 set "VULKAN_SDK=C:\VulkanSDK\1.4.341.1"
-"C:\Program Files\CMake\bin\cmake.exe" --build "%BUILD_DIR%"
+set "BUILD_PARALLEL="
+findstr /B /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "%BUILD_DIR%\CMakeCache.txt" >nul && set "BUILD_PARALLEL=--parallel %NUMBER_OF_PROCESSORS%"
+"C:\Program Files\CMake\bin\cmake.exe" --build "%BUILD_DIR%" %BUILD_PARALLEL%

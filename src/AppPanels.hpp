@@ -6,6 +6,7 @@
 #include "RenderTypes.hpp"
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
+#include "SDLRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
 #include "WorldGridQuadtree.hpp"
@@ -24,6 +25,7 @@ public:
     struct Context
     {
         CameraManager& cameraManager;
+        SDLRenderer& renderer;
         std::vector<TriangleInstance>& instances;
         const std::vector<std::string>& gpuDrivers;
         std::string_view gamepadName;

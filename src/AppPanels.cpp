@@ -142,6 +142,11 @@ void AppPanels::drawControlsTab(Context& context)
         static_cast<int>(context.gamepadName.size()),
         context.gamepadName.data());
     ImGui::Checkbox("Show viewport FPS overlay", &m_showViewportFpsCounter);
+    bool vsyncEnabled = context.renderer.vsyncEnabled();
+    if (ImGui::Checkbox("VSync", &vsyncEnabled))
+    {
+        context.renderer.setVsyncEnabled(vsyncEnabled);
+    }
 
     ImGui::Spacing();
     ImGui::TextUnformatted("SDL GPU Drivers");
@@ -441,6 +446,8 @@ void AppPanels::drawWaterTab(Context& context)
     WaterSettings& settings = context.waterManager.settings();
     ImGui::Checkbox("Enabled", &settings.enabled);
     ImGui::Checkbox("Show LOD tint", &settings.showLodTint);
+    ImGui::Checkbox("Draw foam", &settings.drawFoam);
+    ImGui::Checkbox("Draw terrain caustics", &settings.drawTerrainCaustics);
     ImGui::InputFloat("Water level", &settings.waterLevel, 1.0f, 10.0f, "%.2f");
     ImGui::InputFloat("Global amplitude", &settings.globalAmplitude, 0.05f, 0.25f, "%.2f");
     ImGui::InputFloat("Global choppiness", &settings.globalChoppiness, 0.05f, 0.25f, "%.2f");
@@ -476,6 +483,7 @@ void AppPanels::drawWaterTab(Context& context)
             ImGui::InputFloat("Short waves fade", &cascade.shortWavesFade, 0.0001f, 0.0005f, "%.4f");
             ImGui::InputFloat("Choppiness", &cascade.choppiness, 0.05f, 0.25f, "%.2f");
             ImGui::InputFloat("Shallow damping", &cascade.shallowDampingStrength, 0.05f, 0.25f, "%.2f");
+            ImGui::InputFloat("Foam detail scale", &cascade.foamDetailScale, 0.0025f, 0.01f, "%.4f");
             int updateModulo = static_cast<int>(cascade.updateModulo);
             ImGui::SliderInt("Update modulo", &updateModulo, 1, 8);
             cascade.updateModulo = static_cast<std::uint32_t>(std::max(updateModulo, 1));
@@ -492,6 +500,24 @@ void AppPanels::drawWaterTab(Context& context)
         ImGui::InputFloat("Slope gate start", &settings.crestFoamSlopeStart, 0.01f, 0.05f, "%.2f");
         ImGui::InputFloat("Decay rate", &settings.crestFoamDecayRate, 0.01f, 0.05f, "%.3f");
         ImGui::InputFloat("Brightness", &settings.crestFoamBrightness, 0.05f, 0.25f, "%.2f");
+    }
+
+    if (ImGui::CollapsingHeader("Terrain Caustics", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::InputFloat("Intensity", &settings.causticsIntensity, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Sample A scale", &settings.causticsPatternScaleA, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Sample B scale", &settings.causticsPatternScaleB, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Sample A rotation", &settings.causticsRotationA, 0.05f, 0.2f, "%.3f");
+        ImGui::InputFloat("Sample B rotation", &settings.causticsRotationB, 0.05f, 0.2f, "%.3f");
+        ImGui::InputFloat("Disp warp", &settings.causticsDisplacementWarpStrength, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Slope warp", &settings.causticsSlopeWarpStrength, 0.5f, 2.0f, "%.2f");
+        ImGui::InputFloat("Sample A ridge min", &settings.causticsRidgeMinA, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Sample A ridge max", &settings.causticsRidgeMaxA, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Sample B ridge min", &settings.causticsRidgeMinB, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Sample B ridge max", &settings.causticsRidgeMaxB, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Focus min", &settings.causticsFocusMin, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("Focus max", &settings.causticsFocusMax, 0.01f, 0.05f, "%.3f");
+        ImGui::SliderFloat("Min surface up", &settings.causticsMinSurfaceUp, 0.0f, 1.0f, "%.2f");
     }
 
     ImGui::SeparatorText("Mesh");

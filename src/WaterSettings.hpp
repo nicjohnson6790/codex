@@ -7,7 +7,7 @@ inline WaterSettings makeDefaultWaterSettings()
 {
     WaterSettings settings{};
     settings.enabled = AppConfig::Water::kEnabled;
-    settings.showLodTint = true;
+    settings.showLodTint = false;
     settings.waterLevel = AppConfig::Water::kDefaultWaterLevel;
     settings.globalAmplitude = AppConfig::Water::kDefaultGlobalAmplitude;
     settings.globalChoppiness = AppConfig::Water::kDefaultGlobalChoppiness;
@@ -15,12 +15,28 @@ inline WaterSettings makeDefaultWaterSettings()
     settings.lowCutoff = AppConfig::Water::kDefaultLowCutoff;
     settings.highCutoff = AppConfig::Water::kDefaultHighCutoff;
     settings.crestFoamEnabled = AppConfig::Water::kDefaultCrestFoamEnabled;
+    settings.drawFoam = AppConfig::Water::kDefaultDrawFoam;
+    settings.drawTerrainCaustics = AppConfig::Water::kDefaultDrawTerrainCaustics;
     settings.crestFoamAmount = AppConfig::Water::kDefaultCrestFoamAmount;
     settings.crestFoamThreshold = AppConfig::Water::kDefaultCrestFoamThreshold;
     settings.crestFoamSoftness = AppConfig::Water::kDefaultCrestFoamSoftness;
     settings.crestFoamSlopeStart = AppConfig::Water::kDefaultCrestFoamSlopeStart;
     settings.crestFoamDecayRate = AppConfig::Water::kDefaultCrestFoamDecayRate;
     settings.crestFoamBrightness = AppConfig::Water::kDefaultCrestFoamBrightness;
+    settings.causticsIntensity = AppConfig::Water::kDefaultCausticsIntensity;
+    settings.causticsPatternScaleA = AppConfig::Water::kDefaultCausticsPatternScaleA;
+    settings.causticsPatternScaleB = AppConfig::Water::kDefaultCausticsPatternScaleB;
+    settings.causticsRotationA = AppConfig::Water::kDefaultCausticsRotationA;
+    settings.causticsRotationB = AppConfig::Water::kDefaultCausticsRotationB;
+    settings.causticsDisplacementWarpStrength = AppConfig::Water::kDefaultCausticsDisplacementWarp;
+    settings.causticsSlopeWarpStrength = AppConfig::Water::kDefaultCausticsSlopeWarp;
+    settings.causticsRidgeMinA = AppConfig::Water::kDefaultCausticsRidgeMinA;
+    settings.causticsRidgeMaxA = AppConfig::Water::kDefaultCausticsRidgeMaxA;
+    settings.causticsRidgeMinB = AppConfig::Water::kDefaultCausticsRidgeMinB;
+    settings.causticsRidgeMaxB = AppConfig::Water::kDefaultCausticsRidgeMaxB;
+    settings.causticsFocusMin = AppConfig::Water::kDefaultCausticsFocusMin;
+    settings.causticsFocusMax = AppConfig::Water::kDefaultCausticsFocusMax;
+    settings.causticsMinSurfaceUp = AppConfig::Water::kDefaultCausticsMinSurfaceUp;
     settings.maxTerrainMinHeightAboveWaterToDraw = AppConfig::Water::kMaxTerrainMinHeightAboveWaterToDraw;
     settings.cascadeCount = AppConfig::Water::kDefaultCascadeCount;
 
@@ -37,6 +53,7 @@ inline WaterSettings makeDefaultWaterSettings()
         settings.cascades[i].shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[i];
         settings.cascades[i].choppiness = AppConfig::Water::kDefaultCascadeChoppiness[i];
         settings.cascades[i].shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[i];
+        settings.cascades[i].foamDetailScale = AppConfig::Water::kDefaultCascadeFoamDetailScales[i];
         settings.cascades[i].updateModulo = AppConfig::Water::kDefaultCascadeUpdateModulo[i];
     }
 

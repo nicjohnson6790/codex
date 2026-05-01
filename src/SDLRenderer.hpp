@@ -21,6 +21,9 @@ class TriangleRenderer;
 class SDLRenderer
 {
 public:
+    static constexpr SDL_GPUPresentMode kPresentModeVsync = SDL_GPU_PRESENTMODE_VSYNC;
+    static constexpr SDL_GPUPresentMode kPresentModeImmediate = SDL_GPU_PRESENTMODE_IMMEDIATE;
+
     SDLRenderer() = default;
     ~SDLRenderer() = default;
 
@@ -30,6 +33,7 @@ public:
     void initialize(SDL_Window* window);
     void shutdown();
     void waitIdle() const;
+    void setVsyncEnabled(bool enabled);
 
     void setActiveCamera(
         const Position& cameraPosition,
@@ -57,6 +61,7 @@ public:
     [[nodiscard]] SDL_GPUTextureFormat swapchainFormat() const { return m_swapchainFormat; }
     [[nodiscard]] SDL_GPUTextureFormat viewportDepthFormat() const { return m_viewportDepthFormat; }
     [[nodiscard]] const std::string& driverName() const { return m_driverName; }
+    [[nodiscard]] bool vsyncEnabled() const { return m_presentMode == kPresentModeVsync; }
 
 private:
     void createViewportTargets();
@@ -74,6 +79,7 @@ private:
 
     SDL_GPUTextureFormat m_swapchainFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTextureFormat m_viewportDepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+    SDL_GPUPresentMode m_presentMode = kPresentModeVsync;
 
     SDL_GPUTexture* m_viewportColorTexture = nullptr;
     SDL_GPUTexture* m_viewportDepthTexture = nullptr;

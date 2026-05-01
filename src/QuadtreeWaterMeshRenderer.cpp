@@ -3,6 +3,7 @@
 #include "AppConfig.hpp"
 #include "PerformanceCapture.hpp"
 
+#include <SDL3_image/SDL_image.h>
 #include <SDL3/SDL_stdinc.h>
 #include <glm/trigonometric.hpp>
 
@@ -31,6 +32,38 @@ constexpr std::uint32_t kWaterBridgeInnerVertexCount = kWaterMeshIntervalCount -
 constexpr std::uint32_t kWaterCoarseBridgeOuterVertexCount = (kWaterMeshIntervalCount / 2u) + 1u;
 constexpr std::uint32_t kWaterEqualBridgeQuadCount = kWaterBridgeInnerVertexCount - 1u;
 
+struct DecodedImage
+{
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::vector<std::uint8_t> pixels;
+};
+
+DecodedImage decodePngRgba8(const std::filesystem::path& path)
+{
+    SDL_Surface* loadedSurface = IMG_Load(path.string().c_str());
+    if (loadedSurface == nullptr)
+    {
+        throw std::runtime_error("Failed to load water texture: " + path.string() + " " + SDL_GetError());
+    }
+
+    SDL_Surface* rgbaSurface = SDL_ConvertSurface(loadedSurface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(loadedSurface);
+    if (rgbaSurface == nullptr)
+    {
+        throw std::runtime_error("Failed to convert water texture to RGBA32: " + path.string() + " " + SDL_GetError());
+    }
+
+    DecodedImage image{};
+    image.width = static_cast<std::uint32_t>(rgbaSurface->w);
+    image.height = static_cast<std::uint32_t>(rgbaSurface->h);
+    image.pixels.resize(static_cast<std::size_t>(rgbaSurface->w) * static_cast<std::size_t>(rgbaSurface->h) * 4u);
+    std::memcpy(image.pixels.data(), rgbaSurface->pixels, image.pixels.size());
+    SDL_DestroySurface(rgbaSurface);
+
+    return image;
+}
+
 float normalizedWaterCoord(std::uint32_t index)
 {
     return static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
@@ -49,8 +82,9 @@ std::uint32_t fftStageCountForResolution(std::uint32_t resolution)
 
 glm::vec4 buildFoamGenerationParams(const WaterSettings& settings)
 {
+    const bool foamEnabled = settings.crestFoamEnabled && settings.drawFoam;
     return glm::vec4(
-        settings.crestFoamEnabled ? std::max(settings.crestFoamAmount, 0.0f) : 0.0f,
+        foamEnabled ? std::max(settings.crestFoamAmount, 0.0f) : 0.0f,
         std::max(settings.crestFoamThreshold, 0.0f),
         std::max(settings.crestFoamSoftness, 1.0e-4f),
         std::max(settings.crestFoamSlopeStart, 0.0f));
@@ -58,10 +92,11 @@ glm::vec4 buildFoamGenerationParams(const WaterSettings& settings)
 
 glm::vec4 buildFoamHistoryParams(const WaterSettings& settings, bool hasValidFoamHistory)
 {
+    const bool drawFoam = settings.drawFoam;
     return glm::vec4(
-        std::max(settings.crestFoamDecayRate, 0.0f),
-        hasValidFoamHistory ? 1.0f : 0.0f,
-        0.0f,
+        drawFoam ? std::max(settings.crestFoamDecayRate, 0.0f) : 0.0f,
+        (drawFoam && hasValidFoamHistory) ? 1.0f : 0.0f,
+        drawFoam ? 1.0f : 0.0f,
         0.0f);
 }
 }
@@ -70,7 +105,8 @@ void QuadtreeWaterMeshRenderer::initialize(
     SDL_GPUDevice* device,
     SDL_GPUTextureFormat colorFormat,
     SDL_GPUTextureFormat depthFormat,
-    const std::filesystem::path& shaderDirectory)
+    const std::filesystem::path& shaderDirectory,
+    const std::filesystem::path& resourceDirectory)
 {
     initializeRendererBase(device, colorFormat, depthFormat);
     m_settings = makeDefaultWaterSettings();
@@ -78,6 +114,7 @@ void QuadtreeWaterMeshRenderer::initialize(
     createMesh();
     createWorkingBuffers();
     createWaterTextures();
+    createFoamDetailTextures(resourceDirectory);
     createWaterSampler();
     createPipelines(shaderDirectory);
     createWaterComputePipelines(shaderDirectory);
@@ -145,6 +182,7 @@ void QuadtreeWaterMeshRenderer::shutdown()
     }
 
     destroyWaterSampler();
+    destroyFoamDetailTextures();
     destroyWaterTextures();
     destroyWorkingBuffers();
     destroyMesh();
@@ -471,6 +509,8 @@ void QuadtreeWaterMeshRenderer::render(
         m_displacementTexture == nullptr ||
         m_slopeTexture == nullptr ||
         m_foamHistoryReadTexture == nullptr ||
+        m_foamDetailTextureA == nullptr ||
+        m_foamDetailTextureB == nullptr ||
         m_waterSampler == nullptr ||
         skyboxRenderer.cubemapTexture() == nullptr ||
         skyboxRenderer.atmosphereLutTexture() == nullptr ||
@@ -503,14 +543,16 @@ void QuadtreeWaterMeshRenderer::render(
         };
         SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[5]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
             { m_displacementTexture, m_waterSampler },
             { m_slopeTexture, m_waterSampler },
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
             { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
+            { m_foamDetailTextureA, m_waterSampler },
+            { m_foamDetailTextureB, m_waterSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 5);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
 
         const SDL_GPUBufferBinding vertexBinding{ mesh.vertexBuffer, 0 };
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
@@ -520,9 +562,6 @@ void QuadtreeWaterMeshRenderer::render(
 
         SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, instances.instanceBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        SDL_GPUBuffer* fragmentStorageBuffers[]{ terrainHeightmapBuffer };
-        SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
-
         SDL_DrawGPUIndexedPrimitives(
             renderPass,
             mesh.indexCount,
@@ -548,14 +587,16 @@ void QuadtreeWaterMeshRenderer::render(
         };
         SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[5]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
             { m_displacementTexture, m_waterSampler },
             { m_slopeTexture, m_waterSampler },
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
             { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
+            { m_foamDetailTextureA, m_waterSampler },
+            { m_foamDetailTextureB, m_waterSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 5);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
 
         const SDL_GPUBufferBinding vertexBinding{ m_bridgeMesh.vertexBuffer, 0 };
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
@@ -565,9 +606,6 @@ void QuadtreeWaterMeshRenderer::render(
 
         SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, m_bridgeInstances.instanceBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        SDL_GPUBuffer* fragmentStorageBuffers[]{ terrainHeightmapBuffer };
-        SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
-
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, m_bridgeIndirectCommandCount);
     }
 }
@@ -655,8 +693,8 @@ void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& sha
             shaderDirectory / "water_mesh.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             1,
-            1,
-            5);
+            0,
+            7);
         pipelineInfo.vertex_shader = vertexShader;
         pipelineInfo.fragment_shader = fragmentShader;
         SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
@@ -1179,6 +1217,98 @@ void QuadtreeWaterMeshRenderer::destroyWaterTextures()
     }
 }
 
+void QuadtreeWaterMeshRenderer::createFoamDetailTextures(const std::filesystem::path& resourceDirectory)
+{
+    const std::array<std::filesystem::path, 2> texturePaths{
+        resourceDirectory / "water" / "foam_detail_cells.png",
+        resourceDirectory / "water" / "foam_detail_streaks.png",
+    };
+    std::array<SDL_GPUTexture**, 2> textureSlots{
+        &m_foamDetailTextureA,
+        &m_foamDetailTextureB,
+    };
+
+    for (std::size_t textureIndex = 0; textureIndex < texturePaths.size(); ++textureIndex)
+    {
+        const DecodedImage image = decodePngRgba8(texturePaths[textureIndex]);
+        if (image.width == 0 || image.height == 0)
+        {
+            throw std::runtime_error("Water foam detail textures must be non-empty.");
+        }
+
+        SDL_GPUTextureCreateInfo textureInfo{};
+        textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+        textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        textureInfo.width = image.width;
+        textureInfo.height = image.height;
+        textureInfo.layer_count_or_depth = 1;
+        textureInfo.num_levels = 1;
+        textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+        SDL_GPUTexture* texture = SDL_CreateGPUTexture(m_device, &textureInfo);
+        if (texture == nullptr)
+        {
+            throwSdlError("Failed to create foam detail texture.");
+        }
+
+        SDL_GPUTransferBufferCreateInfo transferInfo{};
+        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        transferInfo.size = static_cast<Uint32>(image.pixels.size());
+        SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+        if (transferBuffer == nullptr)
+        {
+            SDL_ReleaseGPUTexture(m_device, texture);
+            throwSdlError("Failed to create foam detail upload transfer buffer.");
+        }
+
+        void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
+        std::memcpy(mapped, image.pixels.data(), image.pixels.size());
+        SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
+
+        SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+
+        SDL_GPUTextureTransferInfo source{};
+        source.transfer_buffer = transferBuffer;
+        source.offset = 0;
+        source.pixels_per_row = image.width;
+        source.rows_per_layer = image.height;
+
+        SDL_GPUTextureRegion destination{};
+        destination.texture = texture;
+        destination.w = image.width;
+        destination.h = image.height;
+        destination.d = 1;
+        SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
+
+        SDL_EndGPUCopyPass(copyPass);
+        if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+            SDL_ReleaseGPUTexture(m_device, texture);
+            throwSdlError("Failed to upload foam detail texture.");
+        }
+
+        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+        *textureSlots[textureIndex] = texture;
+    }
+}
+
+void QuadtreeWaterMeshRenderer::destroyFoamDetailTextures()
+{
+    if (m_foamDetailTextureB != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_foamDetailTextureB);
+        m_foamDetailTextureB = nullptr;
+    }
+    if (m_foamDetailTextureA != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_foamDetailTextureA);
+        m_foamDetailTextureA = nullptr;
+    }
+}
+
 void QuadtreeWaterMeshRenderer::createWaterSampler()
 {
     SDL_GPUSamplerCreateInfo samplerInfo{};
@@ -1265,15 +1395,18 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     {
         const float worldSize = std::max(m_settings.cascades[cascadeIndex].worldSizeMeters, 1.0f);
         const float shallowDamping = std::max(m_settings.cascades[cascadeIndex].shallowDampingStrength, 0.0f);
+        const float foamDetailScale = std::max(m_settings.cascades[cascadeIndex].foamDetailScale, 0.0001f);
         if (cascadeIndex < 4u)
         {
             (&uniforms.cascadeWorldSizesA.x)[cascadeIndex] = worldSize;
             (&uniforms.cascadeShallowDampingA.x)[cascadeIndex] = shallowDamping;
+            (&uniforms.cascadeFoamDetailScaleA.x)[cascadeIndex] = foamDetailScale;
         }
         else
         {
             (&uniforms.cascadeWorldSizesB.x)[cascadeIndex - 4u] = worldSize;
             (&uniforms.cascadeShallowDampingB.x)[cascadeIndex - 4u] = shallowDamping;
+            (&uniforms.cascadeFoamDetailScaleB.x)[cascadeIndex - 4u] = foamDetailScale;
         }
     }
 

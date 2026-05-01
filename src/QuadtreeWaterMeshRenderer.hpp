@@ -31,6 +31,8 @@ public:
         glm::vec4 cascadeWorldSizesB{ 0.0f };
         glm::vec4 cascadeShallowDampingA{ 0.0f };
         glm::vec4 cascadeShallowDampingB{ 0.0f };
+        glm::vec4 cascadeFoamDetailScaleA{ 0.0f };
+        glm::vec4 cascadeFoamDetailScaleB{ 0.0f };
         glm::vec4 depthEffectParams{ 0.0f };
         glm::mat4 skyRotation{ 1.0f };
         glm::vec4 atmosphereParams{ 0.0f };
@@ -52,7 +54,8 @@ public:
         SDL_GPUDevice* device,
         SDL_GPUTextureFormat colorFormat,
         SDL_GPUTextureFormat depthFormat,
-        const std::filesystem::path& shaderDirectory);
+        const std::filesystem::path& shaderDirectory,
+        const std::filesystem::path& resourceDirectory);
     void shutdown();
 
     void clear();
@@ -210,6 +213,8 @@ private:
     void destroyWorkingBuffers();
     void createWaterTextures();
     void destroyWaterTextures();
+    void createFoamDetailTextures(const std::filesystem::path& resourceDirectory);
+    void destroyFoamDetailTextures();
     void createWaterSampler();
     void destroyWaterSampler();
     [[nodiscard]] WaterUniforms buildWaterUniforms(
@@ -249,6 +254,8 @@ private:
     SDL_GPUTexture* m_slopeTexture = nullptr;
     SDL_GPUTexture* m_foamHistoryReadTexture = nullptr;
     SDL_GPUTexture* m_foamHistoryWriteTexture = nullptr;
+    SDL_GPUTexture* m_foamDetailTextureA = nullptr;
+    SDL_GPUTexture* m_foamDetailTextureB = nullptr;
     SDL_GPUSampler* m_waterSampler = nullptr;
     WaterSettings m_settings{};
     bool m_initialSpectrumDirty = true;

@@ -109,9 +109,9 @@ inline constexpr std::uint32_t kMaxCascadeCount = 4;
 inline constexpr std::uint32_t kDefaultCascadeCount = 4;
 inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascadeSizesMeters{
     125,
-    500,
-    2000,
-    8000,
+    600,
+    1250,
+    1750,
 };
 
 inline constexpr float kDefaultWaterLevel = 250.0f;
@@ -129,23 +129,23 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeWindDire
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeAmplitudes{
+    0.4f,
+    0.85f,
     0.55f,
-    2.20f,
-    0.20f,
-    0.25f,
+    0.5f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeWindSpeeds{
     0.80f,
     7.0f,
-    1.00f,
-    10.00f,
+    4.00f,
+    6.50f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeFetchMeters{
     100000.0f,
     1000.0f,
-    100000000.0f,
+    100000.0f,
     1000000.0f,
 };
 
@@ -164,10 +164,10 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeSwell{
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadePeakEnhancement{
-    1.0f,
-    1.0f,
+    1.7f,
+    1.4f,
     2.6f,
-    1.0f,
+    1.3f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShortWavesFade{
@@ -179,9 +179,9 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShortWav
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeChoppiness{
     3.30f,
-    7.25f,
-    2.85f,
-    1.0f,
+    7.85f,
+    1.95f,
+    1.4f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowDampingStrength{
@@ -189,6 +189,13 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowD
     0.7f,
     0.8f,
     1.0f,
+};
+
+inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeFoamDetailScales{
+    0.090f,
+    0.046f,
+    0.024f,
+    0.012f,
 };
 
 inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascadeUpdateModulo{
@@ -214,6 +221,22 @@ inline constexpr float kDepthAbsorptionStrength = 0.065f;
 inline constexpr float kShallowRefractionMaxDepthMeters = 2.50f;
 inline constexpr float kShallowRefractionFullFadeDepthMeters = 7.50f;
 inline constexpr bool kDefaultCrestFoamEnabled = true;
+inline constexpr bool kDefaultDrawFoam = true;
+inline constexpr bool kDefaultDrawTerrainCaustics = true;
+inline constexpr float kDefaultCausticsIntensity = 0.210f;
+inline constexpr float kDefaultCausticsPatternScaleA = 0.060f;
+inline constexpr float kDefaultCausticsPatternScaleB = 0.070f;
+inline constexpr float kDefaultCausticsRotationA = -0.57f;
+inline constexpr float kDefaultCausticsRotationB = 0.91f;
+inline constexpr float kDefaultCausticsDisplacementWarp = 0.12f;
+inline constexpr float kDefaultCausticsSlopeWarp = 10.0f;
+inline constexpr float kDefaultCausticsRidgeMinA = -0.090f;
+inline constexpr float kDefaultCausticsRidgeMaxA = 0.000f;
+inline constexpr float kDefaultCausticsRidgeMinB = -0.108f;
+inline constexpr float kDefaultCausticsRidgeMaxB = 0.003f;
+inline constexpr float kDefaultCausticsFocusMin = 0.08f;
+inline constexpr float kDefaultCausticsFocusMax = 0.42f;
+inline constexpr float kDefaultCausticsMinSurfaceUp = 0.45f;
 inline constexpr float kDefaultCrestFoamAmount = 1.85f;
 inline constexpr float kDefaultCrestFoamThreshold = 0.12f;
 inline constexpr float kDefaultCrestFoamSoftness = 0.18f;

@@ -5,6 +5,7 @@
 #include "LightingSystem.hpp"
 #include "Position.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
+#include "WaterTypes.hpp"
 #include "WorldGridQuadtreeHeightmapManager.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
 
@@ -38,6 +39,11 @@ public:
         glm::vec4 waterCausticsParams{0.0f};
         glm::vec4 waterCascadeWorldSizesA{0.0f};
         glm::vec4 waterCascadeWorldSizesB{0.0f};
+        glm::vec4 waterCausticsPatternParams{0.0f};
+        glm::vec4 waterCausticsRidgeParamsA{0.0f};
+        glm::vec4 waterCausticsRidgeParamsB{0.0f};
+        glm::vec4 waterCausticsDecodeParams{0.0f};
+        glm::vec4 waterCausticsRotationParams{0.0f};
     };
 
     QuadtreeMeshRenderer() = default;
@@ -59,7 +65,7 @@ public:
     // Sets the camera used to convert world Positions into camera-local coordinates.
     void setActiveCamera(const Position& cameraPosition);
     void setTerrainHeightParams(float baseHeight, float heightAmplitude);
-    void setWaterCausticsState(float waterLevel, bool waterEnabled);
+    void setWaterCausticsState(const WaterSettings& settings);
 
     [[nodiscard]] bool queueHeightmapGeneration(
         const WorldGridQuadtreeLeafId& leafId,
@@ -166,6 +172,10 @@ private:
     // Creates the terrain graphics pipelines and loads the terrain shaders.
     void createPipelines(const std::filesystem::path& shaderDirectory);
     void createHeightmapComputePipeline(const std::filesystem::path& shaderDirectory);
+    void createCausticsTextures();
+    void destroyCausticsTextures();
+    void createCausticsSampler();
+    void destroyCausticsSampler();
 
     // Builds the static mesh buffers for the reusable terrain meshes.
     void createStaticMeshResources();
@@ -188,6 +198,9 @@ private:
     SDL_GPUGraphicsPipeline* m_mainPipeline = nullptr;
     SDL_GPUGraphicsPipeline* m_bridgePipeline = nullptr;
     SDL_GPUComputePipeline* m_heightmapComputePipeline = nullptr;
+    SDL_GPUTexture* m_causticsTextureA = nullptr;
+    SDL_GPUSampler* m_causticsSampler = nullptr;
+    float m_causticsDecodeScaleA = 1.0f;
 
     // Static reusable terrain meshes plus their one-time upload buffers.
     MeshResources m_mainMesh{};
@@ -234,6 +247,5 @@ private:
     std::uint16_t m_nextReadbackSlot = 0;
     float m_terrainBaseHeight = 0.0f;
     float m_terrainHeightAmplitude = static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude);
-    float m_waterLevel = AppConfig::Water::kDefaultWaterLevel;
-    bool m_waterCausticsEnabled = AppConfig::Water::kEnabled;
+    WaterSettings m_waterSettings{};
 };

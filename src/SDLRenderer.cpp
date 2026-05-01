@@ -22,6 +22,11 @@ void throwSdlError(const char* message)
 {
     throw std::runtime_error(std::string(message) + " " + SDL_GetError());
 }
+
+SDL_GPUPresentMode defaultPresentMode()
+{
+    return AppConfig::Renderer::kPresentMode;
+}
 }
 
 void SDLRenderer::initialize(SDL_Window* window)
@@ -51,7 +56,8 @@ void SDLRenderer::initialize(SDL_Window* window)
         throwSdlError("Failed to claim SDL window for SDL GPU device.");
     }
 
-    if (!SDL_SetGPUSwapchainParameters(m_device, m_window, AppConfig::Renderer::kSwapchainComposition, AppConfig::Renderer::kPresentMode))
+    m_presentMode = defaultPresentMode();
+    if (!SDL_SetGPUSwapchainParameters(m_device, m_window, AppConfig::Renderer::kSwapchainComposition, m_presentMode))
     {
         throwSdlError("Failed to configure SDL GPU swapchain parameters.");
     }
@@ -91,6 +97,28 @@ void SDLRenderer::waitIdle() const
     {
         throwSdlError("Failed while waiting for SDL GPU device idle.");
     }
+}
+
+void SDLRenderer::setVsyncEnabled(bool enabled)
+{
+    if (m_device == nullptr || m_window == nullptr)
+    {
+        return;
+    }
+
+    const SDL_GPUPresentMode requestedMode = enabled ? kPresentModeVsync : kPresentModeImmediate;
+    if (requestedMode == m_presentMode)
+    {
+        return;
+    }
+
+    waitIdle();
+    if (!SDL_SetGPUSwapchainParameters(m_device, m_window, AppConfig::Renderer::kSwapchainComposition, requestedMode))
+    {
+        throwSdlError("Failed to update SDL GPU swapchain present mode.");
+    }
+
+    m_presentMode = requestedMode;
 }
 
 void SDLRenderer::setActiveCamera(

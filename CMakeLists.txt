@@ -5,6 +5,8 @@ project(TerrainSandbox LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
 include(FetchContent)
 
@@ -41,6 +43,10 @@ FetchContent_Declare(
 
 set(SDL_SHARED ON CACHE BOOL "" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_TESTS OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_BACKEND_STB ON CACHE BOOL "" FORCE)
@@ -63,6 +69,9 @@ set(SDLIMAGE_XCF OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_XPM OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_XV OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_PNG_SAVE OFF CACHE BOOL "" FORCE)
+set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
+set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL3 SDL3_image imgui glm)
 
 add_library(imgui_backend STATIC
@@ -214,6 +223,7 @@ if (MSVC)
             /Zc:__cplusplus
             /Gy
             /Gw
+            /MP
             $<$<CONFIG:Release>:/O2>
             $<$<CONFIG:Release>:/Oi>
             $<$<CONFIG:Release>:/GL>
@@ -225,6 +235,7 @@ if (MSVC)
             /Zc:__cplusplus
             /Gy
             /Gw
+            /MP
             $<$<CONFIG:Release>:/O2>
             $<$<CONFIG:Release>:/Oi>
             $<$<CONFIG:Release>:/GL>

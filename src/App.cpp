@@ -194,7 +194,8 @@ void App::initialize()
             m_renderer.device(),
             m_renderer.swapchainFormat(),
             m_renderer.viewportDepthFormat(),
-            shaderDirectory
+            shaderDirectory,
+            std::filesystem::path(TERRAIN_SANDBOX_RESOURCE_DIR)
         );
     }
     logStartup("init skybox renderer");
@@ -285,6 +286,7 @@ void App::buildUi()
 {
     AppPanels::Context context{
         .cameraManager = m_cameraManager,
+        .renderer = m_renderer,
         .instances = m_instances,
         .gpuDrivers = m_gpuDrivers,
         .gamepadName = m_gamepadInput.gamepadName(),
@@ -327,7 +329,7 @@ void App::updateSceneForFrame()
             m_waterManager.beginFrame();
             m_waterManager.setActiveCamera(cameraPosition);
             const WaterSettings& waterSettings = m_waterManager.settings();
-            m_quadtreeMeshRenderer.setWaterCausticsState(waterSettings.waterLevel, waterSettings.enabled);
+            m_quadtreeMeshRenderer.setWaterCausticsState(waterSettings);
             const float expectedWaveHeight =
                 (waterSettings.globalAmplitude * AppConfig::Water::kExpectedWaveHeight) +
                 AppConfig::Water::kVisibilityHeightPadding;
@@ -338,7 +340,10 @@ void App::updateSceneForFrame()
         }
         else
         {
-            m_quadtreeMeshRenderer.setWaterCausticsState(0.0f, false);
+            WaterSettings disabledWaterSettings{};
+            disabledWaterSettings.enabled = false;
+            disabledWaterSettings.drawTerrainCaustics = false;
+            m_quadtreeMeshRenderer.setWaterCausticsState(disabledWaterSettings);
             m_worldGridQuadtree.setWaterVisibilityBounds(0.0f, 0.0f, false);
         }
     }

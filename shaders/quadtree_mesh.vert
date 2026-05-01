@@ -8,6 +8,13 @@ layout(set=1, binding=0) uniform TerrainUniforms
     vec4 terrainHeightParams;
     vec4 cameraWorldAndTime;
     vec4 waterCausticsParams;
+    vec4 waterCascadeWorldSizesA;
+    vec4 waterCascadeWorldSizesB;
+    vec4 waterCausticsPatternParams;
+    vec4 waterCausticsRidgeParamsA;
+    vec4 waterCausticsRidgeParamsB;
+    vec4 waterCausticsDecodeParams;
+    vec4 waterCausticsRotationParams;
 } terrain;
 
 layout(set=0, binding=0, std430) readonly buffer HeightmapBuffer
@@ -31,6 +38,7 @@ layout(location = 1) in vec2 inSampleCoord;
 
 layout(location = 0) out vec3 fragLocalPosition;
 layout(location = 1) out vec3 fragWorldNormal;
+layout(location = 2) flat out uint fragAllowCaustics;
 
 const uint kHeightmapResolution = 259u;
 const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
@@ -87,4 +95,5 @@ void main()
     gl_Position = terrain.viewProjection * vec4(worldPosition, 1.0);
     fragLocalPosition = worldPosition;
     fragWorldNormal = computeNormal(sliceIndex, sampleCoord, sampleSpacing);
+    fragAllowCaustics = scalePow == 0u ? 1u : 0u;
 }
