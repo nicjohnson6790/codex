@@ -75,10 +75,10 @@ float metersPerPixel(float viewDistance)
     return max((2.0 * tanHalfVerticalFov * viewDistance) / viewportHeight, 1.0e-4);
 }
 
-float cascadeDetailWeight(float worldSize, float viewDistance)
+float cascadeDetailWeight(float worldSize, float metersPerPixelAtView)
 {
     float texelWorldSize = worldSize / 512.0;
-    float resolvedTexelScale = texelWorldSize / metersPerPixel(viewDistance);
+    float resolvedTexelScale = texelWorldSize / metersPerPixelAtView;
     return smoothstep(
         water.cascadeFilterParams.x,
         water.cascadeFilterParams.y,
@@ -177,6 +177,7 @@ void main()
 {
     vec2 worldXZ = water.cameraAndTime.xy + fragWorldPosition.xz;
     uint cascadeCount = uint(max(water.waterParams.w, 0.0));
+    float metersPerPixelAtView = metersPerPixel(fragViewDistance);
     vec2 slope = vec2(0.0);
     float shorelineBias = saturate(fragShoreFactor);
     bool drawFoam = water.foamParams2.z > 0.5;
@@ -186,17 +187,9 @@ void main()
         water.foamLodParams.y,
         fragViewDistance);
     bool evaluateFoam = drawFoam && farFoamFade > 0.0;
-    vec4 worldNoiseSample = vec4(0.5);
-    vec4 breakupNoiseSample = vec4(0.5);
+    vec4 historyNoiseSample = vec4(0.5);
     vec2 historyOffsetWorld = vec2(0.0);
-    vec2 detailOffsetWorld = vec2(0.0);
-    if (evaluateFoam)
-    {
-        worldNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
-        breakupNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailBreakup.y);
-        historyOffsetWorld = (worldNoiseSample.rg - vec2(0.5)) * water.foamDetailShape.w;
-        detailOffsetWorld = (worldNoiseSample.ba - vec2(0.5)) * water.foamDetailBreakup.x;
-    }
+    bool historyOffsetReady = false;
     for (uint cascadeIndex = 0u; cascadeIndex < cascadeCount; ++cascadeIndex)
     {
         if ((fragBandMask & (1u << cascadeIndex)) == 0u)
@@ -205,7 +198,7 @@ void main()
         }
 
         float worldSize = max(cascadeWorldSize(cascadeIndex), 1.0);
-        float detailWeight = cascadeDetailWeight(worldSize, fragViewDistance);
+        float detailWeight = cascadeDetailWeight(worldSize, metersPerPixelAtView);
         if (detailWeight <= 0.0)
         {
             continue;
@@ -224,15 +217,35 @@ void main()
             {
                 continue;
             }
+            float coverageWeight = 1.0 - (0.55 * (1.0 - smoothstep(500.0, 8000.0, worldSize)));
+            float maxCascadeContribution = coverageWeight * foamCascadeWeight;
+            if (foamCoverage >= maxCascadeContribution)
+            {
+                continue;
+            }
+            if (!historyOffsetReady)
+            {
+                historyNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
+                historyOffsetWorld = (historyNoiseSample.rg - vec2(0.5)) * water.foamDetailShape.w;
+                historyOffsetReady = true;
+            }
             vec2 historyUv = (worldXZ + historyOffsetWorld) / worldSize;
             float cascadeFoam = saturate(texture(foamTexture, vec3(historyUv, float(cascadeIndex))).r);
-            float coverageWeight = 1.0 - (0.55 * (1.0 - smoothstep(500.0, 8000.0, worldSize)));
             foamCoverage = max(foamCoverage, cascadeFoam * coverageWeight * foamCascadeWeight);
+            if (foamCoverage >= 1.0)
+            {
+                break;
+            }
         }
     }
     float foamSignal = 0.0;
-    if (evaluateFoam)
+    if (evaluateFoam && foamCoverage > water.foamFadeParams.x)
     {
+        vec4 worldNoiseSample = historyOffsetReady
+            ? historyNoiseSample
+            : texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
+        vec4 breakupNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailBreakup.y);
+        vec2 detailOffsetWorld = (worldNoiseSample.ba - vec2(0.5)) * water.foamDetailBreakup.x;
         float historySignal = foamCoverage;
         float decaySignal = 1.0 - historySignal;
         float evolutionRange = max(water.foamEvolutionParams.y - water.foamEvolutionParams.x, 1.0e-4);

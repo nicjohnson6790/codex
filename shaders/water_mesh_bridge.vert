@@ -91,10 +91,10 @@ float metersPerPixel(float viewDistance)
     return max((2.0 * tanHalfVerticalFov * viewDistance) / viewportHeight, 1.0e-4);
 }
 
-float cascadeDetailWeight(float worldSize, float viewDistance)
+float cascadeDetailWeight(float worldSize, float metersPerPixelAtView)
 {
     float texelWorldSize = worldSize / 512.0;
-    float resolvedTexelScale = texelWorldSize / metersPerPixel(viewDistance);
+    float resolvedTexelScale = texelWorldSize / metersPerPixelAtView;
     return smoothstep(
         water.cascadeFilterParams.x,
         water.cascadeFilterParams.y,
@@ -151,6 +151,7 @@ void main()
         instance.position.z + localMeters.y);
     float viewDistance = length(position);
     vec2 worldXZ = water.cameraAndTime.xy + position.xz;
+    float metersPerPixelAtView = metersPerPixel(viewDistance);
 
     float localDepth = water.depthEffectParams.x;
     if (hasTerrainSlice)
@@ -179,7 +180,7 @@ void main()
         }
 
         float worldSize = max(cascadeWorldSize(cascadeIndex), 1.0);
-        float detailWeight = cascadeDetailWeight(worldSize, viewDistance);
+        float detailWeight = cascadeDetailWeight(worldSize, metersPerPixelAtView);
         if (detailWeight <= 0.0)
         {
             continue;
