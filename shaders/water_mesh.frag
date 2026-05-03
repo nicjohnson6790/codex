@@ -12,8 +12,6 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 cascadeWorldSizesB;
     vec4 cascadeShallowDampingA;
     vec4 cascadeShallowDampingB;
-    vec4 cascadeFoamDetailScaleA;
-    vec4 cascadeFoamDetailScaleB;
     vec4 depthEffectParams;
     mat4 skyRotation;
     vec4 atmosphereParams;
@@ -23,6 +21,11 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 foamParams;
     vec4 foamParams2;
     vec4 foamColor;
+    vec4 foamDetailShape;
+    vec4 foamDetailRidges;
+    vec4 foamDetailBreakup;
+    vec4 foamEvolutionParams;
+    vec4 foamFadeParams;
 } water;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
@@ -30,8 +33,8 @@ layout(set=2, binding=1) uniform sampler2DArray slopeTexture;
 layout(set=2, binding=2) uniform sampler2DArray foamTexture;
 layout(set=2, binding=3) uniform samplerCube skyboxTexture;
 layout(set=2, binding=4) uniform sampler2DArray atmosphereLutTexture;
-layout(set=2, binding=5) uniform sampler2D foamDetailTextureA;
-layout(set=2, binding=6) uniform sampler2D foamDetailTextureB;
+layout(set=2, binding=5) uniform sampler2D foamDetailSdfTexture;
+layout(set=2, binding=6) uniform sampler2D foamDetailNoiseTexture;
 
 layout(location = 0) in vec3 fragWorldPosition;
 layout(location = 1) flat in uint fragBandMask;
@@ -55,19 +58,17 @@ float cascadeWorldSize(uint cascadeIndex)
     return water.cascadeWorldSizesB[cascadeIndex - 4u];
 }
 
-float cascadeFoamDetailScale(uint cascadeIndex)
-{
-    if (cascadeIndex < 4u)
-    {
-        return water.cascadeFoamDetailScaleA[cascadeIndex];
-    }
-
-    return water.cascadeFoamDetailScaleB[cascadeIndex - 4u];
-}
-
 float saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
+}
+
+float sampleFoamSdf(vec2 uv, vec2 ridgeRange)
+{
+    float sdf = (texture(foamDetailSdfTexture, uv).r - 0.5) * water.foamDetailShape.y;
+    float ridge = 1.0 - smoothstep(ridgeRange.x, ridgeRange.y, abs(sdf));
+    float fill = 1.0 - smoothstep(-0.18, 0.08, sdf);
+    return saturate(max(ridge, fill * 0.26));
 }
 
 float encodeLogDistance(float distanceThroughAtmosphere)
@@ -154,16 +155,15 @@ void main()
 {
     vec2 worldXZ = water.cameraAndTime.xy + fragWorldPosition.xz;
     uint cascadeCount = uint(max(water.waterParams.w, 0.0));
+    vec4 worldNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
+    vec4 breakupNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailBreakup.y);
+    vec2 historyOffsetWorld = (worldNoiseSample.rg - vec2(0.5)) * water.foamDetailShape.w;
+    vec2 detailOffsetWorld = (worldNoiseSample.ba - vec2(0.5)) * water.foamDetailBreakup.x;
 
     vec2 slope = vec2(0.0);
     float shorelineBias = saturate(fragShoreFactor);
     bool drawFoam = water.foamParams2.z > 0.5;
     float foamCoverage = 0.0;
-    float foamDetail = 0.0;
-    float foamMicroSlope = 0.0;
-    float foamDetailPattern = 0.0;
-    float totalDetailWeight = 0.0;
-    float currentTime = water.cameraAndTime.w;
     for (uint cascadeIndex = 0u; cascadeIndex < cascadeCount; ++cascadeIndex)
     {
         if ((fragBandMask & (1u << cascadeIndex)) == 0u)
@@ -175,52 +175,46 @@ void main()
         vec2 uv = fract(worldXZ / worldSize);
         vec4 slopeSample = texture(slopeTexture, vec3(uv, float(cascadeIndex)));
         slope += slopeSample.xy;
-        float detailWeight = 1.0 - smoothstep(500.0, 8000.0, worldSize);
         if (drawFoam)
         {
-            float cascadeFoam = saturate(texture(foamTexture, vec3(uv, float(cascadeIndex))).r);
-            float coverageWeight = 1.0 - (0.55 * detailWeight);
-            float foamScale = max(cascadeFoamDetailScale(cascadeIndex), 0.0001);
-            vec2 detailDriftA = vec2(0.27, -0.18) * currentTime * foamScale;
-            vec2 detailDriftB = vec2(-0.16, 0.30) * currentTime * foamScale;
-            vec2 detailUvA = (worldXZ * foamScale) + (slopeSample.xy * 0.030) + detailDriftA;
-            vec2 detailUvB =
-                (worldXZ * vec2(foamScale * 0.67, foamScale * 1.45)) +
-                (slopeSample.yx * vec2(-0.022, 0.018)) +
-                detailDriftB;
-            float detailCells = texture(foamDetailTextureA, detailUvA).r;
-            float detailStreaks = texture(foamDetailTextureB, detailUvB).r;
-            float foamLace = saturate((detailCells * 1.35) - 0.16);
-            float foamRibbons = saturate((detailStreaks * 1.55) - 0.24);
-            float cascadePattern = mix(
-                foamLace,
-                max(foamLace, foamRibbons),
-                0.35 + (shorelineBias * 0.45));
+            vec2 historyUv = (worldXZ + historyOffsetWorld) / worldSize;
+            float cascadeFoam = saturate(texture(foamTexture, vec3(historyUv, float(cascadeIndex))).r);
+            float coverageWeight = 1.0 - (0.55 * (1.0 - smoothstep(500.0, 8000.0, worldSize)));
             foamCoverage = max(foamCoverage, cascadeFoam * coverageWeight);
-            foamDetail += cascadeFoam * detailWeight;
-            foamMicroSlope += length(slopeSample.xy) * detailWeight;
-            foamDetailPattern += cascadePattern * detailWeight;
-            totalDetailWeight += detailWeight;
         }
     }
     float foamSignal = 0.0;
     if (drawFoam)
     {
-        float normalizedFoamDetail = totalDetailWeight > 0.0 ? (foamDetail / totalDetailWeight) : 0.0;
-        float normalizedFoamMicroSlope = totalDetailWeight > 0.0 ? (foamMicroSlope / totalDetailWeight) : 0.0;
-        float normalizedFoamPattern = totalDetailWeight > 0.0 ? (foamDetailPattern / totalDetailWeight) : 0.0;
-        float foamBreakup = saturate(
-            (normalizedFoamDetail * 1.1) +
-            smoothstep(0.18, 0.95, normalizedFoamMicroSlope) * 0.75);
-        foamSignal = foamCoverage * mix(0.22, 1.0, foamBreakup);
-        foamSignal = max(foamSignal, normalizedFoamDetail * 0.35);
-        foamSignal = saturate(foamSignal);
-        float detailPresence = mix(
-            0.45 + (0.55 * normalizedFoamPattern),
-            normalizedFoamPattern,
-            saturate((foamSignal * 0.9) + (shorelineBias * 0.5)));
-        foamSignal = saturate(foamSignal * mix(0.35, 1.45, detailPresence));
-        foamSignal = max(foamSignal, normalizedFoamDetail * 0.16);
+        float historySignal = foamCoverage;
+        float decaySignal = 1.0 - historySignal;
+        float evolutionRange = max(water.foamEvolutionParams.y - water.foamEvolutionParams.x, 1.0e-4);
+        float evolutionT = 1.0 - saturate((decaySignal - water.foamEvolutionParams.x) / evolutionRange);
+        if (decaySignal > water.foamEvolutionParams.y)
+        {
+            float dropoffRange = max(water.foamEvolutionParams.z - water.foamEvolutionParams.y, 1.0e-4);
+            float evolutionDropoff = saturate((decaySignal - water.foamEvolutionParams.y) / dropoffRange);
+            evolutionT *= evolutionDropoff;
+        }
+        vec2 evolvedRidgeRange = vec2(
+            mix(water.foamDetailRidges.x, water.foamDetailRidges.z, evolutionT),
+            mix(water.foamDetailRidges.y, water.foamDetailRidges.w, evolutionT));
+        vec2 detailBaseUv = (worldXZ + detailOffsetWorld) / max(water.foamDetailShape.x, 0.0001);
+        vec2 detailUv =
+            detailBaseUv +
+            (slope * 0.022);
+        float detailPattern = sampleFoamSdf(detailUv, evolvedRidgeRange);
+        float breakupNoise = saturate((breakupNoiseSample.r * 0.55) + (breakupNoiseSample.g * 0.45));
+        float breakupMask = mix(1.0 - water.foamDetailBreakup.z, 1.0, smoothstep(0.18, 0.82, breakupNoise));
+        detailPattern *= breakupMask;
+        detailPattern *= mix(0.94, 1.04, worldNoiseSample.r);
+        detailPattern = mix(detailPattern, detailPattern * 1.05, shorelineBias * 0.16);
+        float visibilityFade = smoothstep(
+            water.foamFadeParams.x,
+            water.foamFadeParams.y,
+            historySignal);
+        float historyPresence = smoothstep(0.001, water.foamFadeParams.y * 1.5, historySignal);
+        foamSignal = saturate(detailPattern * visibilityFade * mix(0.72, 1.0, historyPresence));
     }
 
     float slopeMagnitude = length(slope);

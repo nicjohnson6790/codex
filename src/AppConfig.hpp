@@ -191,13 +191,6 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowD
     1.0f,
 };
 
-inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeFoamDetailScales{
-    0.090f,
-    0.046f,
-    0.024f,
-    0.012f,
-};
-
 inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascadeUpdateModulo{
     1u,
     1u,
@@ -237,12 +230,27 @@ inline constexpr float kDefaultCausticsRidgeMaxB = 0.003f;
 inline constexpr float kDefaultCausticsFocusMin = 0.08f;
 inline constexpr float kDefaultCausticsFocusMax = 0.42f;
 inline constexpr float kDefaultCausticsMinSurfaceUp = 0.45f;
-inline constexpr float kDefaultCrestFoamAmount = 1.85f;
+inline constexpr float kDefaultCrestFoamAmount = 1.6f;
 inline constexpr float kDefaultCrestFoamThreshold = 0.12f;
 inline constexpr float kDefaultCrestFoamSoftness = 0.18f;
-inline constexpr float kDefaultCrestFoamSlopeStart = 0.21f;
-inline constexpr float kDefaultCrestFoamDecayRate = 0.05f;
+inline constexpr float kDefaultCrestFoamSlopeStart = 0.39f;
+inline constexpr float kDefaultCrestFoamDecayRate = 0.015f;
 inline constexpr float kDefaultCrestFoamBrightness = 1.35f;
+inline constexpr float kDefaultFoamSdfSampleScaleA = 1.25f;
+inline constexpr float kDefaultFoamSdfRidgeMinA = -0.015f;
+inline constexpr float kDefaultFoamSdfRidgeMaxA = 0.000f;
+inline constexpr float kDefaultFoamSdfRidgeMinB = 0.018f;
+inline constexpr float kDefaultFoamSdfRidgeMaxB = 0.155f;
+inline constexpr float kDefaultFoamNoiseScale = 0.130f;
+inline constexpr float kDefaultFoamHistoryWarpStrength = 6.0f;
+inline constexpr float kDefaultFoamDetailOffsetStrength = 0.052f;
+inline constexpr float kDefaultFoamDetailBreakupStrength = 0.7f;
+inline constexpr float kDefaultFoamDetailBreakupScale = 0.035f;
+inline constexpr float kDefaultFoamEvolutionStart = 0.1f;
+inline constexpr float kDefaultFoamEvolutionEnd = 1.0f;
+inline constexpr float kDefaultFoamEvolutionDropoffEnd = 1.050f;
+inline constexpr float kDefaultFoamFadeStart = 0.005f;
+inline constexpr float kDefaultFoamFadeEnd = 0.070f;
 inline constexpr glm::vec3 kCrestFoamColor{ 0.92f, 0.97f, 1.0f };
 
 inline constexpr std::uint32_t kMeshVertexResolution = 129;
@@ -262,9 +270,9 @@ inline constexpr float kSunAzimuthDegrees = 40.0f;
 // Orbit axis elevation above the horizon used to tilt the sun's daily path.
 inline constexpr float kSunElevationDegrees = 8.0f;
 // Initial hour shown at startup.
-inline constexpr float kTimeOfDayHours = 10.0f;
+inline constexpr float kTimeOfDayHours = 15.0f;
 // Real seconds required for one in-game day at timeFactor 1.
-inline constexpr float kDayLengthSeconds = 120.0f;
+inline constexpr float kDayLengthSeconds = 120000.0f;
 // Multiplier on day/night progression speed.
 inline constexpr float kTimeFactor = 1.0f;
 // Direct-light tint applied to terrain and the atmosphere LUT sun term.

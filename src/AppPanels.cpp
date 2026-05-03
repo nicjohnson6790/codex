@@ -483,7 +483,6 @@ void AppPanels::drawWaterTab(Context& context)
             ImGui::InputFloat("Short waves fade", &cascade.shortWavesFade, 0.0001f, 0.0005f, "%.4f");
             ImGui::InputFloat("Choppiness", &cascade.choppiness, 0.05f, 0.25f, "%.2f");
             ImGui::InputFloat("Shallow damping", &cascade.shallowDampingStrength, 0.05f, 0.25f, "%.2f");
-            ImGui::InputFloat("Foam detail scale", &cascade.foamDetailScale, 0.0025f, 0.01f, "%.4f");
             int updateModulo = static_cast<int>(cascade.updateModulo);
             ImGui::SliderInt("Update modulo", &updateModulo, 1, 8);
             cascade.updateModulo = static_cast<std::uint32_t>(std::max(updateModulo, 1));
@@ -500,6 +499,29 @@ void AppPanels::drawWaterTab(Context& context)
         ImGui::InputFloat("Slope gate start", &settings.crestFoamSlopeStart, 0.01f, 0.05f, "%.2f");
         ImGui::InputFloat("Decay rate", &settings.crestFoamDecayRate, 0.01f, 0.05f, "%.3f");
         ImGui::InputFloat("Brightness", &settings.crestFoamBrightness, 0.05f, 0.25f, "%.2f");
+    }
+
+    if (ImGui::CollapsingHeader("Foam Detail", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::TextWrapped("Merged foam history picks the fresh-to-decayed ridge shape. A world-space smooth-noise sample drives small offsets in both the foam history lookup and the foam detail lookup.");
+        ImGui::Spacing();
+        ImGui::InputFloat("Foam cell size##FoamDetail", &settings.foamSdfSampleScaleA, 0.05f, 0.2f, "%.3f");
+        ImGui::InputFloat("Fresh foam ridge min##FoamDetail", &settings.foamSdfRidgeMinA, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Fresh foam ridge max##FoamDetail", &settings.foamSdfRidgeMaxA, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Decayed foam ridge min##FoamDetail", &settings.foamSdfRidgeMinB, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Decayed foam ridge max##FoamDetail", &settings.foamSdfRidgeMaxB, 0.005f, 0.02f, "%.3f");
+        ImGui::Spacing();
+        ImGui::InputFloat("Smooth-noise world scale##FoamDetail", &settings.foamNoiseScale, 0.01f, 0.05f, "%.3f");
+        ImGui::InputFloat("History wobble strength##FoamDetail", &settings.foamHistoryWarpStrength, 0.25f, 1.0f, "%.3f");
+        ImGui::InputFloat("Detail wobble strength##FoamDetail", &settings.foamDetailOffsetStrength, 0.005f, 0.02f, "%.3f");
+        ImGui::InputFloat("Detail breakup strength##FoamDetail", &settings.foamDetailBreakupStrength, 0.05f, 0.2f, "%.3f");
+        ImGui::InputFloat("Detail breakup scale##FoamDetail", &settings.foamDetailBreakupScale, 0.005f, 0.02f, "%.3f");
+        ImGui::Spacing();
+        ImGui::InputFloat("Fresh-to-decayed start##FoamDetail", &settings.foamEvolutionStart, 0.02f, 0.1f, "%.3f");
+        ImGui::InputFloat("Fresh-to-decayed end##FoamDetail", &settings.foamEvolutionEnd, 0.02f, 0.1f, "%.3f");
+        ImGui::InputFloat("Decayed-shape dropoff end##FoamDetail", &settings.foamEvolutionDropoffEnd, 0.02f, 0.1f, "%.3f");
+        ImGui::InputFloat("Visibility fade start##FoamDetail", &settings.foamFadeStart, 0.001f, 0.005f, "%.3f");
+        ImGui::InputFloat("Visibility fade end##FoamDetail", &settings.foamFadeEnd, 0.005f, 0.02f, "%.3f");
     }
 
     if (ImGui::CollapsingHeader("Terrain Caustics", ImGuiTreeNodeFlags_DefaultOpen))

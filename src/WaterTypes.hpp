@@ -20,7 +20,6 @@ struct WaterCascadeSettings
     float shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[0];
     float choppiness = AppConfig::Water::kDefaultCascadeChoppiness[0];
     float shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[0];
-    float foamDetailScale = AppConfig::Water::kDefaultCascadeFoamDetailScales[0];
     std::uint32_t updateModulo = 1;
 };
 
@@ -43,6 +42,21 @@ struct WaterSettings
     float crestFoamSlopeStart = AppConfig::Water::kDefaultCrestFoamSlopeStart;
     float crestFoamDecayRate = AppConfig::Water::kDefaultCrestFoamDecayRate;
     float crestFoamBrightness = AppConfig::Water::kDefaultCrestFoamBrightness;
+    float foamSdfSampleScaleA = AppConfig::Water::kDefaultFoamSdfSampleScaleA;
+    float foamSdfRidgeMinA = AppConfig::Water::kDefaultFoamSdfRidgeMinA;
+    float foamSdfRidgeMaxA = AppConfig::Water::kDefaultFoamSdfRidgeMaxA;
+    float foamSdfRidgeMinB = AppConfig::Water::kDefaultFoamSdfRidgeMinB;
+    float foamSdfRidgeMaxB = AppConfig::Water::kDefaultFoamSdfRidgeMaxB;
+    float foamNoiseScale = AppConfig::Water::kDefaultFoamNoiseScale;
+    float foamHistoryWarpStrength = AppConfig::Water::kDefaultFoamHistoryWarpStrength;
+    float foamDetailOffsetStrength = AppConfig::Water::kDefaultFoamDetailOffsetStrength;
+    float foamDetailBreakupStrength = AppConfig::Water::kDefaultFoamDetailBreakupStrength;
+    float foamDetailBreakupScale = AppConfig::Water::kDefaultFoamDetailBreakupScale;
+    float foamEvolutionStart = AppConfig::Water::kDefaultFoamEvolutionStart;
+    float foamEvolutionEnd = AppConfig::Water::kDefaultFoamEvolutionEnd;
+    float foamEvolutionDropoffEnd = AppConfig::Water::kDefaultFoamEvolutionDropoffEnd;
+    float foamFadeStart = AppConfig::Water::kDefaultFoamFadeStart;
+    float foamFadeEnd = AppConfig::Water::kDefaultFoamFadeEnd;
     float causticsIntensity = AppConfig::Water::kDefaultCausticsIntensity;
     float causticsPatternScaleA = AppConfig::Water::kDefaultCausticsPatternScaleA;
     float causticsPatternScaleB = AppConfig::Water::kDefaultCausticsPatternScaleB;

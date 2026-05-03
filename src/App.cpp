@@ -157,7 +157,7 @@ void App::initialize()
     logStartup("create default camera");
     m_cameraManager.createCamera(
         "Camera 1",
-        Position(0, 0, { 0.0, 0.0, 2.8 })
+        Position(0, 0, { 0.0, 300.0, 2.8 })
     );
     logStartup("default camera created");
 
@@ -194,8 +194,7 @@ void App::initialize()
             m_renderer.device(),
             m_renderer.swapchainFormat(),
             m_renderer.viewportDepthFormat(),
-            shaderDirectory,
-            std::filesystem::path(TERRAIN_SANDBOX_RESOURCE_DIR)
+            shaderDirectory
         );
     }
     logStartup("init skybox renderer");

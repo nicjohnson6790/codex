@@ -3,7 +3,6 @@
 #include "AppConfig.hpp"
 #include "PerformanceCapture.hpp"
 
-#include <SDL3_image/SDL_image.h>
 #include <SDL3/SDL_stdinc.h>
 #include <glm/trigonometric.hpp>
 
@@ -31,35 +30,209 @@ constexpr std::uint32_t kWaterBridgeOuterVertexCount = AppConfig::Water::kMeshVe
 constexpr std::uint32_t kWaterBridgeInnerVertexCount = kWaterMeshIntervalCount - 1u;
 constexpr std::uint32_t kWaterCoarseBridgeOuterVertexCount = (kWaterMeshIntervalCount / 2u) + 1u;
 constexpr std::uint32_t kWaterEqualBridgeQuadCount = kWaterBridgeInnerVertexCount - 1u;
+constexpr std::uint32_t kFoamDetailTextureResolution = 256u;
 
-struct DecodedImage
+struct GeneratedImage
 {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::vector<std::uint8_t> pixels;
+    float decodeScale = 1.0f;
 };
 
-DecodedImage decodePngRgba8(const std::filesystem::path& path)
+float fractf(float value)
 {
-    SDL_Surface* loadedSurface = IMG_Load(path.string().c_str());
-    if (loadedSurface == nullptr)
+    return value - std::floor(value);
+}
+
+float saturatef(float value)
+{
+    return std::clamp(value, 0.0f, 1.0f);
+}
+
+float smoothstep01(float value)
+{
+    const float t = saturatef(value);
+    return t * t * (3.0f - (2.0f * t));
+}
+
+float lerpf(float a, float b, float t)
+{
+    return a + ((b - a) * t);
+}
+
+float hash11(float x, float y, float seed)
+{
+    const float value = std::sin((x * 127.1f) + (y * 311.7f) + (seed * 74.7f)) * 43758.5453f;
+    return fractf(value);
+}
+
+float periodicValueNoise(float x, float y, std::uint32_t grid, float seed)
+{
+    const float scaledX = x * static_cast<float>(grid);
+    const float scaledY = y * static_cast<float>(grid);
+    const float cellX = std::floor(scaledX);
+    const float cellY = std::floor(scaledY);
+    const std::uint32_t ix = static_cast<std::uint32_t>(cellX) % grid;
+    const std::uint32_t iy = static_cast<std::uint32_t>(cellY) % grid;
+    const std::uint32_t ix1 = (ix + 1u) % grid;
+    const std::uint32_t iy1 = (iy + 1u) % grid;
+    const float fx = smoothstep01(scaledX - cellX);
+    const float fy = smoothstep01(scaledY - cellY);
+
+    const float v00 = hash11(static_cast<float>(ix), static_cast<float>(iy), seed);
+    const float v10 = hash11(static_cast<float>(ix1), static_cast<float>(iy), seed);
+    const float v01 = hash11(static_cast<float>(ix), static_cast<float>(iy1), seed);
+    const float v11 = hash11(static_cast<float>(ix1), static_cast<float>(iy1), seed);
+    return lerpf(lerpf(v00, v10, fx), lerpf(v01, v11, fx), fy);
+}
+
+float periodicFbm(float x, float y, std::uint32_t octaves, std::uint32_t baseGrid, float seed)
+{
+    float amplitude = 1.0f;
+    float total = 0.0f;
+    float normalization = 0.0f;
+    for (std::uint32_t octave = 0; octave < octaves; ++octave)
     {
-        throw std::runtime_error("Failed to load water texture: " + path.string() + " " + SDL_GetError());
+        total += periodicValueNoise(x, y, baseGrid << octave, seed + static_cast<float>(octave * 17u)) * amplitude;
+        normalization += amplitude;
+        amplitude *= 0.5f;
     }
 
-    SDL_Surface* rgbaSurface = SDL_ConvertSurface(loadedSurface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(loadedSurface);
-    if (rgbaSurface == nullptr)
+    return normalization > 0.0f ? (total / normalization) : 0.0f;
+}
+
+float wrapDistance(float a, float b)
+{
+    const float distance = std::fabs(a - b);
+    return std::min(distance, 1.0f - distance);
+}
+
+std::pair<float, float> worleyF1F2(float x, float y, std::uint32_t cellCount, float seed)
+{
+    const float scaledX = x * static_cast<float>(cellCount);
+    const float scaledY = y * static_cast<float>(cellCount);
+    const int baseCellX = static_cast<int>(std::floor(scaledX));
+    const int baseCellY = static_cast<int>(std::floor(scaledY));
+    float f1 = 1.0e9f;
+    float f2 = 1.0e9f;
+
+    for (int oy = -1; oy <= 1; ++oy)
     {
-        throw std::runtime_error("Failed to convert water texture to RGBA32: " + path.string() + " " + SDL_GetError());
+        for (int ox = -1; ox <= 1; ++ox)
+        {
+            const std::uint32_t cx = static_cast<std::uint32_t>((baseCellX + ox + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
+            const std::uint32_t cy = static_cast<std::uint32_t>((baseCellY + oy + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
+            const float featureX = (static_cast<float>(cx) + hash11(static_cast<float>(cx), static_cast<float>(cy), seed)) / static_cast<float>(cellCount);
+            const float featureY = (static_cast<float>(cy) + hash11(static_cast<float>(cy), static_cast<float>(cx), seed + 19.0f)) / static_cast<float>(cellCount);
+            const float dx = wrapDistance(x, featureX);
+            const float dy = wrapDistance(y, featureY);
+            const float distanceSquared = (dx * dx) + (dy * dy);
+            if (distanceSquared < f1)
+            {
+                f2 = f1;
+                f1 = distanceSquared;
+            }
+            else if (distanceSquared < f2)
+            {
+                f2 = distanceSquared;
+            }
+        }
     }
 
-    DecodedImage image{};
-    image.width = static_cast<std::uint32_t>(rgbaSurface->w);
-    image.height = static_cast<std::uint32_t>(rgbaSurface->h);
-    image.pixels.resize(static_cast<std::size_t>(rgbaSurface->w) * static_cast<std::size_t>(rgbaSurface->h) * 4u);
-    std::memcpy(image.pixels.data(), rgbaSurface->pixels, image.pixels.size());
-    SDL_DestroySurface(rgbaSurface);
+    return { std::sqrt(f1), std::sqrt(f2) };
+}
+
+GeneratedImage buildFoamSdfTexture()
+{
+    GeneratedImage image{};
+    image.width = kFoamDetailTextureResolution;
+    image.height = kFoamDetailTextureResolution;
+    image.pixels.resize(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u);
+    std::vector<float> sdfValues(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height));
+    float maxAbsSdf = 1.0e-5f;
+
+    for (std::uint32_t y = 0; y < image.height; ++y)
+    {
+        const float v = static_cast<float>(y) / static_cast<float>(image.height);
+        for (std::uint32_t x = 0; x < image.width; ++x)
+        {
+            const float u = static_cast<float>(x) / static_cast<float>(image.width);
+            const auto [f1, f2] = worleyF1F2(u, v, 12u, 71.0f);
+            const auto [g1, g2] = worleyF1F2(u + 0.17f, v - 0.09f, 23u, 163.0f);
+            float sdf = (f2 - f1) - 0.052f;
+            sdf += ((g2 - g1) - 0.024f) * 0.42f;
+            sdf += (periodicFbm((u * 1.1f) + 0.23f, (v * 0.9f) - 0.11f, 4u, 4u, 241.0f) - 0.5f) * 0.026f;
+            sdf += (periodicFbm((u * 2.0f) - 0.08f, (v * 1.8f) + 0.14f, 3u, 7u, 509.0f) - 0.5f) * 0.013f;
+
+            const std::size_t sampleIndex = static_cast<std::size_t>(y) * image.width + x;
+            sdfValues[sampleIndex] = sdf;
+            maxAbsSdf = std::max(maxAbsSdf, std::fabs(sdf));
+        }
+    }
+
+    const float encodeScale = 0.48f / maxAbsSdf;
+    image.decodeScale = 1.0f / encodeScale;
+
+    for (std::uint32_t y = 0; y < image.height; ++y)
+    {
+        for (std::uint32_t x = 0; x < image.width; ++x)
+        {
+            const std::size_t sampleIndex = static_cast<std::size_t>(y) * image.width + x;
+            const float encoded = saturatef(0.5f + (sdfValues[sampleIndex] * encodeScale));
+            const std::uint8_t channel = static_cast<std::uint8_t>(std::round(encoded * 255.0f));
+            const std::size_t pixelIndex = sampleIndex * 4u;
+            image.pixels[pixelIndex + 0u] = channel;
+            image.pixels[pixelIndex + 1u] = channel;
+            image.pixels[pixelIndex + 2u] = channel;
+            image.pixels[pixelIndex + 3u] = 255u;
+        }
+    }
+
+    return image;
+}
+
+GeneratedImage buildFoamNoiseTexture()
+{
+    GeneratedImage image{};
+    image.width = kFoamDetailTextureResolution;
+    image.height = kFoamDetailTextureResolution;
+    image.pixels.resize(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u);
+
+    for (std::uint32_t y = 0; y < image.height; ++y)
+    {
+        const float v = static_cast<float>(y) / static_cast<float>(image.height);
+        for (std::uint32_t x = 0; x < image.width; ++x)
+        {
+            const float u = static_cast<float>(x) / static_cast<float>(image.width);
+            float noiseR = periodicFbm(u, v, 5u, 5u, 811.0f);
+            noiseR = lerpf(noiseR, periodicFbm((u * 1.7f) + 0.19f, (v * 1.4f) - 0.13f, 3u, 9u, 977.0f), 0.35f);
+            noiseR = smoothstep01((noiseR - 0.18f) / 0.68f);
+
+            float noiseG = periodicFbm((u * 0.93f) + 0.27f, (v * 1.11f) - 0.21f, 5u, 6u, 1231.0f);
+            noiseG = lerpf(noiseG, periodicFbm((u * 1.41f) - 0.16f, (v * 1.62f) + 0.08f, 3u, 10u, 1597.0f), 0.32f);
+            noiseG = smoothstep01((noiseG - 0.18f) / 0.68f);
+
+            float noiseB = periodicFbm((u * 1.23f) - 0.11f, (v * 0.87f) + 0.29f, 4u, 7u, 1877.0f);
+            noiseB = lerpf(noiseB, periodicFbm((u * 2.03f) + 0.05f, (v * 1.33f) - 0.24f, 2u, 12u, 2137.0f), 0.28f);
+            noiseB = smoothstep01((noiseB - 0.18f) / 0.68f);
+
+            float noiseA = periodicFbm((u * 0.78f) + 0.34f, (v * 1.52f) + 0.17f, 4u, 8u, 2459.0f);
+            noiseA = lerpf(noiseA, periodicFbm((u * 1.84f) - 0.27f, (v * 1.08f) + 0.31f, 3u, 11u, 2767.0f), 0.30f);
+            noiseA = smoothstep01((noiseA - 0.18f) / 0.68f);
+
+            const std::uint8_t channelR = static_cast<std::uint8_t>(std::round(saturatef(noiseR) * 255.0f));
+            const std::uint8_t channelG = static_cast<std::uint8_t>(std::round(saturatef(noiseG) * 255.0f));
+            const std::uint8_t channelB = static_cast<std::uint8_t>(std::round(saturatef(noiseB) * 255.0f));
+            const std::uint8_t channelA = static_cast<std::uint8_t>(std::round(saturatef(noiseA) * 255.0f));
+            const std::size_t pixelIndex =
+                (static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) + x) * 4u;
+            image.pixels[pixelIndex + 0u] = channelR;
+            image.pixels[pixelIndex + 1u] = channelG;
+            image.pixels[pixelIndex + 2u] = channelB;
+            image.pixels[pixelIndex + 3u] = channelA;
+        }
+    }
 
     return image;
 }
@@ -105,8 +278,7 @@ void QuadtreeWaterMeshRenderer::initialize(
     SDL_GPUDevice* device,
     SDL_GPUTextureFormat colorFormat,
     SDL_GPUTextureFormat depthFormat,
-    const std::filesystem::path& shaderDirectory,
-    const std::filesystem::path& resourceDirectory)
+    const std::filesystem::path& shaderDirectory)
 {
     initializeRendererBase(device, colorFormat, depthFormat);
     m_settings = makeDefaultWaterSettings();
@@ -114,7 +286,7 @@ void QuadtreeWaterMeshRenderer::initialize(
     createMesh();
     createWorkingBuffers();
     createWaterTextures();
-    createFoamDetailTextures(resourceDirectory);
+    createFoamDetailTextures();
     createWaterSampler();
     createPipelines(shaderDirectory);
     createWaterComputePipelines(shaderDirectory);
@@ -509,8 +681,8 @@ void QuadtreeWaterMeshRenderer::render(
         m_displacementTexture == nullptr ||
         m_slopeTexture == nullptr ||
         m_foamHistoryReadTexture == nullptr ||
-        m_foamDetailTextureA == nullptr ||
-        m_foamDetailTextureB == nullptr ||
+        m_foamDetailSdfTexture == nullptr ||
+        m_foamDetailNoiseTexture == nullptr ||
         m_waterSampler == nullptr ||
         skyboxRenderer.cubemapTexture() == nullptr ||
         skyboxRenderer.atmosphereLutTexture() == nullptr ||
@@ -549,8 +721,8 @@ void QuadtreeWaterMeshRenderer::render(
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
             { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
-            { m_foamDetailTextureA, m_waterSampler },
-            { m_foamDetailTextureB, m_waterSampler },
+            { m_foamDetailSdfTexture, m_waterSampler },
+            { m_foamDetailNoiseTexture, m_waterSampler },
         };
         SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
 
@@ -593,8 +765,8 @@ void QuadtreeWaterMeshRenderer::render(
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
             { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
-            { m_foamDetailTextureA, m_waterSampler },
-            { m_foamDetailTextureB, m_waterSampler },
+            { m_foamDetailSdfTexture, m_waterSampler },
+            { m_foamDetailNoiseTexture, m_waterSampler },
         };
         SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
 
@@ -1217,23 +1389,23 @@ void QuadtreeWaterMeshRenderer::destroyWaterTextures()
     }
 }
 
-void QuadtreeWaterMeshRenderer::createFoamDetailTextures(const std::filesystem::path& resourceDirectory)
+void QuadtreeWaterMeshRenderer::createFoamDetailTextures()
 {
-    const std::array<std::filesystem::path, 2> texturePaths{
-        resourceDirectory / "water" / "foam_detail_cells.png",
-        resourceDirectory / "water" / "foam_detail_streaks.png",
+    const std::array<GeneratedImage, 2> images{
+        buildFoamSdfTexture(),
+        buildFoamNoiseTexture(),
     };
     std::array<SDL_GPUTexture**, 2> textureSlots{
-        &m_foamDetailTextureA,
-        &m_foamDetailTextureB,
+        &m_foamDetailSdfTexture,
+        &m_foamDetailNoiseTexture,
     };
 
-    for (std::size_t textureIndex = 0; textureIndex < texturePaths.size(); ++textureIndex)
+    for (std::size_t textureIndex = 0; textureIndex < images.size(); ++textureIndex)
     {
-        const DecodedImage image = decodePngRgba8(texturePaths[textureIndex]);
+        const GeneratedImage& image = images[textureIndex];
         if (image.width == 0 || image.height == 0)
         {
-            throw std::runtime_error("Water foam detail textures must be non-empty.");
+            throw std::runtime_error("Generated water foam detail textures must be non-empty.");
         }
 
         SDL_GPUTextureCreateInfo textureInfo{};
@@ -1293,19 +1465,22 @@ void QuadtreeWaterMeshRenderer::createFoamDetailTextures(const std::filesystem::
         SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
         *textureSlots[textureIndex] = texture;
     }
+
+    m_foamDetailSdfDecodeScale = images[0].decodeScale;
 }
 
 void QuadtreeWaterMeshRenderer::destroyFoamDetailTextures()
 {
-    if (m_foamDetailTextureB != nullptr)
+    m_foamDetailSdfDecodeScale = 1.0f;
+    if (m_foamDetailNoiseTexture != nullptr)
     {
-        SDL_ReleaseGPUTexture(m_device, m_foamDetailTextureB);
-        m_foamDetailTextureB = nullptr;
+        SDL_ReleaseGPUTexture(m_device, m_foamDetailNoiseTexture);
+        m_foamDetailNoiseTexture = nullptr;
     }
-    if (m_foamDetailTextureA != nullptr)
+    if (m_foamDetailSdfTexture != nullptr)
     {
-        SDL_ReleaseGPUTexture(m_device, m_foamDetailTextureA);
-        m_foamDetailTextureA = nullptr;
+        SDL_ReleaseGPUTexture(m_device, m_foamDetailSdfTexture);
+        m_foamDetailSdfTexture = nullptr;
     }
 }
 
@@ -1387,6 +1562,38 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     uniforms.foamColor = glm::vec4(
         AppConfig::Water::kCrestFoamColor,
         std::max(m_settings.crestFoamBrightness, 0.0f));
+    const float foamRidgeMinA = std::max(m_settings.foamSdfRidgeMinA, 0.0f);
+    const float foamRidgeMinB = std::max(m_settings.foamSdfRidgeMinB, 0.0f);
+    const float foamEvolutionStart = std::min(m_settings.foamEvolutionStart, m_settings.foamEvolutionEnd);
+    const float foamEvolutionEnd = std::max(m_settings.foamEvolutionStart, m_settings.foamEvolutionEnd);
+    const float foamEvolutionDropoffEnd = std::max(m_settings.foamEvolutionDropoffEnd, foamEvolutionEnd + 1.0e-4f);
+    const float foamFadeStart = std::min(m_settings.foamFadeStart, m_settings.foamFadeEnd);
+    const float foamFadeEnd = std::max(m_settings.foamFadeStart, m_settings.foamFadeEnd);
+    uniforms.foamDetailShape = glm::vec4(
+        std::max(m_settings.foamSdfSampleScaleA, 0.0001f),
+        m_foamDetailSdfDecodeScale,
+        std::max(m_settings.foamNoiseScale, 0.0001f),
+        std::max(m_settings.foamHistoryWarpStrength, 0.0f));
+    uniforms.foamDetailRidges = glm::vec4(
+        foamRidgeMinA,
+        std::max(m_settings.foamSdfRidgeMaxA, foamRidgeMinA + 1.0e-4f),
+        foamRidgeMinB,
+        std::max(m_settings.foamSdfRidgeMaxB, foamRidgeMinB + 1.0e-4f));
+    uniforms.foamDetailBreakup = glm::vec4(
+        std::max(m_settings.foamDetailOffsetStrength, 0.0f),
+        std::max(m_settings.foamDetailBreakupScale, 0.0001f),
+        std::max(m_settings.foamDetailBreakupStrength, 0.0f),
+        0.0f);
+    uniforms.foamEvolutionParams = glm::vec4(
+        foamEvolutionStart,
+        std::max(foamEvolutionEnd, foamEvolutionStart + 1.0e-4f),
+        foamEvolutionDropoffEnd,
+        0.0f);
+    uniforms.foamFadeParams = glm::vec4(
+        foamFadeStart,
+        std::max(foamFadeEnd, foamFadeStart + 1.0e-4f),
+        0.0f,
+        0.0f);
     uniforms.debugParams.y = AppConfig::Water::kSubsurfaceStrength;
     uniforms.debugParams.z = AppConfig::Water::kScatteringAnisotropy;
     uniforms.debugParams.w = AppConfig::Water::kDepthAbsorptionStrength;
@@ -1395,18 +1602,15 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     {
         const float worldSize = std::max(m_settings.cascades[cascadeIndex].worldSizeMeters, 1.0f);
         const float shallowDamping = std::max(m_settings.cascades[cascadeIndex].shallowDampingStrength, 0.0f);
-        const float foamDetailScale = std::max(m_settings.cascades[cascadeIndex].foamDetailScale, 0.0001f);
         if (cascadeIndex < 4u)
         {
             (&uniforms.cascadeWorldSizesA.x)[cascadeIndex] = worldSize;
             (&uniforms.cascadeShallowDampingA.x)[cascadeIndex] = shallowDamping;
-            (&uniforms.cascadeFoamDetailScaleA.x)[cascadeIndex] = foamDetailScale;
         }
         else
         {
             (&uniforms.cascadeWorldSizesB.x)[cascadeIndex - 4u] = worldSize;
             (&uniforms.cascadeShallowDampingB.x)[cascadeIndex - 4u] = shallowDamping;
-            (&uniforms.cascadeFoamDetailScaleB.x)[cascadeIndex - 4u] = foamDetailScale;
         }
     }
 

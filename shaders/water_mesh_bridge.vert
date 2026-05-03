@@ -12,14 +12,20 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 cascadeWorldSizesB;
     vec4 cascadeShallowDampingA;
     vec4 cascadeShallowDampingB;
-    vec4 cascadeFoamDetailScaleA;
-    vec4 cascadeFoamDetailScaleB;
     vec4 depthEffectParams;
     mat4 skyRotation;
     vec4 atmosphereParams;
     vec4 sunDirectionTimeOfDay;
     vec4 opticalParams;
     vec4 refractionParams;
+    vec4 foamParams;
+    vec4 foamParams2;
+    vec4 foamColor;
+    vec4 foamDetailShape;
+    vec4 foamDetailRidges;
+    vec4 foamDetailBreakup;
+    vec4 foamEvolutionParams;
+    vec4 foamFadeParams;
 } water;
 
 layout(set=0, binding=0) uniform sampler2DArray displacementTexture;

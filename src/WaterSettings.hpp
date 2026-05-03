@@ -23,6 +23,21 @@ inline WaterSettings makeDefaultWaterSettings()
     settings.crestFoamSlopeStart = AppConfig::Water::kDefaultCrestFoamSlopeStart;
     settings.crestFoamDecayRate = AppConfig::Water::kDefaultCrestFoamDecayRate;
     settings.crestFoamBrightness = AppConfig::Water::kDefaultCrestFoamBrightness;
+    settings.foamSdfSampleScaleA = AppConfig::Water::kDefaultFoamSdfSampleScaleA;
+    settings.foamSdfRidgeMinA = AppConfig::Water::kDefaultFoamSdfRidgeMinA;
+    settings.foamSdfRidgeMaxA = AppConfig::Water::kDefaultFoamSdfRidgeMaxA;
+    settings.foamSdfRidgeMinB = AppConfig::Water::kDefaultFoamSdfRidgeMinB;
+    settings.foamSdfRidgeMaxB = AppConfig::Water::kDefaultFoamSdfRidgeMaxB;
+    settings.foamNoiseScale = AppConfig::Water::kDefaultFoamNoiseScale;
+    settings.foamHistoryWarpStrength = AppConfig::Water::kDefaultFoamHistoryWarpStrength;
+    settings.foamDetailOffsetStrength = AppConfig::Water::kDefaultFoamDetailOffsetStrength;
+    settings.foamDetailBreakupStrength = AppConfig::Water::kDefaultFoamDetailBreakupStrength;
+    settings.foamDetailBreakupScale = AppConfig::Water::kDefaultFoamDetailBreakupScale;
+    settings.foamEvolutionStart = AppConfig::Water::kDefaultFoamEvolutionStart;
+    settings.foamEvolutionEnd = AppConfig::Water::kDefaultFoamEvolutionEnd;
+    settings.foamEvolutionDropoffEnd = AppConfig::Water::kDefaultFoamEvolutionDropoffEnd;
+    settings.foamFadeStart = AppConfig::Water::kDefaultFoamFadeStart;
+    settings.foamFadeEnd = AppConfig::Water::kDefaultFoamFadeEnd;
     settings.causticsIntensity = AppConfig::Water::kDefaultCausticsIntensity;
     settings.causticsPatternScaleA = AppConfig::Water::kDefaultCausticsPatternScaleA;
     settings.causticsPatternScaleB = AppConfig::Water::kDefaultCausticsPatternScaleB;
@@ -53,7 +68,6 @@ inline WaterSettings makeDefaultWaterSettings()
         settings.cascades[i].shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[i];
         settings.cascades[i].choppiness = AppConfig::Water::kDefaultCascadeChoppiness[i];
         settings.cascades[i].shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[i];
-        settings.cascades[i].foamDetailScale = AppConfig::Water::kDefaultCascadeFoamDetailScales[i];
         settings.cascades[i].updateModulo = AppConfig::Water::kDefaultCascadeUpdateModulo[i];
     }
 
