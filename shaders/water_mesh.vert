@@ -18,6 +18,10 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 sunDirectionTimeOfDay;
     vec4 opticalParams;
     vec4 refractionParams;
+    vec4 distanceLodParams;
+    vec4 cascadeFilterParams;
+    vec4 farFieldParams;
+    vec4 foamLodParams;
     vec4 foamParams;
     vec4 foamParams2;
     vec4 foamColor;
@@ -54,6 +58,7 @@ layout(location = 1) flat out uint fragBandMask;
 layout(location = 2) out float fragShoreFactor;
 layout(location = 3) out float fragLocalDepth;
 layout(location = 4) flat out uint fragHasTerrainSlice;
+layout(location = 5) out float fragViewDistance;
 
 const uint kHeightmapResolution = 259u;
 const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
@@ -77,6 +82,23 @@ float cascadeShallowDamping(uint cascadeIndex)
     }
 
     return water.cascadeShallowDampingB[cascadeIndex - 4u];
+}
+
+float metersPerPixel(float viewDistance)
+{
+    float viewportHeight = max(water.distanceLodParams.x, 1.0);
+    float tanHalfVerticalFov = max(water.distanceLodParams.y, 1.0e-4);
+    return max((2.0 * tanHalfVerticalFov * viewDistance) / viewportHeight, 1.0e-4);
+}
+
+float cascadeDetailWeight(float worldSize, float viewDistance)
+{
+    float texelWorldSize = worldSize / 512.0;
+    float resolvedTexelScale = texelWorldSize / metersPerPixel(viewDistance);
+    return smoothstep(
+        water.cascadeFilterParams.x,
+        water.cascadeFilterParams.y,
+        resolvedTexelScale);
 }
 
 float sampleTerrainHeight(uint sliceIndex, vec2 localMeters, float leafSize)
@@ -106,6 +128,7 @@ void main()
         instance.position.x + localMeters.x,
         instance.position.y + waterLevel,
         instance.position.z + localMeters.y);
+    float viewDistance = length(position);
     vec2 worldXZ = water.cameraAndTime.xy + position.xz;
 
     float localDepth = water.depthEffectParams.x;
@@ -135,10 +158,16 @@ void main()
         }
 
         float worldSize = max(cascadeWorldSize(cascadeIndex), 1.0);
+        float detailWeight = cascadeDetailWeight(worldSize, viewDistance);
+        if (detailWeight <= 0.0)
+        {
+            continue;
+        }
+
         vec2 uv = fract(worldXZ / worldSize);
         float dampingStrength = max(cascadeShallowDamping(cascadeIndex), 0.0);
         float cascadeFade = mix(1.0, shallowFade, clamp(dampingStrength, 0.0, 8.0));
-        displacement += texture(displacementTexture, vec3(uv, float(cascadeIndex))).xyz * cascadeFade;
+        displacement += texture(displacementTexture, vec3(uv, float(cascadeIndex))).xyz * (cascadeFade * detailWeight);
     }
 
     position += displacement;
@@ -148,5 +177,6 @@ void main()
     fragShoreFactor = shoreFactor;
     fragLocalDepth = localDepth;
     fragHasTerrainSlice = hasTerrainSlice ? 1u : 0u;
+    fragViewDistance = viewDistance;
     gl_Position = water.viewProjection * vec4(position, 1.0);
 }

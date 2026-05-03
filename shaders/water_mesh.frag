@@ -18,6 +18,10 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 sunDirectionTimeOfDay;
     vec4 opticalParams;
     vec4 refractionParams;
+    vec4 distanceLodParams;
+    vec4 cascadeFilterParams;
+    vec4 farFieldParams;
+    vec4 foamLodParams;
     vec4 foamParams;
     vec4 foamParams2;
     vec4 foamColor;
@@ -41,6 +45,7 @@ layout(location = 1) flat in uint fragBandMask;
 layout(location = 2) in float fragShoreFactor;
 layout(location = 3) in float fragLocalDepth;
 layout(location = 4) flat in uint fragHasTerrainSlice;
+layout(location = 5) in float fragViewDistance;
 
 layout(location = 0) out vec4 outColor;
 
@@ -61,6 +66,23 @@ float cascadeWorldSize(uint cascadeIndex)
 float saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
+}
+
+float metersPerPixel(float viewDistance)
+{
+    float viewportHeight = max(water.distanceLodParams.x, 1.0);
+    float tanHalfVerticalFov = max(water.distanceLodParams.y, 1.0e-4);
+    return max((2.0 * tanHalfVerticalFov * viewDistance) / viewportHeight, 1.0e-4);
+}
+
+float cascadeDetailWeight(float worldSize, float viewDistance)
+{
+    float texelWorldSize = worldSize / 512.0;
+    float resolvedTexelScale = texelWorldSize / metersPerPixel(viewDistance);
+    return smoothstep(
+        water.cascadeFilterParams.x,
+        water.cascadeFilterParams.y,
+        resolvedTexelScale);
 }
 
 float sampleFoamSdf(vec2 uv, vec2 ridgeRange)
@@ -155,15 +177,26 @@ void main()
 {
     vec2 worldXZ = water.cameraAndTime.xy + fragWorldPosition.xz;
     uint cascadeCount = uint(max(water.waterParams.w, 0.0));
-    vec4 worldNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
-    vec4 breakupNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailBreakup.y);
-    vec2 historyOffsetWorld = (worldNoiseSample.rg - vec2(0.5)) * water.foamDetailShape.w;
-    vec2 detailOffsetWorld = (worldNoiseSample.ba - vec2(0.5)) * water.foamDetailBreakup.x;
-
     vec2 slope = vec2(0.0);
     float shorelineBias = saturate(fragShoreFactor);
     bool drawFoam = water.foamParams2.z > 0.5;
     float foamCoverage = 0.0;
+    float farFoamFade = 1.0 - smoothstep(
+        water.foamLodParams.x,
+        water.foamLodParams.y,
+        fragViewDistance);
+    bool evaluateFoam = drawFoam && farFoamFade > 0.0;
+    vec4 worldNoiseSample = vec4(0.5);
+    vec4 breakupNoiseSample = vec4(0.5);
+    vec2 historyOffsetWorld = vec2(0.0);
+    vec2 detailOffsetWorld = vec2(0.0);
+    if (evaluateFoam)
+    {
+        worldNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
+        breakupNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailBreakup.y);
+        historyOffsetWorld = (worldNoiseSample.rg - vec2(0.5)) * water.foamDetailShape.w;
+        detailOffsetWorld = (worldNoiseSample.ba - vec2(0.5)) * water.foamDetailBreakup.x;
+    }
     for (uint cascadeIndex = 0u; cascadeIndex < cascadeCount; ++cascadeIndex)
     {
         if ((fragBandMask & (1u << cascadeIndex)) == 0u)
@@ -172,19 +205,33 @@ void main()
         }
 
         float worldSize = max(cascadeWorldSize(cascadeIndex), 1.0);
+        float detailWeight = cascadeDetailWeight(worldSize, fragViewDistance);
+        if (detailWeight <= 0.0)
+        {
+            continue;
+        }
+
         vec2 uv = fract(worldXZ / worldSize);
         vec4 slopeSample = texture(slopeTexture, vec3(uv, float(cascadeIndex)));
-        slope += slopeSample.xy;
-        if (drawFoam)
+        slope += slopeSample.xy * detailWeight;
+        if (evaluateFoam)
         {
+            float foamCascadeWeight = smoothstep(
+                water.foamLodParams.z,
+                1.0,
+                detailWeight);
+            if (foamCascadeWeight <= 0.0)
+            {
+                continue;
+            }
             vec2 historyUv = (worldXZ + historyOffsetWorld) / worldSize;
             float cascadeFoam = saturate(texture(foamTexture, vec3(historyUv, float(cascadeIndex))).r);
             float coverageWeight = 1.0 - (0.55 * (1.0 - smoothstep(500.0, 8000.0, worldSize)));
-            foamCoverage = max(foamCoverage, cascadeFoam * coverageWeight);
+            foamCoverage = max(foamCoverage, cascadeFoam * coverageWeight * foamCascadeWeight);
         }
     }
     float foamSignal = 0.0;
-    if (drawFoam)
+    if (evaluateFoam)
     {
         float historySignal = foamCoverage;
         float decaySignal = 1.0 - historySignal;
@@ -214,16 +261,31 @@ void main()
             water.foamFadeParams.y,
             historySignal);
         float historyPresence = smoothstep(0.001, water.foamFadeParams.y * 1.5, historySignal);
-        foamSignal = saturate(detailPattern * visibilityFade * mix(0.72, 1.0, historyPresence));
+        foamSignal = saturate(detailPattern * visibilityFade * mix(0.72, 1.0, historyPresence)) * farFoamFade;
     }
 
+    float farNormalT = smoothstep(
+        water.distanceLodParams.z,
+        water.distanceLodParams.w,
+        fragViewDistance);
+    float farReflectionFlattenT = smoothstep(
+        water.farFieldParams.y,
+        water.farFieldParams.z,
+        fragViewDistance);
+    float farRoughnessT = smoothstep(
+        water.cascadeFilterParams.z,
+        water.cascadeFilterParams.w,
+        fragViewDistance);
     float slopeMagnitude = length(slope);
     float roughness = clamp(
-        water.opticalParams.y + (slopeMagnitude * water.opticalParams.z),
+        water.opticalParams.y +
+        (slopeMagnitude * water.opticalParams.z) +
+        (farRoughnessT * water.farFieldParams.x),
         0.02,
-        0.4);
+        0.65);
 
-    vec3 normal = normalize(vec3(-slope.x, 1.0, -slope.y));
+    vec3 detailNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
+    vec3 normal = normalize(mix(detailNormal, vec3(0.0, 1.0, 0.0), farNormalT));
     vec3 viewDir = normalize(-fragWorldPosition);
     vec3 sunDirection = normalize(water.sunDirectionIntensity.xyz);
     vec3 halfVector = normalize(sunDirection + viewDir);
@@ -260,7 +322,8 @@ void main()
         water.sunColorAmbient.rgb *
         (water.sunDirectionIntensity.w * normalDotLight);
 
-    vec3 reflectionDir = reflect(-viewDir, normal);
+    vec3 reflectionNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), farReflectionFlattenT));
+    vec3 reflectionDir = reflect(-viewDir, reflectionNormal);
     vec3 reflectedSky = sampleSkyRadiance(reflectionDir) * water.opticalParams.w;
     vec3 environmentSpecular =
         reflectedSky *

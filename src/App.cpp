@@ -98,6 +98,7 @@ void App::run()
             m_skyboxRenderer,
             viewProjection,
             m_lightingSystem,
+            m_panels.viewportExtent(),
             ImGui::GetDrawData(),
             !m_panels.viewportPaused(),
             m_elapsedTimeSeconds,

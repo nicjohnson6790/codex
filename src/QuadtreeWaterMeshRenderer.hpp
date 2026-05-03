@@ -3,6 +3,7 @@
 #include "EngineRendererBase.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
+#include "RenderTypes.hpp"
 #include "SkyboxRenderer.hpp"
 #include "WaterSettings.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
@@ -37,6 +38,10 @@ public:
         glm::vec4 sunDirectionTimeOfDay{ 0.0f };
         glm::vec4 opticalParams{ 0.0f };
         glm::vec4 refractionParams{ 0.0f };
+        glm::vec4 distanceLodParams{ 0.0f };
+        glm::vec4 cascadeFilterParams{ 0.0f };
+        glm::vec4 farFieldParams{ 0.0f };
+        glm::vec4 foamLodParams{ 0.0f };
         glm::vec4 foamParams{ 0.0f };
         glm::vec4 foamParams2{ 0.0f };
         glm::vec4 foamColor{ 0.0f };
@@ -103,6 +108,7 @@ public:
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
         const SkyboxRenderer& skyboxRenderer,
+        Extent2D viewportExtent,
         float timeSeconds,
         SDL_GPUBuffer* terrainHeightmapBuffer) const;
 
@@ -223,6 +229,7 @@ private:
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
         const SkyboxRenderer& skyboxRenderer,
+        Extent2D viewportExtent,
         float timeSeconds) const;
     [[nodiscard]] WaterSimulationUniforms buildSimulationUniforms(
         float timeSeconds,

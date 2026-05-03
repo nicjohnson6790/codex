@@ -157,6 +157,7 @@ void SDLRenderer::renderFrame(
     SkyboxRenderer& skyboxRenderer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
+    Extent2D viewportExtent,
     ImDrawData* drawData,
     bool renderViewport,
     float timeSeconds,
@@ -278,6 +279,7 @@ void SDLRenderer::renderFrame(
                 viewProjection,
                 lightingSystem,
                 skyboxRenderer,
+                viewportExtent,
                 timeSeconds,
                 quadtreeMeshRenderer.heightmapBuffer());
         }

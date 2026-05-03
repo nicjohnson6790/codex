@@ -669,6 +669,7 @@ void QuadtreeWaterMeshRenderer::render(
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
     const SkyboxRenderer& skyboxRenderer,
+    Extent2D viewportExtent,
     float timeSeconds,
     SDL_GPUBuffer* terrainHeightmapBuffer) const
 {
@@ -693,7 +694,12 @@ void QuadtreeWaterMeshRenderer::render(
         return;
     }
 
-    const WaterUniforms uniforms = buildWaterUniforms(viewProjection, lightingSystem, skyboxRenderer, timeSeconds);
+    const WaterUniforms uniforms = buildWaterUniforms(
+        viewProjection,
+        lightingSystem,
+        skyboxRenderer,
+        viewportExtent,
+        timeSeconds);
 
     const auto drawMeshInstances = [&](SDL_GPUGraphicsPipeline* pipeline, const MeshResources& mesh, const InstanceResources& instances)
     {
@@ -1515,6 +1521,7 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
     const SkyboxRenderer& skyboxRenderer,
+    Extent2D viewportExtent,
     float timeSeconds) const
 {
     WaterUniforms uniforms{};
@@ -1556,6 +1563,26 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
         AppConfig::Water::kShallowRefractionMaxDepthMeters,
         AppConfig::Water::kShallowRefractionFullFadeDepthMeters,
         0.0f,
+        0.0f);
+    uniforms.distanceLodParams = glm::vec4(
+        static_cast<float>(std::max(viewportExtent.height, 1u)),
+        std::tan(AppConfig::Camera::kVerticalFovRadians * 0.5f),
+        AppConfig::Water::kFarNormalFadeStartMeters,
+        AppConfig::Water::kFarNormalFadeEndMeters);
+    uniforms.cascadeFilterParams = glm::vec4(
+        AppConfig::Water::kCascadeDetailTexelFadeStart,
+        AppConfig::Water::kCascadeDetailTexelFadeEnd,
+        AppConfig::Water::kFarRoughnessFadeStartMeters,
+        AppConfig::Water::kFarRoughnessFadeEndMeters);
+    uniforms.farFieldParams = glm::vec4(
+        AppConfig::Water::kFarRoughnessBoost,
+        AppConfig::Water::kFarReflectionFlattenStartMeters,
+        AppConfig::Water::kFarReflectionFlattenEndMeters,
+        0.0f);
+    uniforms.foamLodParams = glm::vec4(
+        AppConfig::Water::kFarFoamFadeStartMeters,
+        AppConfig::Water::kFarFoamFadeEndMeters,
+        AppConfig::Water::kFoamCascadeDetailTexelThreshold,
         0.0f);
     uniforms.foamParams = buildFoamGenerationParams(m_settings);
     uniforms.foamParams2 = buildFoamHistoryParams(m_settings, false);
