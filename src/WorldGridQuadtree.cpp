@@ -395,15 +395,16 @@ void WorldGridQuadtree::emitMeshDraws(RenderEngines& renderEngines)
 
         for (std::uint8_t edgeIndex = 0; edgeIndex < 4; ++edgeIndex)
         {
-            if (edgeHasDrawableNeighborCoverage(nodeIndex, edgeIndex))
-            {
-                renderEngines.quadtreeMeshRenderer->addBridge(node.nodeId, sliceIndex, edgeIndex);
-                continue;
-            }
-
+            // Every drawn terrain node needs one bridge per edge because the main patch
+            // is trimmed inward by one sample. The only decision here is whether the edge
+            // should use the regular 1:1 bridge or the 2:1 coarse bridge.
             if (edgeHasDrawableCoarserNeighbor(nodeIndex, edgeIndex))
             {
                 renderEngines.quadtreeMeshRenderer->addCoarseBridge(node.nodeId, sliceIndex, edgeIndex);
+            }
+            else
+            {
+                renderEngines.quadtreeMeshRenderer->addBridge(node.nodeId, sliceIndex, edgeIndex);
             }
         }
     }
@@ -892,7 +893,13 @@ bool WorldGridQuadtree::subtreeEdgeCoveredByTerrain(std::uint16_t nodeIndex, std
         m_nodes,
         nodeIndex,
         edgeIndex,
-        [](const QuadtreeNode& node) { return WorldGridQuadtree::nodeContributesTerrainDraw(node); });
+        [](const QuadtreeNode& node)
+        {
+            // Bridge coverage must follow resident terrain surface availability rather than
+            // this frame's visibility result. A visible node can still need a bridge against
+            // a neighbor whose edge geometry exists but was culled by the node frustum test.
+            return WorldGridQuadtree::nodeHasResidentTerrainSurface(node);
+        });
 }
 
 bool WorldGridQuadtree::subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
