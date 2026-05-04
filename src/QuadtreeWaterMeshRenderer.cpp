@@ -1621,6 +1621,30 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
         std::max(foamFadeEnd, foamFadeStart + 1.0e-4f),
         0.0f,
         0.0f);
+    const float shoreFoamDepthStart = std::max(m_settings.shoreFoamDepthStart, 0.0f);
+    const float shoreFoamDepthEnd = std::max(m_settings.shoreFoamDepthEnd, shoreFoamDepthStart + 1.0e-4f);
+    uniforms.shorelineFoamParams = glm::vec4(
+        (m_settings.drawFoam && m_settings.shoreFoamEnabled) ? std::max(m_settings.shoreFoamAmount, 0.0f) : 0.0f,
+        shoreFoamDepthStart,
+        shoreFoamDepthEnd,
+        std::max(m_settings.shoreFoamBreakupStrength, 0.0f));
+    const float shoreFoamDecayDepthStart = std::max(m_settings.shoreFoamDecayDepthStart, 0.0f);
+    const float shoreFoamDecayDepthEnd = std::max(
+        m_settings.shoreFoamDecayDepthEnd,
+        shoreFoamDecayDepthStart + 1.0e-4f);
+    uniforms.shorelineFoamDecayParams = glm::vec4(
+        shoreFoamDecayDepthStart,
+        shoreFoamDecayDepthEnd,
+        0.0f,
+        0.0f);
+    uniforms.shallowWaterColor = glm::vec4(m_settings.shallowWaterColor, 0.0f);
+    uniforms.midWaterColor = glm::vec4(m_settings.midWaterColor, 0.0f);
+    uniforms.deepWaterColor = glm::vec4(m_settings.deepWaterColor, 0.0f);
+    uniforms.waterDepthColorParams = glm::vec4(
+        std::max(m_settings.midWaterDepthStart, 0.0f),
+        std::max(m_settings.midWaterDepthEnd, m_settings.midWaterDepthStart + 1.0e-4f),
+        std::max(m_settings.deepWaterDepthStart, 0.0f),
+        std::max(m_settings.deepWaterDepthEnd, m_settings.deepWaterDepthStart + 1.0e-4f));
     uniforms.debugParams.y = AppConfig::Water::kSubsurfaceStrength;
     uniforms.debugParams.z = AppConfig::Water::kScatteringAnisotropy;
     uniforms.debugParams.w = AppConfig::Water::kDepthAbsorptionStrength;
@@ -1629,15 +1653,20 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     {
         const float worldSize = std::max(m_settings.cascades[cascadeIndex].worldSizeMeters, 1.0f);
         const float shallowDamping = std::max(m_settings.cascades[cascadeIndex].shallowDampingStrength, 0.0f);
+        const float shallowDepthMeters = std::max(
+            m_settings.cascades[cascadeIndex].shallowDampingDepthMeters,
+            0.0f);
         if (cascadeIndex < 4u)
         {
             (&uniforms.cascadeWorldSizesA.x)[cascadeIndex] = worldSize;
             (&uniforms.cascadeShallowDampingA.x)[cascadeIndex] = shallowDamping;
+            (&uniforms.cascadeShallowDepthA.x)[cascadeIndex] = shallowDepthMeters;
         }
         else
         {
             (&uniforms.cascadeWorldSizesB.x)[cascadeIndex - 4u] = worldSize;
             (&uniforms.cascadeShallowDampingB.x)[cascadeIndex - 4u] = shallowDamping;
+            (&uniforms.cascadeShallowDepthB.x)[cascadeIndex - 4u] = shallowDepthMeters;
         }
     }
 

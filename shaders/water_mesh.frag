@@ -12,6 +12,8 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 cascadeWorldSizesB;
     vec4 cascadeShallowDampingA;
     vec4 cascadeShallowDampingB;
+    vec4 cascadeShallowDepthA;
+    vec4 cascadeShallowDepthB;
     vec4 depthEffectParams;
     mat4 skyRotation;
     vec4 atmosphereParams;
@@ -30,6 +32,12 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 foamDetailBreakup;
     vec4 foamEvolutionParams;
     vec4 foamFadeParams;
+    vec4 shorelineFoamParams;
+    vec4 shorelineFoamDecayParams;
+    vec4 shallowWaterColor;
+    vec4 midWaterColor;
+    vec4 deepWaterColor;
+    vec4 waterDepthColorParams;
 } water;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
@@ -66,6 +74,33 @@ float cascadeWorldSize(uint cascadeIndex)
 float saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
+}
+
+float cascadeShallowDamping(uint cascadeIndex)
+{
+    if (cascadeIndex < 4u)
+    {
+        return water.cascadeShallowDampingA[cascadeIndex];
+    }
+
+    return water.cascadeShallowDampingB[cascadeIndex - 4u];
+}
+
+float cascadeShallowDepth(uint cascadeIndex)
+{
+    if (cascadeIndex < 4u)
+    {
+        return water.cascadeShallowDepthA[cascadeIndex];
+    }
+
+    return water.cascadeShallowDepthB[cascadeIndex - 4u];
+}
+
+float cascadeShallowFade(uint cascadeIndex, float localDepth)
+{
+    float fadeStart = max(cascadeShallowDepth(cascadeIndex), water.depthEffectParams.y + 0.001);
+    float fadeEnd = max(water.depthEffectParams.y, 0.0);
+    return smoothstep(fadeEnd, fadeStart, localDepth);
 }
 
 float metersPerPixel(float viewDistance)
@@ -186,6 +221,17 @@ void main()
         water.foamLodParams.x,
         water.foamLodParams.y,
         fragViewDistance);
+    float shorelineFoamBand = 0.0;
+    if (water.shorelineFoamParams.x > 0.0)
+    {
+        shorelineFoamBand =
+            (1.0 - smoothstep(
+                water.shorelineFoamParams.y,
+                water.shorelineFoamParams.z,
+                fragLocalDepth)) *
+            water.shorelineFoamParams.x *
+            farFoamFade;
+    }
     bool evaluateFoam = drawFoam && farFoamFade > 0.0;
     vec4 historyNoiseSample = vec4(0.5);
     vec2 historyOffsetWorld = vec2(0.0);
@@ -209,6 +255,15 @@ void main()
         slope += slopeSample.xy * detailWeight;
         if (evaluateFoam)
         {
+            float dampingStrength = max(cascadeShallowDamping(cascadeIndex), 0.0);
+            float shallowFade = (fragHasTerrainSlice != 0u)
+                ? cascadeShallowFade(cascadeIndex, fragLocalDepth)
+                : 1.0;
+            float foamShallowFade = mix(1.0, shallowFade, clamp(dampingStrength, 0.0, 8.0));
+            if (foamShallowFade <= 0.0)
+            {
+                continue;
+            }
             float foamCascadeWeight = smoothstep(
                 water.foamLodParams.z,
                 1.0,
@@ -218,7 +273,7 @@ void main()
                 continue;
             }
             float coverageWeight = 1.0 - (0.55 * (1.0 - smoothstep(500.0, 8000.0, worldSize)));
-            float maxCascadeContribution = coverageWeight * foamCascadeWeight;
+            float maxCascadeContribution = coverageWeight * foamCascadeWeight * foamShallowFade;
             if (foamCoverage >= maxCascadeContribution)
             {
                 continue;
@@ -231,7 +286,9 @@ void main()
             }
             vec2 historyUv = (worldXZ + historyOffsetWorld) / worldSize;
             float cascadeFoam = saturate(texture(foamTexture, vec3(historyUv, float(cascadeIndex))).r);
-            foamCoverage = max(foamCoverage, cascadeFoam * coverageWeight * foamCascadeWeight);
+            foamCoverage = max(
+                foamCoverage,
+                cascadeFoam * coverageWeight * foamCascadeWeight * foamShallowFade);
             if (foamCoverage >= 1.0)
             {
                 break;
@@ -239,7 +296,8 @@ void main()
         }
     }
     float foamSignal = 0.0;
-    if (evaluateFoam && foamCoverage > water.foamFadeParams.x)
+    bool evaluateFoamDetail = (evaluateFoam && foamCoverage > water.foamFadeParams.x) || (shorelineFoamBand > 0.0);
+    if (evaluateFoamDetail)
     {
         vec4 worldNoiseSample = historyOffsetReady
             ? historyNoiseSample
@@ -269,12 +327,36 @@ void main()
         detailPattern *= breakupMask;
         detailPattern *= mix(0.94, 1.04, worldNoiseSample.r);
         detailPattern = mix(detailPattern, detailPattern * 1.05, shorelineBias * 0.16);
-        float visibilityFade = smoothstep(
-            water.foamFadeParams.x,
-            water.foamFadeParams.y,
-            historySignal);
-        float historyPresence = smoothstep(0.001, water.foamFadeParams.y * 1.5, historySignal);
-        foamSignal = saturate(detailPattern * visibilityFade * mix(0.72, 1.0, historyPresence)) * farFoamFade;
+        if (evaluateFoam && foamCoverage > water.foamFadeParams.x)
+        {
+            float visibilityFade = smoothstep(
+                water.foamFadeParams.x,
+                water.foamFadeParams.y,
+                historySignal);
+            float historyPresence = smoothstep(0.001, water.foamFadeParams.y * 1.5, historySignal);
+            foamSignal = saturate(detailPattern * visibilityFade * mix(0.72, 1.0, historyPresence)) * farFoamFade;
+        }
+        if (shorelineFoamBand > 0.0)
+        {
+            float shorelineDecayT = smoothstep(
+                water.shorelineFoamDecayParams.x,
+                water.shorelineFoamDecayParams.y,
+                fragLocalDepth);
+            vec2 shorelineRidgeRange = vec2(
+                mix(water.foamDetailRidges.z, water.foamDetailRidges.x, shorelineDecayT),
+                mix(water.foamDetailRidges.w, water.foamDetailRidges.y, shorelineDecayT));
+            float shorelinePattern = sampleFoamSdf(detailUv, shorelineRidgeRange);
+            float shorelineBreakupMask = mix(
+                1.0 - water.shorelineFoamParams.w,
+                1.0,
+                smoothstep(0.18, 0.82, breakupNoise));
+            float shorelineFoam = saturate(
+                shorelinePattern *
+                shorelineBreakupMask *
+                shorelineFoamBand *
+                mix(0.92, 1.08, worldNoiseSample.g));
+            foamSignal = max(foamSignal, shorelineFoam);
+        }
     }
 
     float farNormalT = smoothstep(
@@ -311,11 +393,17 @@ void main()
     vec3 fresnelReflection = fresnelSchlick(normalDotView, f0);
 
     float opticalDepth = clamp(fragLocalDepth, 0.0, 48.0);
-    float midDepthFactor = smoothstep(2.0, 12.0, opticalDepth);
-    float deepDepthFactor = smoothstep(10.0, 32.0, opticalDepth);
-    vec3 shallowColor = vec3(0.24, 0.58, 0.60);
-    vec3 midColor = vec3(0.08, 0.34, 0.44);
-    vec3 deepColor = vec3(0.012, 0.060, 0.115);
+    float midDepthFactor = smoothstep(
+        water.waterDepthColorParams.x,
+        water.waterDepthColorParams.y,
+        opticalDepth);
+    float deepDepthFactor = smoothstep(
+        water.waterDepthColorParams.z,
+        water.waterDepthColorParams.w,
+        opticalDepth);
+    vec3 shallowColor = water.shallowWaterColor.rgb;
+    vec3 midColor = water.midWaterColor.rgb;
+    vec3 deepColor = water.deepWaterColor.rgb;
     vec3 shoreColor = vec3(0.28, 0.58, 0.52);
     vec3 waterBodyColor = mix(shallowColor, midColor, midDepthFactor);
     waterBodyColor = mix(waterBodyColor, deepColor, deepDepthFactor);

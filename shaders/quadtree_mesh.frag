@@ -42,6 +42,23 @@ vec3 terrainAlbedo(float height)
     return mix(lowland, highland, normalizedHeight);
 }
 
+vec3 applyShorelineSand(vec3 albedo, float height)
+{
+    float waterHeight = terrain.waterCausticsParams.x;
+    float sandBand =
+        smoothstep(waterHeight - 10.0, waterHeight - 0.25, height) *
+        (1.0 - smoothstep(waterHeight + 6.0, waterHeight + 10.0, height));
+
+    vec3 drySand = vec3(0.78, 0.70, 0.52);
+    vec3 transitionSand = vec3(0.70, 0.63, 0.47);
+    vec3 wetSand = vec3(0.56, 0.50, 0.36);
+
+    float wetT = 1.0 - smoothstep(waterHeight - 3.0, waterHeight + 2.5, height);
+    vec3 dryToTransition = mix(transitionSand, drySand, smoothstep(waterHeight + 0.5, waterHeight + 5.0, height));
+    vec3 shorelineColor = mix(dryToTransition, wetSand, wetT);
+    return mix(albedo, shorelineColor, sandBand);
+}
+
 float cascadeWorldSize(uint cascadeIndex)
 {
     if (cascadeIndex < 4u)
@@ -119,7 +136,9 @@ void main()
 
     float diffuse = max(dot(normal, sunDirection), 0.0) * terrain.sunDirectionIntensity.w;
     vec3 ambient = terrain.sunColorAmbient.rgb * terrain.sunColorAmbient.a;
-    vec3 litColor = terrainAlbedo(worldPosition.y) * (ambient + (terrain.sunColorAmbient.rgb * diffuse));
+    vec3 albedo = terrainAlbedo(worldPosition.y);
+    albedo = applyShorelineSand(albedo, worldPosition.y);
+    vec3 litColor = albedo * (ambient + (terrain.sunColorAmbient.rgb * diffuse));
 
     if (terrain.waterCausticsParams.y > 0.5 &&
         fragAllowCaustics != 0u &&

@@ -12,6 +12,8 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 cascadeWorldSizesB;
     vec4 cascadeShallowDampingA;
     vec4 cascadeShallowDampingB;
+    vec4 cascadeShallowDepthA;
+    vec4 cascadeShallowDepthB;
     vec4 depthEffectParams;
     mat4 skyRotation;
     vec4 atmosphereParams;
@@ -30,6 +32,12 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 foamDetailBreakup;
     vec4 foamEvolutionParams;
     vec4 foamFadeParams;
+    vec4 shorelineFoamParams;
+    vec4 shorelineFoamDecayParams;
+    vec4 shallowWaterColor;
+    vec4 midWaterColor;
+    vec4 deepWaterColor;
+    vec4 waterDepthColorParams;
 } water;
 
 layout(set=0, binding=0) uniform sampler2DArray displacementTexture;
@@ -82,6 +90,23 @@ float cascadeShallowDamping(uint cascadeIndex)
     }
 
     return water.cascadeShallowDampingB[cascadeIndex - 4u];
+}
+
+float cascadeShallowDepth(uint cascadeIndex)
+{
+    if (cascadeIndex < 4u)
+    {
+        return water.cascadeShallowDepthA[cascadeIndex];
+    }
+
+    return water.cascadeShallowDepthB[cascadeIndex - 4u];
+}
+
+float cascadeShallowFade(uint cascadeIndex, float localDepth)
+{
+    float fadeStart = max(cascadeShallowDepth(cascadeIndex), water.depthEffectParams.y + 0.001);
+    float fadeEnd = max(water.depthEffectParams.y, 0.0);
+    return smoothstep(fadeEnd, fadeStart, localDepth);
 }
 
 float metersPerPixel(float viewDistance)
@@ -160,13 +185,9 @@ void main()
         localDepth = max(waterLevel - terrainHeight, 0.0);
     }
 
-    float shallowFade = 1.0;
     float shoreFactor = 0.0;
     if (hasTerrainSlice)
     {
-        float fadeStart = max(water.depthEffectParams.x, water.depthEffectParams.y + 0.001);
-        float fadeEnd = max(water.depthEffectParams.y, 0.0);
-        shallowFade = smoothstep(fadeEnd, fadeStart, localDepth);
         float shoreDepth = max(water.depthEffectParams.z, 0.001);
         shoreFactor = 1.0 - smoothstep(0.0, shoreDepth, localDepth);
     }
@@ -188,11 +209,22 @@ void main()
 
         vec2 uv = fract(worldXZ / worldSize);
         float dampingStrength = max(cascadeShallowDamping(cascadeIndex), 0.0);
+        float shallowFade = hasTerrainSlice ? cascadeShallowFade(cascadeIndex, localDepth) : 1.0;
         float cascadeFade = mix(1.0, shallowFade, clamp(dampingStrength, 0.0, 8.0));
         displacement += texture(displacementTexture, vec3(uv, float(cascadeIndex))).xyz * (cascadeFade * detailWeight);
     }
 
     position += displacement;
+
+    if (hasTerrainSlice)
+    {
+        float terrainHeight = sampleTerrainHeight(terrainSliceIndex, localMeters, leafSize);
+        float displacedWaterHeight = water.cameraAndTime.z + position.y;
+        localDepth = max(displacedWaterHeight - terrainHeight, 0.0);
+
+        float shoreDepth = max(water.depthEffectParams.z, 0.001);
+        shoreFactor = 1.0 - smoothstep(0.0, shoreDepth, localDepth);
+    }
 
     fragWorldPosition = position;
     fragBandMask = bandMask;

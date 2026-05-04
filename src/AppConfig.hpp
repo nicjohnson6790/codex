@@ -122,38 +122,38 @@ inline constexpr float kDefaultLowCutoff = 0.0001f;
 inline constexpr float kDefaultHighCutoff = 9000.0f;
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeWindDirectionsRadians{
-    1.0f,
-    2.0f,
+    4.0f,
+    3.5f,
     3.0f,
     4.0f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeAmplitudes{
-    0.4f,
-    0.85f,
-    0.55f,
-    0.5f,
+    0.25f,
+    0.05f,
+    0.05f,
+    0.35f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeWindSpeeds{
-    0.80f,
-    7.0f,
-    4.00f,
-    6.50f,
+    2.3f,
+    12.0f,
+    5.0f,
+    8.0f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeFetchMeters{
     100000.0f,
-    1000.0f,
+    10000.0f,
     100000.0f,
     1000000.0f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeSpreadBlend{
     0.642f,
-    0.0f,
-    0.14f,
-    0.47f,
+    0.96f,
+    0.70f,
+    0.82f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeSwell{
@@ -165,7 +165,7 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeSwell{
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadePeakEnhancement{
     1.7f,
-    1.4f,
+    2.1f,
     2.6f,
     1.3f,
 };
@@ -179,9 +179,9 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShortWav
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeChoppiness{
     3.30f,
-    7.85f,
-    1.95f,
-    1.4f,
+    1.30f,
+    1.90f,
+    0.70f,
 };
 
 inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowDampingStrength{
@@ -189,6 +189,13 @@ inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowD
     0.7f,
     0.8f,
     1.0f,
+};
+
+inline constexpr std::array<float, kDefaultCascadeCount> kDefaultCascadeShallowDampingDepthMeters{
+    6.0f,
+    12.0f,
+    18.0f,
+    24.0f,
 };
 
 inline constexpr std::array<std::uint32_t, kDefaultCascadeCount> kDefaultCascadeUpdateModulo{
@@ -204,6 +211,13 @@ inline constexpr float kMaxTerrainMinHeightAboveWaterToDraw = 50.0f;
 inline constexpr float kShallowDepthFadeStartMeters = 12.0f;
 inline constexpr float kShallowDepthFadeEndMeters = 2.0f;
 inline constexpr float kShorelineTintDepthMeters = 6.0f;
+inline constexpr glm::vec3 kShallowWaterColor{ 0.30f, 0.66f, 0.70f };
+inline constexpr glm::vec3 kMidWaterColor{ 0.11f, 0.40f, 0.52f };
+inline constexpr glm::vec3 kDeepWaterColor{ 0.012f, 0.060f, 0.115f };
+inline constexpr float kMidWaterDepthStartMeters = 3.0f;
+inline constexpr float kMidWaterDepthEndMeters = 18.0f;
+inline constexpr float kDeepWaterDepthStartMeters = 16.0f;
+inline constexpr float kDeepWaterDepthEndMeters = 42.0f;
 inline constexpr float kBaseReflectance = 0.02037f;
 inline constexpr float kBaseRoughness = 0.08f;
 inline constexpr float kSlopeRoughnessStrength = 0.18f;
@@ -263,6 +277,13 @@ inline constexpr float kDefaultFoamEvolutionEnd = 1.0f;
 inline constexpr float kDefaultFoamEvolutionDropoffEnd = 1.050f;
 inline constexpr float kDefaultFoamFadeStart = 0.005f;
 inline constexpr float kDefaultFoamFadeEnd = 0.070f;
+inline constexpr bool kDefaultShoreFoamEnabled = true;
+inline constexpr float kDefaultShoreFoamAmount = 0.65f;
+inline constexpr float kDefaultShoreFoamDepthStart = 0.15f;
+inline constexpr float kDefaultShoreFoamDepthEnd = 0.95f;
+inline constexpr float kDefaultShoreFoamBreakupStrength = 0.40f;
+inline constexpr float kDefaultShoreFoamDecayDepthStart = -0.25f;
+inline constexpr float kDefaultShoreFoamDecayDepthEnd = 0.80f;
 inline constexpr glm::vec3 kCrestFoamColor{ 0.92f, 0.97f, 1.0f };
 
 inline constexpr std::uint32_t kMeshVertexResolution = 129;

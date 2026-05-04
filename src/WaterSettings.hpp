@@ -8,10 +8,17 @@ inline WaterSettings makeDefaultWaterSettings()
     WaterSettings settings{};
     settings.enabled = AppConfig::Water::kEnabled;
     settings.showLodTint = false;
+    settings.shallowWaterColor = AppConfig::Water::kShallowWaterColor;
+    settings.midWaterColor = AppConfig::Water::kMidWaterColor;
+    settings.deepWaterColor = AppConfig::Water::kDeepWaterColor;
     settings.waterLevel = AppConfig::Water::kDefaultWaterLevel;
     settings.globalAmplitude = AppConfig::Water::kDefaultGlobalAmplitude;
     settings.globalChoppiness = AppConfig::Water::kDefaultGlobalChoppiness;
     settings.depthMeters = AppConfig::Water::kDefaultDepthMeters;
+    settings.midWaterDepthStart = AppConfig::Water::kMidWaterDepthStartMeters;
+    settings.midWaterDepthEnd = AppConfig::Water::kMidWaterDepthEndMeters;
+    settings.deepWaterDepthStart = AppConfig::Water::kDeepWaterDepthStartMeters;
+    settings.deepWaterDepthEnd = AppConfig::Water::kDeepWaterDepthEndMeters;
     settings.lowCutoff = AppConfig::Water::kDefaultLowCutoff;
     settings.highCutoff = AppConfig::Water::kDefaultHighCutoff;
     settings.crestFoamEnabled = AppConfig::Water::kDefaultCrestFoamEnabled;
@@ -38,6 +45,13 @@ inline WaterSettings makeDefaultWaterSettings()
     settings.foamEvolutionDropoffEnd = AppConfig::Water::kDefaultFoamEvolutionDropoffEnd;
     settings.foamFadeStart = AppConfig::Water::kDefaultFoamFadeStart;
     settings.foamFadeEnd = AppConfig::Water::kDefaultFoamFadeEnd;
+    settings.shoreFoamEnabled = AppConfig::Water::kDefaultShoreFoamEnabled;
+    settings.shoreFoamAmount = AppConfig::Water::kDefaultShoreFoamAmount;
+    settings.shoreFoamDepthStart = AppConfig::Water::kDefaultShoreFoamDepthStart;
+    settings.shoreFoamDepthEnd = AppConfig::Water::kDefaultShoreFoamDepthEnd;
+    settings.shoreFoamBreakupStrength = AppConfig::Water::kDefaultShoreFoamBreakupStrength;
+    settings.shoreFoamDecayDepthStart = AppConfig::Water::kDefaultShoreFoamDecayDepthStart;
+    settings.shoreFoamDecayDepthEnd = AppConfig::Water::kDefaultShoreFoamDecayDepthEnd;
     settings.causticsIntensity = AppConfig::Water::kDefaultCausticsIntensity;
     settings.causticsPatternScaleA = AppConfig::Water::kDefaultCausticsPatternScaleA;
     settings.causticsPatternScaleB = AppConfig::Water::kDefaultCausticsPatternScaleB;
@@ -68,6 +82,7 @@ inline WaterSettings makeDefaultWaterSettings()
         settings.cascades[i].shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[i];
         settings.cascades[i].choppiness = AppConfig::Water::kDefaultCascadeChoppiness[i];
         settings.cascades[i].shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[i];
+        settings.cascades[i].shallowDampingDepthMeters = AppConfig::Water::kDefaultCascadeShallowDampingDepthMeters[i];
         settings.cascades[i].updateModulo = AppConfig::Water::kDefaultCascadeUpdateModulo[i];
     }
 

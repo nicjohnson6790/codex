@@ -483,6 +483,7 @@ void AppPanels::drawWaterTab(Context& context)
             ImGui::InputFloat("Short waves fade", &cascade.shortWavesFade, 0.0001f, 0.0005f, "%.4f");
             ImGui::InputFloat("Choppiness", &cascade.choppiness, 0.05f, 0.25f, "%.2f");
             ImGui::InputFloat("Shallow damping", &cascade.shallowDampingStrength, 0.05f, 0.25f, "%.2f");
+            ImGui::InputFloat("Shallow depth (m)", &cascade.shallowDampingDepthMeters, 0.5f, 2.0f, "%.2f");
             int updateModulo = static_cast<int>(cascade.updateModulo);
             ImGui::SliderInt("Update modulo", &updateModulo, 1, 8);
             cascade.updateModulo = static_cast<std::uint32_t>(std::max(updateModulo, 1));
@@ -524,6 +525,17 @@ void AppPanels::drawWaterTab(Context& context)
         ImGui::InputFloat("Visibility fade end##FoamDetail", &settings.foamFadeEnd, 0.005f, 0.02f, "%.3f");
     }
 
+    if (ImGui::CollapsingHeader("Shore Foam", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Enabled##ShoreFoam", &settings.shoreFoamEnabled);
+        ImGui::InputFloat("Amount##ShoreFoam", &settings.shoreFoamAmount, 0.05f, 0.25f, "%.3f");
+        ImGui::InputFloat("Depth start##ShoreFoam", &settings.shoreFoamDepthStart, 0.05f, 0.25f, "%.3f");
+        ImGui::InputFloat("Depth end##ShoreFoam", &settings.shoreFoamDepthEnd, 0.10f, 0.50f, "%.3f");
+        ImGui::InputFloat("Decay depth start##ShoreFoam", &settings.shoreFoamDecayDepthStart, 0.05f, 0.25f, "%.3f");
+        ImGui::InputFloat("Decay depth end##ShoreFoam", &settings.shoreFoamDecayDepthEnd, 0.10f, 0.50f, "%.3f");
+        ImGui::InputFloat("Breakup strength##ShoreFoam", &settings.shoreFoamBreakupStrength, 0.05f, 0.25f, "%.3f");
+    }
+
     if (ImGui::CollapsingHeader("Terrain Caustics", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::InputFloat("Intensity", &settings.causticsIntensity, 0.01f, 0.05f, "%.3f");
@@ -540,6 +552,17 @@ void AppPanels::drawWaterTab(Context& context)
         ImGui::InputFloat("Focus min", &settings.causticsFocusMin, 0.01f, 0.05f, "%.3f");
         ImGui::InputFloat("Focus max", &settings.causticsFocusMax, 0.01f, 0.05f, "%.3f");
         ImGui::SliderFloat("Min surface up", &settings.causticsMinSurfaceUp, 0.0f, 1.0f, "%.2f");
+    }
+
+    if (ImGui::CollapsingHeader("Water Color", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::ColorEdit3("Shallow color", &settings.shallowWaterColor.x);
+        ImGui::ColorEdit3("Mid color", &settings.midWaterColor.x);
+        ImGui::ColorEdit3("Deep color", &settings.deepWaterColor.x);
+        ImGui::InputFloat("Mid depth start", &settings.midWaterDepthStart, 0.1f, 1.0f, "%.2f");
+        ImGui::InputFloat("Mid depth end", &settings.midWaterDepthEnd, 0.1f, 1.0f, "%.2f");
+        ImGui::InputFloat("Deep depth start", &settings.deepWaterDepthStart, 0.1f, 1.0f, "%.2f");
+        ImGui::InputFloat("Deep depth end", &settings.deepWaterDepthEnd, 0.1f, 1.0f, "%.2f");
     }
 
     ImGui::SeparatorText("Mesh");

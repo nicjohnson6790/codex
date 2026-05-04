@@ -136,7 +136,7 @@ void App::initialize()
     logStartup("create window");
     m_window = SDL_CreateWindow(
         "Terrain Sandbox",
-        1440,
+        1780,
         900,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
     );

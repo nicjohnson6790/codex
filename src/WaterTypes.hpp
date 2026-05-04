@@ -7,6 +7,8 @@
 #include <array>
 #include <cstdint>
 
+#include <glm/vec3.hpp>
+
 struct WaterCascadeSettings
 {
     float worldSizeMeters = static_cast<float>(AppConfig::Water::kDefaultCascadeSizesMeters[0]);
@@ -20,6 +22,7 @@ struct WaterCascadeSettings
     float shortWavesFade = AppConfig::Water::kDefaultCascadeShortWavesFade[0];
     float choppiness = AppConfig::Water::kDefaultCascadeChoppiness[0];
     float shallowDampingStrength = AppConfig::Water::kDefaultCascadeShallowDampingStrength[0];
+    float shallowDampingDepthMeters = AppConfig::Water::kDefaultCascadeShallowDampingDepthMeters[0];
     std::uint32_t updateModulo = 1;
 };
 
@@ -30,10 +33,18 @@ struct WaterSettings
     bool crestFoamEnabled = AppConfig::Water::kDefaultCrestFoamEnabled;
     bool drawFoam = AppConfig::Water::kDefaultDrawFoam;
     bool drawTerrainCaustics = AppConfig::Water::kDefaultDrawTerrainCaustics;
+    bool shoreFoamEnabled = AppConfig::Water::kDefaultShoreFoamEnabled;
+    glm::vec3 shallowWaterColor = AppConfig::Water::kShallowWaterColor;
+    glm::vec3 midWaterColor = AppConfig::Water::kMidWaterColor;
+    glm::vec3 deepWaterColor = AppConfig::Water::kDeepWaterColor;
     float waterLevel = AppConfig::Water::kDefaultWaterLevel;
     float globalAmplitude = AppConfig::Water::kDefaultGlobalAmplitude;
     float globalChoppiness = AppConfig::Water::kDefaultGlobalChoppiness;
     float depthMeters = AppConfig::Water::kDefaultDepthMeters;
+    float midWaterDepthStart = AppConfig::Water::kMidWaterDepthStartMeters;
+    float midWaterDepthEnd = AppConfig::Water::kMidWaterDepthEndMeters;
+    float deepWaterDepthStart = AppConfig::Water::kDeepWaterDepthStartMeters;
+    float deepWaterDepthEnd = AppConfig::Water::kDeepWaterDepthEndMeters;
     float lowCutoff = AppConfig::Water::kDefaultLowCutoff;
     float highCutoff = AppConfig::Water::kDefaultHighCutoff;
     float crestFoamAmount = AppConfig::Water::kDefaultCrestFoamAmount;
@@ -57,6 +68,12 @@ struct WaterSettings
     float foamEvolutionDropoffEnd = AppConfig::Water::kDefaultFoamEvolutionDropoffEnd;
     float foamFadeStart = AppConfig::Water::kDefaultFoamFadeStart;
     float foamFadeEnd = AppConfig::Water::kDefaultFoamFadeEnd;
+    float shoreFoamAmount = AppConfig::Water::kDefaultShoreFoamAmount;
+    float shoreFoamDepthStart = AppConfig::Water::kDefaultShoreFoamDepthStart;
+    float shoreFoamDepthEnd = AppConfig::Water::kDefaultShoreFoamDepthEnd;
+    float shoreFoamBreakupStrength = AppConfig::Water::kDefaultShoreFoamBreakupStrength;
+    float shoreFoamDecayDepthStart = AppConfig::Water::kDefaultShoreFoamDecayDepthStart;
+    float shoreFoamDecayDepthEnd = AppConfig::Water::kDefaultShoreFoamDecayDepthEnd;
     float causticsIntensity = AppConfig::Water::kDefaultCausticsIntensity;
     float causticsPatternScaleA = AppConfig::Water::kDefaultCausticsPatternScaleA;
     float causticsPatternScaleB = AppConfig::Water::kDefaultCausticsPatternScaleB;

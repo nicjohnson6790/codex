@@ -53,12 +53,12 @@ private:
     void drawDebugTab(Context& context);
     void drawViewportPane(Context& context);
 
-    Extent2D m_viewportPanelExtent{ 640, 480 };
+    Extent2D m_viewportPanelExtent{ 1280, 800 };
     bool m_dockLayoutInitialized = false;
     bool m_leftPaneCollapsed = false;
     bool m_viewportPaused = false;
     bool m_showViewportFpsCounter = true;
-    bool m_showQuadtreeBorders = true;
+    bool m_showQuadtreeBorders = false;
     bool m_layoutDirty = false;
     ImGuiID m_viewportDockId = 0;
     PerfPanel m_perfPanel;

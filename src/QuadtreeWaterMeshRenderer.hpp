@@ -32,6 +32,8 @@ public:
         glm::vec4 cascadeWorldSizesB{ 0.0f };
         glm::vec4 cascadeShallowDampingA{ 0.0f };
         glm::vec4 cascadeShallowDampingB{ 0.0f };
+        glm::vec4 cascadeShallowDepthA{ 0.0f };
+        glm::vec4 cascadeShallowDepthB{ 0.0f };
         glm::vec4 depthEffectParams{ 0.0f };
         glm::mat4 skyRotation{ 1.0f };
         glm::vec4 atmosphereParams{ 0.0f };
@@ -50,6 +52,12 @@ public:
         glm::vec4 foamDetailBreakup{ 0.0f };
         glm::vec4 foamEvolutionParams{ 0.0f };
         glm::vec4 foamFadeParams{ 0.0f };
+        glm::vec4 shorelineFoamParams{ 0.0f };
+        glm::vec4 shorelineFoamDecayParams{ 0.0f };
+        glm::vec4 shallowWaterColor{ 0.0f };
+        glm::vec4 midWaterColor{ 0.0f };
+        glm::vec4 deepWaterColor{ 0.0f };
+        glm::vec4 waterDepthColorParams{ 0.0f };
     };
 
     QuadtreeWaterMeshRenderer() = default;
