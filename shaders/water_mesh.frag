@@ -372,12 +372,15 @@ void main()
         water.cascadeFilterParams.w,
         fragViewDistance);
     float slopeMagnitude = length(slope);
-    float roughness = clamp(
+    float baseRoughness = clamp(
         water.opticalParams.y +
         (slopeMagnitude * water.opticalParams.z) +
         (farRoughnessT * water.farFieldParams.x),
         0.02,
         0.65);
+    float foamReflectivityFade = smoothstep(0.08, 0.55, foamSignal);
+    float foamRoughnessTarget = clamp(max(baseRoughness, water.farFieldParams.w), 0.02, 0.65);
+    float roughness = mix(baseRoughness, foamRoughnessTarget, foamReflectivityFade);
 
     vec3 detailNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
     vec3 normal = normalize(mix(detailNormal, vec3(0.0, 1.0, 0.0), farNormalT));
@@ -422,6 +425,7 @@ void main()
         (numerator / denominator) *
         water.sunColorAmbient.rgb *
         (water.sunDirectionIntensity.w * normalDotLight);
+    directSpecular *= mix(1.0, 0.30, foamReflectivityFade);
 
     vec3 reflectionNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), farReflectionFlattenT));
     vec3 reflectionDir = reflect(-viewDir, reflectionNormal);
@@ -431,6 +435,7 @@ void main()
         fresnelReflection *
         mix(1.35, 0.55, roughness) *
         mix(0.45, 1.0, pow(1.0 - normalDotView, 0.35));
+    environmentSpecular *= mix(1.0, 0.22, foamReflectivityFade);
 
     vec3 absorptionCoefficients = vec3(0.22, 0.09, 0.045) * water.debugParams.w;
     vec3 transmission = exp(-absorptionCoefficients * opticalDepth);
@@ -479,6 +484,7 @@ void main()
         environmentSpecular,
         reflectedSky,
         saturate(max(fresnelReflection.r, max(fresnelReflection.g, fresnelReflection.b)) * 0.65));
+    reflectionColor *= mix(1.0, 0.35, foamReflectivityFade);
     vec3 foamOverlay = vec3(0.0);
 
     if (drawFoam && foamSignal > 0.0)

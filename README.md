@@ -13,7 +13,15 @@ Water follows the same broad ownership split as terrain, but stays globally simu
 - `QuadtreeWaterMeshRenderer` owns the reusable water meshes, FFT compute resources, and water draw path
 - `SDLRenderer` orchestrates the terrain and water compute/render order each frame
 
-The current water path uses four shared FFT cascades at `512 x 512`, with one reusable interior water patch mesh plus reusable equal-LOD and `2:1` bridge meshes instanced across visible leaves. The simulation uses precomputed static spectrum data, SSBO-backed FFT working buffers, a shared-memory butterfly FFT pass, and final displacement/slope texture arrays sampled in world space by the water draw shaders. The water draw also reuses the resident terrain heightmap slices to estimate local water depth for shallow-water displacement damping, cascade-specific shallow-depth thresholds, depth-based transparency shaping, shoreline-aware transmission, and shoreline foam over the already rendered terrain. Water shading is now driven by a sky/atmosphere-aware PBR-style surface model that samples the same cubemap and atmosphere LUT used by the skybox pass, with aggressive distance-based filtering that sheds unresolved wave cascades, flattens far normals, increases effective roughness, and reduces far-field reflection distortion so distant water reads as broad surface tone instead of high-frequency noise. Crest foam is generated from wave compression and accumulated in a separate persistent foam history texture, while a second shoreline foam band is derived directly from local depth. Visible foam detail is built at draw time from two startup-generated procedural textures: a tileable cellular SDF and a tileable smooth-noise field. The smooth noise adds small world-space wobble to the foam-history and foam-detail lookups, and also breaks up the repeated SDF pattern with a separate overlay pass. The terrain fragment path also samples the shared water displacement and slope maps to drive underwater caustics on submerged terrain, using a startup-generated caustics SDF sampled twice on the terrain `XZ` plane instead of a heavy procedural triplanar pattern, and blends into a shoreline sand band with separate dry and wetted tones around the waterline. The background sky and water reflection atmosphere probes both treat the atmosphere as a deep participating medium instead of cutting off at `y = 0`.
+Rendering highlights:
+
+- Terrain is drawn as reusable quadtree patch meshes backed by GPU-generated heightmap slices, async min/max extent readback, and tree-based bridge stitching for equal-LOD and `2:1` seams.
+- Water uses four shared `512 x 512` FFT cascades, sampled globally in world space and instanced across visible quadtree leaves with matching interior, equal-LOD, and `2:1` bridge meshes.
+- The water draw reuses resident terrain heightmaps to estimate local depth for shallow-wave damping, per-cascade shallow-depth thresholds, transparency, shoreline transmission, and shoreline foam placement.
+- Water shading uses the same cubemap and atmosphere LUT as the skybox, with distance-based filtering that sheds unresolved cascades, simplifies far normals/reflections, and makes distant water cheaper and less noisy.
+- Crest foam comes from wave compression and persists in a dedicated history texture; both crest foam and shoreline foam are shaped at draw time from the same procedural cellular SDF and smooth-noise textures.
+- Submerged terrain samples the shared water displacement and slope fields for underwater caustics, while shoreline terrain blends into dry and wetted sand bands around the waterline.
+- Skybox and water reflection probes both treat the atmosphere as a deep participating medium instead of cutting off at `y = 0`.
 
 Core pieces:
 
@@ -95,6 +103,7 @@ The renderer then:
 - Per-cascade shallow-water damping strengths and shallow-depth thresholds so small and large wave bands can fade differently near shore
 - Depth-driven water surface transparency over already rendered terrain instead of a local shallow-refraction raymarch
 - Distance-based water cascade filtering and far-field BRDF flattening to keep distant water from turning into unresolved FFT/specular noise
+- Foam-aware water reflectivity, with visible foam raising roughness and damping specular/reflection response
 - Underwater terrain caustics from a startup-generated cell SDF sampled twice on the terrain `XZ` plane and warped by the shared FFT water displacement/slope field
 - Shoreline terrain sand band with separate dry and wetted tones above and below the waterline
 - Tiered water cascade selection by patch size:
@@ -122,7 +131,7 @@ The renderer then:
 - Terrain shading with a tunable global sun light plus underwater caustic lighting on submerged terrain
 - Automatic day/night progression with configurable day length and time factor
 - Built-in frame graph and CPU flame graph
-- Water tuning UI for level, amplitude, cutoffs, per-cascade parameters including wind direction, shallow-water damping strength and depth, water color ramps, far-water filtering, shoreline foam, terrain-height water culling, crest-foam controls, procedural foam-detail shaping, and terrain-caustics shaping
+- Water tuning UI for level, amplitude, cutoffs, per-cascade parameters including wind direction, shallow-water damping strength and depth, water color ramps, far-water filtering, shoreline foam, foam reflectivity shaping, terrain-height water culling, crest-foam controls, procedural foam-detail shaping, and terrain-caustics shaping
 
 ## Project Layout
 
@@ -251,10 +260,10 @@ Windows GPU preference:
 - Terrain and water both render trimmed interior base patches and add edge-specific bridge meshes where neighboring quadtree nodes would otherwise leave a crack.
 - Water visibility currently uses both expanded quadtree bounds and a terrain-height gate, so leaves that are clearly dry can skip water entirely while still allowing low terrain under the water plane to remain visible.
 - Water patch LOD also controls which shared wave cascades are sampled, so larger/farther quadtree patches shed the finest wave bands instead of always using all four maps.
-- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal now affects draw-time damping, per-cascade shallow-depth fade, water color/transmission, shoreline foam, and surface transparency, but it still does not feed back into the shared FFT simulation itself.
+- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal affects draw-time damping, per-cascade shallow-depth fade, water color/transmission, shoreline foam, and surface transparency, but it still does not feed back into the shared FFT simulation itself.
 - Submerged terrain shading samples the shared water displacement and slope maps to drive a startup-generated caustics SDF sampled twice on the terrain `XZ` plane, so the caustic motion evolves with the same FFT water field instead of using an unrelated scrolling overlay.
 - Crest foam is generated during the map-build pass from horizontal-displacement compression, then accumulated with decay in a separate foam history texture rather than being packed into displacement alpha.
-- Visible foam is a second-stage shading pass over that history: a startup-generated cellular SDF provides the bubble structure, while a startup-generated smooth-noise texture adds world-space wobble to the history/detail lookups and a separate breakup overlay to reduce visible repetition. The same detail textures are also reused to shape resident shoreline foam from local depth.
+- Visible foam is a second-stage shading pass over that history: a startup-generated cellular SDF provides the bubble structure, while a startup-generated smooth-noise texture adds world-space wobble to the history/detail lookups and a separate breakup overlay to reduce visible repetition. The same detail textures are also reused to shape resident shoreline foam, and visible foam reduces water reflectivity by raising roughness and damping specular/reflection response.
 - Far-water shading intentionally gets cheaper as distance increases: unresolved displacement, slope, and foam-history cascades are skipped, foam fades out, and the shading normal/roughness response is filtered toward a broad far-field water surface.
 - The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction. Both the skybox path and the water reflection probe treat the atmosphere as a deep medium rather than intersecting a hard `y = 0` ground plane.
 - Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.

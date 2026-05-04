@@ -1578,7 +1578,7 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
         AppConfig::Water::kFarRoughnessBoost,
         AppConfig::Water::kFarReflectionFlattenStartMeters,
         AppConfig::Water::kFarReflectionFlattenEndMeters,
-        0.0f);
+        AppConfig::Water::kFoamRoughness);
     uniforms.foamLodParams = glm::vec4(
         AppConfig::Water::kFarFoamFadeStartMeters,
         AppConfig::Water::kFarFoamFadeEndMeters,

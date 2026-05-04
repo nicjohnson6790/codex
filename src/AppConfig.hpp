@@ -234,6 +234,7 @@ inline constexpr float kFarNormalFadeEndMeters = 7000.0f;
 inline constexpr float kFarRoughnessFadeStartMeters = 1200.0f;
 inline constexpr float kFarRoughnessFadeEndMeters = 6000.0f;
 inline constexpr float kFarRoughnessBoost = 0.22f;
+inline constexpr float kFoamRoughness = 0.58f;
 inline constexpr float kFarReflectionFlattenStartMeters = 3000.0f;
 inline constexpr float kFarReflectionFlattenEndMeters = 10000.0f;
 inline constexpr float kFarFoamFadeStartMeters = 1800.0f;
