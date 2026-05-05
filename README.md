@@ -1,5 +1,7 @@
 # SDL3 GPU + ImGui Terrain Sandbox
 
+![rendered screenshot](images/screenshot.png)
+
 This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, and shared-cascade FFT water.
 
 ## Overview
