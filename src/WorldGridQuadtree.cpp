@@ -66,68 +66,46 @@ bool shouldDrawNodeFrustum(
 
     const glm::dvec3 minCorner = minCornerPosition.localCoordinatesInCellOf(activeCamera.position);
     const glm::dvec3 maxCorner = maxCornerPosition.localCoordinatesInCellOf(activeCamera.position);
-
-    const glm::dvec3 corners[8]{
-        { minCorner.x, minCorner.y, minCorner.z },
-        { maxCorner.x, minCorner.y, minCorner.z },
-        { minCorner.x, maxCorner.y, minCorner.z },
-        { maxCorner.x, maxCorner.y, minCorner.z },
-        { minCorner.x, minCorner.y, maxCorner.z },
-        { maxCorner.x, minCorner.y, maxCorner.z },
-        { minCorner.x, maxCorner.y, maxCorner.z },
-        { maxCorner.x, maxCorner.y, maxCorner.z },
-    };
+    const glm::dvec3 center = (minCorner + maxCorner) * 0.5;
+    const glm::dvec3 extents = (maxCorner - minCorner) * 0.5;
 
     const double aspectRatio =
         static_cast<double>(std::max(viewportExtent.width, 1u)) /
         static_cast<double>(std::max(viewportExtent.height, 1u));
     const double tanHalfVerticalFov = std::tan(AppConfig::Camera::kVerticalFovRadians * 0.5);
     const double tanHalfHorizontalFov = tanHalfVerticalFov * aspectRatio;
-
-    bool anyInFrontOfNearPlane = false;
-    bool allLeftOfFrustum = true;
-    bool allRightOfFrustum = true;
-    bool allBelowFrustum = true;
-    bool allAboveFrustum = true;
-
-    for (const glm::dvec3& corner : corners)
+    const auto boxIsOutsidePlane = [&center, &extents](const glm::dvec3& planeNormal, double planeOffset)
     {
-        const double localX = glm::dot(corner, right);
-        const double localY = glm::dot(corner, up);
-        const double localZ = glm::dot(corner, forward);
+        const double projectedRadius =
+            std::abs(planeNormal.x) * extents.x +
+            std::abs(planeNormal.y) * extents.y +
+            std::abs(planeNormal.z) * extents.z;
+        const double signedDistance = glm::dot(planeNormal, center) + planeOffset;
+        return (signedDistance + projectedRadius) < 0.0;
+    };
 
-        if (localZ >= AppConfig::Camera::kNearPlane)
-        {
-            anyInFrontOfNearPlane = true;
-        }
-
-        const double horizontalLimit = localZ * tanHalfHorizontalFov;
-        const double verticalLimit = localZ * tanHalfVerticalFov;
-
-        if (localX >= -horizontalLimit)
-        {
-            allLeftOfFrustum = false;
-        }
-        if (localX <= horizontalLimit)
-        {
-            allRightOfFrustum = false;
-        }
-        if (localY >= -verticalLimit)
-        {
-            allBelowFrustum = false;
-        }
-        if (localY <= verticalLimit)
-        {
-            allAboveFrustum = false;
-        }
+    if (boxIsOutsidePlane(forward, -AppConfig::Camera::kNearPlane))
+    {
+        return false;
+    }
+    if (boxIsOutsidePlane(right + (forward * tanHalfHorizontalFov), 0.0))
+    {
+        return false;
+    }
+    if (boxIsOutsidePlane((-right) + (forward * tanHalfHorizontalFov), 0.0))
+    {
+        return false;
+    }
+    if (boxIsOutsidePlane(up + (forward * tanHalfVerticalFov), 0.0))
+    {
+        return false;
+    }
+    if (boxIsOutsidePlane((-up) + (forward * tanHalfVerticalFov), 0.0))
+    {
+        return false;
     }
 
-    return
-        anyInFrontOfNearPlane &&
-        !allLeftOfFrustum &&
-        !allRightOfFrustum &&
-        !allBelowFrustum &&
-        !allAboveFrustum;
+    return true;
 }
 
 bool quadtreeNodeHasFlag(const QuadtreeNode& node, std::uint16_t mask)
@@ -199,11 +177,6 @@ bool nodeIsParentOfLeaves(
 
 bool nodeUsesCanonicalFoliagePages(const QuadtreeNode& node)
 {
-    if (!quadtreeNodeHasFlag(node, QuadtreeNode::IsLeafMask))
-    {
-        return false;
-    }
-
     const double nodeSize = worldGridQuadtreeLeafSize(node.nodeId);
     return
         nodeSize >= static_cast<double>(FoliageConfig::kPageSizeMeters) &&
@@ -965,8 +938,6 @@ void WorldGridQuadtree::updateNodeFoliageState(QuadtreeNode& node, WorldGridFoli
 {
     if (foliageManager == nullptr ||
         !nodeHasFlag(node, QuadtreeNode::ShouldDrawMask) ||
-        nodeHasFlag(node, QuadtreeNode::IsSubdividingMask) ||
-        nodeHasFlag(node, QuadtreeNode::IsCollapsingMask) ||
         !nodeHasResidentTerrainSurface(node) ||
         !nodeUsesCanonicalFoliagePages(node))
     {
@@ -1220,6 +1191,8 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
             setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
             setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
+            setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, false);
+            setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
             updateNodeFoliageState(node, m_activeFoliageManager);
             return;
         }
@@ -1243,6 +1216,8 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
             setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
             setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
+            setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, false);
+            setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
             updateNodeFoliageState(node, m_activeFoliageManager);
             return;
         }
@@ -1255,9 +1230,27 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         }
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
 
-        const bool isSubdividing = !allChildrenReady;
+        bool isSubdividing = !allChildrenReady;
+        if (!isSubdividing && wasSubdividing)
+        {
+            const bool handoffArmed = nodeHasFlag(node, QuadtreeNode::SubdivisionHandoffMask);
+            if (!handoffArmed)
+            {
+                isSubdividing = true;
+                setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, true);
+            }
+            else
+            {
+                setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, false);
+            }
+        }
+        else if (isSubdividing)
+        {
+            setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, false);
+        }
         setNodeFlag(node, QuadtreeNode::IsSubdividingMask, isSubdividing);
         setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
+        setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
         if (isSubdividing && !wasSubdividing)
         {
             ++treeData.subdivisionCountThisFrame;
@@ -1276,6 +1269,8 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
         setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
         setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
+        setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, false);
+        setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
         updateNodeFoliageState(node, m_activeFoliageManager);
         return;
     }
@@ -1293,6 +1288,8 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
         setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
         setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
+        setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, false);
+        setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
         updateNodeFoliageState(node, m_activeFoliageManager);
         return;
     }
@@ -1305,10 +1302,32 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     }
     setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
     setNodeFlag(node, QuadtreeNode::IsSubdividingMask, false);
-    // While collapsing, the children remain drawable until the parent slice is resident again.
-    setNodeFlag(node, QuadtreeNode::IsCollapsingMask, !resident);
+    setNodeFlag(node, QuadtreeNode::SubdivisionHandoffMask, false);
 
-    if (resident)
+    bool keepChildrenAsFallback = !resident;
+    if (resident && wasCollapsing)
+    {
+        const bool handoffArmed = nodeHasFlag(node, QuadtreeNode::CollapseHandoffMask);
+        if (!handoffArmed)
+        {
+            keepChildrenAsFallback = true;
+            setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, true);
+        }
+        else
+        {
+            setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
+        }
+    }
+    else if (!resident)
+    {
+        setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
+    }
+
+    // While collapsing, the children remain drawable until the parent slice is resident,
+    // then stay alive for one extra frame so ownership does not switch on the exact handoff frame.
+    setNodeFlag(node, QuadtreeNode::IsCollapsingMask, keepChildrenAsFallback);
+
+    if (resident && !keepChildrenAsFallback)
     {
         for (std::uint16_t& childIndex : node.children)
         {

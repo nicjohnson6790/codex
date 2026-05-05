@@ -45,6 +45,8 @@ struct QuadtreeNode
     static constexpr std::uint16_t HasExtentsMask = 64;
     static constexpr std::uint16_t FoliageUploadPendingMask = 128;
     static constexpr std::uint16_t FoliageShouldDrawMask = 256;
+    static constexpr std::uint16_t SubdivisionHandoffMask = 512;
+    static constexpr std::uint16_t CollapseHandoffMask = 1024;
 };
 
 class WorldGridQuadtree
