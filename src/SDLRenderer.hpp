@@ -13,6 +13,7 @@
 
 class LightingSystem;
 class LineRenderer;
+class FoliageImposterRenderer;
 class QuadtreeMeshRenderer;
 class QuadtreeWaterMeshRenderer;
 class SkyboxRenderer;
@@ -39,12 +40,14 @@ public:
         const Position& cameraPosition,
         TriangleRenderer& triangleRenderer,
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
+        FoliageImposterRenderer& foliageRenderer,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer);
     void setViewportSize(Extent2D extent);
     void renderFrame(
         TriangleRenderer& triangleRenderer,
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
+        FoliageImposterRenderer& foliageRenderer,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer,
         SkyboxRenderer& skyboxRenderer,

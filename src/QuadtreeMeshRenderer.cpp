@@ -6,6 +6,7 @@
 #include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cmath>
 #include <cstring>
@@ -28,6 +29,8 @@ constexpr std::size_t kHeightmapExtentsCount = AppConfig::Terrain::kHeightmapSli
 constexpr std::uint32_t kHeightmapComputeThreadCountX = 16;
 constexpr std::uint32_t kHeightmapComputeThreadCountY = 16;
 constexpr std::uint32_t kHeightmapComputeThreadCountZ = 1;
+constexpr std::uint32_t kFoliageInstanceComputeThreadCountX = 8;
+constexpr std::uint32_t kFoliageInstanceComputeThreadCountY = 8;
 constexpr std::int32_t kInitialMinHeightCentimeters = std::numeric_limits<std::int32_t>::max();
 constexpr std::int32_t kInitialMaxHeightCentimeters = std::numeric_limits<std::int32_t>::lowest();
 constexpr std::uint32_t kBridgeOuterVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount + 1;
@@ -209,6 +212,32 @@ GeneratedImage buildCausticsTexture(bool streaks)
 
     return image;
 }
+
+std::uint64_t mixLeafHash64(std::uint64_t x)
+{
+    x ^= x >> 30U;
+    x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27U;
+    x *= 0x94d049bb133111ebULL;
+    x ^= x >> 31U;
+    return x;
+}
+
+std::uint64_t hashLeafId(const WorldGridQuadtreeLeafId& leafId)
+{
+    const std::uint64_t word0 = std::bit_cast<std::uint64_t>(leafId.gridX);
+    const std::uint64_t word1 = std::bit_cast<std::uint64_t>(leafId.gridY);
+    const std::uint64_t word2 = leafId.subdivisionPath;
+
+    std::uint64_t hash = 0x9e3779b97f4a7c15ULL;
+    hash ^= mixLeafHash64(word0 + 0x9e3779b97f4a7c15ULL);
+    hash = mixLeafHash64(hash);
+    hash ^= mixLeafHash64(word1 + 0xbf58476d1ce4e5b9ULL);
+    hash = mixLeafHash64(hash);
+    hash ^= mixLeafHash64(word2 + 0x94d049bb133111ebULL);
+    hash = mixLeafHash64(hash);
+    return hash;
+}
 }
 
 void QuadtreeMeshRenderer::initialize(
@@ -224,6 +253,7 @@ void QuadtreeMeshRenderer::initialize(
     createCausticsSampler();
     createPipelines(shaderDirectory);
     createHeightmapComputePipeline(shaderDirectory);
+    createFoliageInstanceComputePipeline(shaderDirectory);
 
     SDL_GPUBufferCreateInfo instanceInfo{};
     instanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
@@ -357,18 +387,84 @@ void QuadtreeMeshRenderer::initialize(
             throwSdlError("Failed to create quadtree mesh extents download transfer buffer.");
         }
     }
+
+    SDL_GPUBufferCreateInfo foliageInstanceGenerationInfo{};
+    foliageInstanceGenerationInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    foliageInstanceGenerationInfo.size = static_cast<Uint32>(
+        sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerations.size());
+    m_foliageInstanceGenerationBuffer = SDL_CreateGPUBuffer(m_device, &foliageInstanceGenerationInfo);
+    if (m_foliageInstanceGenerationBuffer == nullptr)
+    {
+        throwSdlError("Failed to create foliage instance generation buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo foliageInstanceGenerationTransferInfo{};
+    foliageInstanceGenerationTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    foliageInstanceGenerationTransferInfo.size = foliageInstanceGenerationInfo.size;
+    m_foliageInstanceGenerationTransferBuffer =
+        SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceGenerationTransferInfo);
+    if (m_foliageInstanceGenerationTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create foliage instance generation transfer buffer.");
+    }
+
+    SDL_GPUBufferCreateInfo foliageInstanceLiveCountInfo{};
+    foliageInstanceLiveCountInfo.usage =
+        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    foliageInstanceLiveCountInfo.size = static_cast<Uint32>(
+        sizeof(std::uint32_t) * m_pendingFoliageInstanceGenerations.size());
+    m_foliageInstanceLiveCountBuffer = SDL_CreateGPUBuffer(m_device, &foliageInstanceLiveCountInfo);
+    if (m_foliageInstanceLiveCountBuffer == nullptr)
+    {
+        throwSdlError("Failed to create foliage instance live-count buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo foliageInstanceLiveCountInitTransferInfo{};
+    foliageInstanceLiveCountInitTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    foliageInstanceLiveCountInitTransferInfo.size = foliageInstanceLiveCountInfo.size;
+    m_foliageInstanceLiveCountInitTransferBuffer =
+        SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceLiveCountInitTransferInfo);
+    if (m_foliageInstanceLiveCountInitTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create foliage instance live-count init transfer buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo foliageInstanceLiveCountDownloadInfo{};
+    foliageInstanceLiveCountDownloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+    foliageInstanceLiveCountDownloadInfo.size = foliageInstanceLiveCountInfo.size;
+    for (PendingFoliageLiveCountReadback& readback : m_pendingFoliageLiveCountReadbacks)
+    {
+        readback.transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceLiveCountDownloadInfo);
+        if (readback.transferBuffer == nullptr)
+        {
+            throwSdlError("Failed to create foliage instance live-count download transfer buffer.");
+        }
+    }
 }
 
 void QuadtreeMeshRenderer::shutdown()
 {
+    for (PendingFoliageLiveCountReadback& readback : m_pendingFoliageLiveCountReadbacks)
+    {
+        if (readback.fence != nullptr)
+        {
+            readback.fence.reset();
+        }
+        if (readback.transferBuffer != nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, readback.transferBuffer);
+            readback.transferBuffer = nullptr;
+        }
+        readback.count = 0;
+    }
     destroyCausticsSampler();
     destroyCausticsTextures();
     for (PendingExtentsReadback& readback : m_pendingExtentsReadbacks)
     {
         if (readback.fence != nullptr)
         {
-            SDL_ReleaseGPUFence(m_device, readback.fence);
-            readback.fence = nullptr;
+            readback.fence.reset();
         }
         if (readback.transferBuffer != nullptr)
         {
@@ -392,10 +488,35 @@ void QuadtreeMeshRenderer::shutdown()
         SDL_ReleaseGPUTransferBuffer(m_device, m_heightmapGenerationTransferBuffer);
         m_heightmapGenerationTransferBuffer = nullptr;
     }
+    if (m_foliageInstanceGenerationTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_foliageInstanceGenerationTransferBuffer);
+        m_foliageInstanceGenerationTransferBuffer = nullptr;
+    }
+    if (m_foliageInstanceLiveCountInitTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_foliageInstanceLiveCountInitTransferBuffer);
+        m_foliageInstanceLiveCountInitTransferBuffer = nullptr;
+    }
     if (m_heightmapGenerationBuffer != nullptr)
     {
         SDL_ReleaseGPUBuffer(m_device, m_heightmapGenerationBuffer);
         m_heightmapGenerationBuffer = nullptr;
+    }
+    if (m_foliageInstanceGenerationBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_foliageInstanceGenerationBuffer);
+        m_foliageInstanceGenerationBuffer = nullptr;
+    }
+    if (m_foliageInstanceLiveCountBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_foliageInstanceLiveCountBuffer);
+        m_foliageInstanceLiveCountBuffer = nullptr;
+    }
+    if (m_foliageInstanceComputePipeline != nullptr)
+    {
+        SDL_ReleaseGPUComputePipeline(m_device, m_foliageInstanceComputePipeline);
+        m_foliageInstanceComputePipeline = nullptr;
     }
     if (m_heightmapComputePipeline != nullptr)
     {
@@ -851,7 +972,10 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::DispatchHeightmapGenerations");
 
-    m_lastDispatchedGenerationCount = 0;
+    if (m_lastDispatchedGenerationCount != 0)
+    {
+        return;
+    }
     if (m_pendingHeightmapGenerationCount == 0)
     {
         return;
@@ -933,23 +1057,208 @@ void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPa
         break;
     }
 
-    m_lastDispatchedGenerationCount = 0;
+    if (m_pendingFenceReadbackSlot != UINT16_MAX)
+    {
+        m_lastDispatchedGenerationCount = 0;
+    }
 }
 
-void QuadtreeMeshRenderer::attachSubmittedFence(SDL_GPUFence* fence)
+bool QuadtreeMeshRenderer::queueFoliagePageGeneration(
+    const WorldGridQuadtreeLeafId& foliageLeafId,
+    const WorldGridQuadtreeLeafId& terrainLeafId,
+    std::uint16_t terrainSliceIndex,
+    std::uint16_t pageIndex,
+    float waterLevel)
 {
-    if (m_pendingFenceReadbackSlot == UINT16_MAX)
+    if (m_pendingFoliageInstanceGenerationCount >= m_pendingFoliageInstanceGenerations.size())
     {
-        if (fence != nullptr)
-        {
-            SDL_ReleaseGPUFence(m_device, fence);
-        }
+        return false;
+    }
+
+    const auto [foliageMinCorner, foliageMaxCorner] = worldGridQuadtreeLeafBounds(foliageLeafId);
+    const auto [terrainMinCorner, terrainMaxCorner] = worldGridQuadtreeLeafBounds(terrainLeafId);
+    const double terrainLeafSizeMeters = terrainMaxCorner.worldPosition().x - terrainMinCorner.worldPosition().x;
+    const double foliageOffsetXMeters = foliageMinCorner.worldPosition().x - terrainMinCorner.worldPosition().x;
+    const double foliageOffsetZMeters = foliageMinCorner.worldPosition().z - terrainMinCorner.worldPosition().z;
+
+    const std::uint16_t generationIndex = m_pendingFoliageInstanceGenerationCount++;
+    m_pendingFoliageInstanceLeafIds[generationIndex] = foliageLeafId;
+    m_pendingFoliageInstanceGenerations[generationIndex] = {
+        .dispatchParams = glm::uvec4(
+            pageIndex,
+            terrainSliceIndex,
+            static_cast<std::uint32_t>(hashLeafId(foliageLeafId)),
+            0u),
+        .terrainParams = glm::vec4(
+            static_cast<float>(terrainLeafSizeMeters),
+            static_cast<float>(foliageOffsetXMeters),
+            static_cast<float>(foliageOffsetZMeters),
+            waterLevel),
+        .worldParams = glm::vec4(
+            static_cast<float>(foliageMinCorner.worldPosition().x),
+            static_cast<float>(foliageMinCorner.worldPosition().z),
+            0.0f,
+            0.0f),
+    };
+    return true;
+}
+
+void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(
+    SDL_GPUCommandBuffer* commandBuffer,
+    SDL_GPUBuffer* foliagePagePoolBuffer)
+{
+    HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::DispatchFoliageInstanceGenerations");
+
+    if (foliagePagePoolBuffer == nullptr ||
+        m_lastDispatchedFoliageInstanceGenerationCount != 0 ||
+        m_pendingFoliageInstanceGenerationCount == 0)
+    {
         return;
     }
 
-    PendingExtentsReadback& readback = m_pendingExtentsReadbacks[m_pendingFenceReadbackSlot];
-    readback.fence = fence;
-    m_pendingFenceReadbackSlot = UINT16_MAX;
+    void* mappedGenerationUniforms = SDL_MapGPUTransferBuffer(m_device, m_foliageInstanceGenerationTransferBuffer, true);
+    std::memcpy(
+        mappedGenerationUniforms,
+        m_pendingFoliageInstanceGenerations.data(),
+        sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerationCount);
+    SDL_UnmapGPUTransferBuffer(m_device, m_foliageInstanceGenerationTransferBuffer);
+
+    const std::array<std::uint32_t, FoliageConfig::kGenerationBudgetPerFrame> zeroCounts{};
+    void* mappedLiveCountInit = SDL_MapGPUTransferBuffer(m_device, m_foliageInstanceLiveCountInitTransferBuffer, true);
+    std::memcpy(mappedLiveCountInit, zeroCounts.data(), sizeof(zeroCounts));
+    SDL_UnmapGPUTransferBuffer(m_device, m_foliageInstanceLiveCountInitTransferBuffer);
+
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    if (copyPass == nullptr)
+    {
+        throwSdlError("Failed to begin foliage instance-generation upload copy pass.");
+    }
+
+    SDL_GPUTransferBufferLocation generationSource{};
+    generationSource.transfer_buffer = m_foliageInstanceGenerationTransferBuffer;
+    SDL_GPUBufferRegion generationDestination{};
+    generationDestination.buffer = m_foliageInstanceGenerationBuffer;
+    generationDestination.size = static_cast<Uint32>(
+        sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerationCount);
+    SDL_UploadToGPUBuffer(copyPass, &generationSource, &generationDestination, false);
+
+    SDL_GPUTransferBufferLocation liveCountInitSource{};
+    liveCountInitSource.transfer_buffer = m_foliageInstanceLiveCountInitTransferBuffer;
+    SDL_GPUBufferRegion liveCountInitDestination{};
+    liveCountInitDestination.buffer = m_foliageInstanceLiveCountBuffer;
+    liveCountInitDestination.size = static_cast<Uint32>(sizeof(std::uint32_t) * m_pendingFoliageInstanceGenerationCount);
+    SDL_UploadToGPUBuffer(copyPass, &liveCountInitSource, &liveCountInitDestination, false);
+    SDL_EndGPUCopyPass(copyPass);
+
+    SDL_GPUStorageBufferReadWriteBinding storageBindings[2]{};
+    storageBindings[0].buffer = foliagePagePoolBuffer;
+    storageBindings[0].cycle = false;
+    storageBindings[1].buffer = m_foliageInstanceLiveCountBuffer;
+    storageBindings[1].cycle = false;
+
+    SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, nullptr, 0, storageBindings, 2);
+    if (computePass == nullptr)
+    {
+        throwSdlError("Failed to begin foliage instance-generation compute pass.");
+    }
+
+    SDL_BindGPUComputePipeline(computePass, m_foliageInstanceComputePipeline);
+    SDL_GPUBuffer* readonlyStorageBuffers[]{
+        m_foliageInstanceGenerationBuffer,
+        m_heightmapBuffer,
+    };
+    SDL_BindGPUComputeStorageBuffers(computePass, 0, readonlyStorageBuffers, 2);
+
+    for (std::uint16_t index = 0; index < m_pendingFoliageInstanceGenerationCount; ++index)
+    {
+        m_lastDispatchedFoliageInstanceLeafIds[index] = m_pendingFoliageInstanceLeafIds[index];
+    }
+
+    const std::uint32_t groupCountX =
+        (FoliageConfig::kCandidateGridResolution + kFoliageInstanceComputeThreadCountX - 1u) /
+        kFoliageInstanceComputeThreadCountX;
+    const std::uint32_t groupCountY =
+        (FoliageConfig::kCandidateGridResolution + kFoliageInstanceComputeThreadCountY - 1u) /
+        kFoliageInstanceComputeThreadCountY;
+    SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, m_pendingFoliageInstanceGenerationCount);
+    SDL_EndGPUComputePass(computePass);
+
+    m_lastDispatchedFoliageInstanceGenerationCount = m_pendingFoliageInstanceGenerationCount;
+    m_pendingFoliageInstanceGenerationCount = 0;
+}
+
+void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass* copyPass)
+{
+    HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::QueueFoliageInstanceLiveCountDownloads");
+
+    m_pendingFoliageLiveCountFenceReadbackSlot = UINT16_MAX;
+    if (m_lastDispatchedFoliageInstanceGenerationCount == 0)
+    {
+        return;
+    }
+
+    for (std::size_t offset = 0; offset < m_pendingFoliageLiveCountReadbacks.size(); ++offset)
+    {
+        const std::size_t slotIndex =
+            (m_nextFoliageLiveCountReadbackSlot + offset) % m_pendingFoliageLiveCountReadbacks.size();
+        PendingFoliageLiveCountReadback& readback = m_pendingFoliageLiveCountReadbacks[slotIndex];
+        if (readback.fence != nullptr)
+        {
+            continue;
+        }
+
+        SDL_GPUBufferRegion source{};
+        source.buffer = m_foliageInstanceLiveCountBuffer;
+        source.offset = 0;
+        source.size = static_cast<Uint32>(sizeof(std::uint32_t) * m_pendingFoliageInstanceGenerations.size());
+
+        SDL_GPUTransferBufferLocation destination{};
+        destination.transfer_buffer = readback.transferBuffer;
+        destination.offset = 0;
+        SDL_DownloadFromGPUBuffer(copyPass, &source, &destination);
+
+        readback.count = m_lastDispatchedFoliageInstanceGenerationCount;
+        for (std::uint16_t index = 0; index < readback.count; ++index)
+        {
+            readback.leafIds[index] = m_lastDispatchedFoliageInstanceLeafIds[index];
+        }
+
+        m_pendingFoliageLiveCountFenceReadbackSlot = static_cast<std::uint16_t>(slotIndex);
+        m_nextFoliageLiveCountReadbackSlot =
+            static_cast<std::uint16_t>((slotIndex + 1u) % m_pendingFoliageLiveCountReadbacks.size());
+        break;
+    }
+
+    if (m_pendingFoliageLiveCountFenceReadbackSlot != UINT16_MAX)
+    {
+        m_lastDispatchedFoliageInstanceGenerationCount = 0;
+    }
+}
+
+void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence>& fence)
+{
+    if (m_pendingFenceReadbackSlot == UINT16_MAX)
+    {
+        if (m_pendingFoliageLiveCountFenceReadbackSlot == UINT16_MAX)
+        {
+            return;
+        }
+    }
+
+    if (m_pendingFenceReadbackSlot != UINT16_MAX)
+    {
+        PendingExtentsReadback& readback = m_pendingExtentsReadbacks[m_pendingFenceReadbackSlot];
+        readback.fence = fence;
+        m_pendingFenceReadbackSlot = UINT16_MAX;
+    }
+
+    if (m_pendingFoliageLiveCountFenceReadbackSlot != UINT16_MAX)
+    {
+        PendingFoliageLiveCountReadback& readback =
+            m_pendingFoliageLiveCountReadbacks[m_pendingFoliageLiveCountFenceReadbackSlot];
+        readback.fence = fence;
+        m_pendingFoliageLiveCountFenceReadbackSlot = UINT16_MAX;
+    }
 }
 
 void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents)
@@ -958,7 +1267,7 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<Generate
 
     for (PendingExtentsReadback& readback : m_pendingExtentsReadbacks)
     {
-        if (readback.fence == nullptr || !SDL_QueryGPUFence(m_device, readback.fence))
+        if (!readback.fence || !readback.fence->isSignaled())
         {
             continue;
         }
@@ -979,8 +1288,37 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<Generate
             });
         }
         SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
-        SDL_ReleaseGPUFence(m_device, readback.fence);
-        readback.fence = nullptr;
+        readback.fence.reset();
+        readback.count = 0;
+    }
+}
+
+void QuadtreeMeshRenderer::collectCompletedFoliagePageLiveCounts(
+    std::vector<GeneratedFoliagePageLiveCount>& completedLiveCounts)
+{
+    HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::CollectCompletedFoliagePageLiveCounts");
+
+    for (PendingFoliageLiveCountReadback& readback : m_pendingFoliageLiveCountReadbacks)
+    {
+        if (!readback.fence || !readback.fence->isSignaled())
+        {
+            continue;
+        }
+
+        const std::uint32_t* mappedCounts = static_cast<const std::uint32_t*>(
+            SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
+        for (std::uint16_t index = 0; index < readback.count; ++index)
+        {
+            completedLiveCounts.push_back({
+                .leafId = readback.leafIds[index],
+                .liveCount = static_cast<std::uint16_t>(std::min<std::uint32_t>(
+                    mappedCounts[index],
+                    FoliageConfig::kCandidateSlotCount)),
+            });
+        }
+
+        SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
+        readback.fence.reset();
         readback.count = 0;
     }
 }
@@ -1206,6 +1544,29 @@ void QuadtreeMeshRenderer::createHeightmapComputePipeline(const std::filesystem:
     if (m_heightmapComputePipeline == nullptr)
     {
         throwSdlError("Failed to create quadtree mesh compute pipeline.");
+    }
+}
+
+void QuadtreeMeshRenderer::createFoliageInstanceComputePipeline(const std::filesystem::path& shaderDirectory)
+{
+    const std::vector<std::uint8_t> bytes = readShaderCode(shaderDirectory / "foliage_generate.comp.spv");
+
+    SDL_GPUComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.code_size = bytes.size();
+    pipelineInfo.code = bytes.data();
+    pipelineInfo.entrypoint = "main";
+    pipelineInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    pipelineInfo.num_readonly_storage_buffers = 2;
+    pipelineInfo.num_readwrite_storage_buffers = 2;
+    pipelineInfo.num_uniform_buffers = 0;
+    pipelineInfo.threadcount_x = kFoliageInstanceComputeThreadCountX;
+    pipelineInfo.threadcount_y = kFoliageInstanceComputeThreadCountY;
+    pipelineInfo.threadcount_z = 1;
+
+    m_foliageInstanceComputePipeline = SDL_CreateGPUComputePipeline(m_device, &pipelineInfo);
+    if (m_foliageInstanceComputePipeline == nullptr)
+    {
+        throwSdlError("Failed to create foliage instance compute pipeline.");
     }
 }
 

@@ -7,7 +7,9 @@
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
 #include "SDLRenderer.hpp"
+#include "FoliageImposterRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
+#include "WorldGridFoliageManager.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
 #include "WorldGridQuadtree.hpp"
 
@@ -31,6 +33,8 @@ public:
         std::string_view gamepadName;
         LightingSystem& lightingSystem;
         SkyboxRenderer& skyboxRenderer;
+        FoliageImposterRenderer& foliageRenderer;
+        WorldGridFoliageManager& foliageManager;
         QuadtreeWaterMeshRenderer& waterMeshRenderer;
         WorldGridQuadtreeWaterManager& waterManager;
         WorldGridQuadtree& worldGridQuadtree;

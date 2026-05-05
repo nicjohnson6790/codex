@@ -1,19 +1,23 @@
 #include "SDLRenderer.hpp"
 
 #include "AppConfig.hpp"
+#include "FoliageImposterRenderer.hpp"
 #include "LightingSystem.hpp"
 #include "LineRenderer.hpp"
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
 #include "SkyboxRenderer.hpp"
+#include "SubmittedGpuFence.hpp"
 #include "TriangleRenderer.hpp"
+#include "WorldGridFoliageManager.hpp"
 
 #include <imgui_impl_sdlgpu3.h>
 
 #include <algorithm>
 #include <array>
 #include <glm/matrix.hpp>
+#include <memory>
 #include <stdexcept>
 
 namespace
@@ -27,6 +31,33 @@ SDL_GPUPresentMode defaultPresentMode()
 {
     return AppConfig::Renderer::kPresentMode;
 }
+
+constexpr std::uint32_t makeVulkanApiVersion(
+    std::uint32_t variant,
+    std::uint32_t major,
+    std::uint32_t minor,
+    std::uint32_t patch)
+{
+    return (variant << 29u) | (major << 22u) | (minor << 12u) | patch;
+}
+
+constexpr std::uint32_t preferredVulkanFeatureApiVersion()
+{
+    // SDL 3.4 validates Vulkan 1.1 opt-in feature requests correctly, but its
+    // device-creation path only chains the Vulkan 1.1 feature struct into
+    // VkDeviceCreateInfo when the requested minor version is greater than 1.
+    // Requesting Vulkan 1.2 ensures the feature chain reaches vkCreateDevice.
+    return makeVulkanApiVersion(0u, 1u, 2u, 0u);
+}
+
+constexpr std::uint32_t kVkStructureTypePhysicalDeviceShaderDrawParametersFeatures = 1000063000u;
+
+struct VulkanShaderDrawParametersFeatureList
+{
+    std::uint32_t sType = kVkStructureTypePhysicalDeviceShaderDrawParametersFeatures;
+    void* pNext = nullptr;
+    std::uint32_t shaderDrawParameters = 1u;
+};
 }
 
 void SDLRenderer::initialize(SDL_Window* window)
@@ -43,6 +74,12 @@ void SDLRenderer::initialize(SDL_Window* window)
     SDL_SetStringProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, "vulkan");
     SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
     SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, true);
+    VulkanShaderDrawParametersFeatureList vulkan11Features{};
+
+    SDL_GPUVulkanOptions vulkanOptions{};
+    vulkanOptions.vulkan_api_version = preferredVulkanFeatureApiVersion();
+    vulkanOptions.feature_list = &vulkan11Features;
+    SDL_SetPointerProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, &vulkanOptions);
 
     m_device = SDL_CreateGPUDeviceWithProperties(properties);
     SDL_DestroyProperties(properties);
@@ -125,12 +162,17 @@ void SDLRenderer::setActiveCamera(
     const Position& cameraPosition,
     TriangleRenderer& triangleRenderer,
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
+    FoliageImposterRenderer& foliageRenderer,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer)
 {
     m_activeCameraPosition = cameraPosition;
     triangleRenderer.setActiveCamera(cameraPosition);
     quadtreeMeshRenderer.setActiveCamera(cameraPosition);
+    if constexpr (AppConfig::Foliage::kEnabled)
+    {
+        foliageRenderer.setActiveCamera(cameraPosition);
+    }
     if constexpr (AppConfig::Water::kEnabled)
     {
         waterMeshRenderer.setActiveCamera(cameraPosition);
@@ -152,6 +194,7 @@ ImTextureID SDLRenderer::viewportTextureId() const
 void SDLRenderer::renderFrame(
     TriangleRenderer& triangleRenderer,
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
+    FoliageImposterRenderer& foliageRenderer,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer,
     SkyboxRenderer& skyboxRenderer,
@@ -181,6 +224,10 @@ void SDLRenderer::renderFrame(
         }
         triangleRenderer.upload(copyPass);
         quadtreeMeshRenderer.upload(copyPass);
+        if constexpr (AppConfig::Foliage::kEnabled)
+        {
+            foliageRenderer.upload(copyPass);
+        }
         if constexpr (AppConfig::Water::kEnabled)
         {
             waterMeshRenderer.upload(copyPass);
@@ -192,6 +239,7 @@ void SDLRenderer::renderFrame(
     {
         HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::DispatchTerrainCompute", ProfileScopeGroup::Renderer);
         quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
+        quadtreeMeshRenderer.dispatchFoliageInstanceGenerations(commandBuffer, foliageRenderer.pagePoolBuffer());
     }
     if constexpr (AppConfig::Water::kEnabled)
     {
@@ -207,6 +255,7 @@ void SDLRenderer::renderFrame(
             throwSdlError("Failed to begin SDL GPU extents download copy pass.");
         }
         quadtreeMeshRenderer.queueHeightmapExtentsDownload(copyPass);
+        quadtreeMeshRenderer.queueFoliageInstanceLiveCountDownloads(copyPass);
         SDL_EndGPUCopyPass(copyPass);
     }
 
@@ -282,6 +331,17 @@ void SDLRenderer::renderFrame(
                 viewportExtent,
                 timeSeconds,
                 quadtreeMeshRenderer.heightmapBuffer());
+        }
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderFoliage", ProfileScopeGroup::Renderer);
+            if constexpr (AppConfig::Foliage::kEnabled)
+            {
+                foliageRenderer.render(
+                    renderPass,
+                    commandBuffer,
+                    viewProjection,
+                    quadtreeMeshRenderer.heightmapBuffer());
+            }
         }
         {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderDebugPrimitives", ProfileScopeGroup::Renderer);
@@ -370,11 +430,13 @@ void SDLRenderer::renderFrame(
 
     HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::SubmitFrame", ProfileScopeGroup::Renderer);
     SDL_GPUFence* submittedFence = SDL_SubmitGPUCommandBufferAndAcquireFence(commandBuffer);
-    quadtreeMeshRenderer.attachSubmittedFence(submittedFence);
     if (submittedFence == nullptr)
     {
         throwSdlError("Failed to submit SDL GPU command buffer.");
     }
+    const std::shared_ptr<SubmittedGpuFence> sharedFence =
+        std::make_shared<SubmittedGpuFence>(m_device, submittedFence);
+    quadtreeMeshRenderer.attachSubmittedFence(sharedFence);
 
     // ImGui draw data for this frame may still reference the previous viewport texture,
     // so defer resizing until after the command buffer using it has been submitted.

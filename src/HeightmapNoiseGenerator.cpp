@@ -159,7 +159,7 @@ double sampleBlendChannel(
     return 0.5 + (0.5 * sampleFractalLayer(worldX, worldZ, blendAsLayer));
 }
 
-double sampleHeight(double worldX, double worldZ, const TerrainNoiseSettings& settings)
+double sampleTerrainHeightImpl(double worldX, double worldZ, const TerrainNoiseSettings& settings)
 {
     const double blendValue = sampleBlendChannel(worldX, worldZ, settings.blend);
     const double lowToMedium = smoothStep(std::clamp(
@@ -182,6 +182,12 @@ double sampleHeight(double worldX, double worldZ, const TerrainNoiseSettings& se
         (mediumHeight * lowToMedium) +
         (highHeight * mediumToHigh);
 }
+
+}
+
+double sampleTerrainHeight(double worldX, double worldZ, const TerrainNoiseSettings& settings)
+{
+    return sampleTerrainHeightImpl(worldX, worldZ, settings);
 }
 
 TerrainFractalNoiseLayerSettings sanitizeTerrainFractalNoiseLayerSettings(
@@ -256,7 +262,7 @@ std::pair<float, float> HeightmapNoiseGenerator::fillNoise(const Position& a, co
         for (std::uint32_t x = 0; x < AppConfig::Terrain::kHeightmapResolution; ++x)
         {
             const double sampleX = worldMinX + (stepX * static_cast<double>(x));
-            const float height = static_cast<float>(sampleHeight(sampleX, sampleZ, sanitized));
+            const float height = static_cast<float>(sampleTerrainHeightImpl(sampleX, sampleZ, sanitized));
             if (buffer != nullptr)
             {
                 buffer[(static_cast<std::size_t>(z) * AppConfig::Terrain::kHeightmapResolution) + x] = height;

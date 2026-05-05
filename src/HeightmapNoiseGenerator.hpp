@@ -84,6 +84,7 @@ struct TerrainNoiseSettings
     const TerrainBlendNoiseSettings& settings);
 [[nodiscard]] TerrainNoiseSettings sanitizeTerrainNoiseSettings(const TerrainNoiseSettings& settings);
 [[nodiscard]] double terrainNoiseMaxAmplitude(const TerrainNoiseSettings& settings);
+[[nodiscard]] double sampleTerrainHeight(double worldX, double worldZ, const TerrainNoiseSettings& settings);
 
 class HeightmapNoiseGenerator
 {

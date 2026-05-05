@@ -116,8 +116,11 @@ set(QUADTREE_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.vert.spv)
 set(QUADTREE_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh_bridge.vert.spv)
 set(QUADTREE_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.frag.spv)
 set(HEIGHTMAP_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/heightmap_generate.comp.spv)
+set(FOLIAGE_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/foliage_generate.comp.spv)
 set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
 set(SKYBOX_FRAG_SPV ${SHADER_OUTPUT_DIR}/skybox.frag.spv)
+set(FOLIAGE_IMPOSTER_VERT_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter.vert.spv)
+set(FOLIAGE_IMPOSTER_FRAG_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter.frag.spv)
 set(WATER_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh.vert.spv)
 set(WATER_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh_bridge.vert.spv)
 set(WATER_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/water_mesh.frag.spv)
@@ -134,8 +137,11 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.vert ${QUADTREE_MESH_VE
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_MESH_BRIDGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_GENERATE_COMP_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_generate.comp ${FOLIAGE_GENERATE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.vert ${FOLIAGE_IMPOSTER_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.frag ${FOLIAGE_IMPOSTER_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh_bridge.vert ${WATER_MESH_BRIDGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV})
@@ -154,8 +160,11 @@ add_custom_target(shaders ALL
         ${QUADTREE_MESH_BRIDGE_VERT_SPV}
         ${QUADTREE_MESH_FRAG_SPV}
         ${HEIGHTMAP_GENERATE_COMP_SPV}
+        ${FOLIAGE_GENERATE_COMP_SPV}
         ${SKYBOX_VERT_SPV}
         ${SKYBOX_FRAG_SPV}
+        ${FOLIAGE_IMPOSTER_VERT_SPV}
+        ${FOLIAGE_IMPOSTER_FRAG_SPV}
         ${WATER_MESH_VERT_SPV}
         ${WATER_MESH_BRIDGE_VERT_SPV}
         ${WATER_MESH_FRAG_SPV}
@@ -171,6 +180,7 @@ add_executable(terrain_sandbox
     src/AppPanels.cpp
     src/CameraManager.cpp
     src/EngineRendererBase.cpp
+    src/FoliageImposterRenderer.cpp
     src/FreeFlightCameraController.cpp
     src/GamepadInput.cpp
     src/HeightmapNoiseGenerator.cpp
@@ -184,6 +194,7 @@ add_executable(terrain_sandbox
     src/SkyboxRenderer.cpp
     src/TriangleRenderer.cpp
     src/WorldGridQuadtree.cpp
+    src/WorldGridFoliageManager.cpp
     src/WorldGridQuadtreeDebugRenderer.cpp
     src/WorldGridQuadtreeHeightmapManager.cpp
     src/WorldGridQuadtreeWaterManager.cpp

@@ -297,6 +297,12 @@ inline constexpr SDL_GPUSwapchainComposition kSwapchainComposition = SDL_GPU_SWA
 inline constexpr SDL_GPUPresentMode kPresentMode = SDL_GPU_PRESENTMODE_VSYNC;
 }
 
+namespace Foliage
+{
+inline constexpr bool kEnabled = true;
+inline constexpr std::uint32_t kMarkerPageDrawCapacity = 1024u;
+}
+
 namespace Light
 {
 // Orbit axis azimuth around world up used to define the sun's daily path.

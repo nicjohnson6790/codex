@@ -427,6 +427,17 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::Text("Resident slices: %u", context.worldGridQuadtree.residentCount());
     ImGui::Text("Queued leaves: %u", context.worldGridQuadtree.queuedCount());
     ImGui::Spacing();
+    ImGui::TextUnformatted("Foliage");
+    ImGui::Separator();
+    ImGui::Text("Emitted foliage page draws: %u", context.foliageRenderer.drawCount());
+    ImGui::Text("Emitted foliage marker instances: %u", context.foliageRenderer.emittedInstanceCount());
+    ImGui::Text("Resident foliage pages: %u", context.foliageManager.residentCount());
+    ImGui::Text("Queued foliage pages: %u", context.foliageManager.queuedCount());
+    ImGui::Text("GPU page-generation pending: %u", context.foliageManager.maskPendingCount());
+    ImGui::Text("GPU generation pending pages: %u", context.foliageManager.uploadPendingCount());
+    ImGui::Text("Ready foliage pages: %u", context.foliageManager.readyCount());
+    ImGui::Text("Foliage page-pool capacity: %u", FoliageConfig::kPagePoolCapacity);
+    ImGui::Spacing();
     ImGui::TextUnformatted("Water");
     ImGui::Separator();
     ImGui::Text("Queued water instances: %u", context.waterManager.queuedCount());

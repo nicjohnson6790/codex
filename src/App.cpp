@@ -1,6 +1,7 @@
 #include "App.hpp"
 
 #include "AppConfig.hpp"
+#include "FoliageTypes.hpp"
 #include <SDL3/SDL_gpu.h>
 
 #include <imgui.h>
@@ -93,6 +94,7 @@ void App::run()
         m_renderer.renderFrame(
             m_triangleRenderer,
             m_quadtreeMeshRenderer,
+            m_foliageRenderer,
             m_waterMeshRenderer,
             m_lineRenderer,
             m_skyboxRenderer,
@@ -188,6 +190,16 @@ void App::initialize()
         m_renderer.viewportDepthFormat(),
         shaderDirectory
     );
+    if constexpr (AppConfig::Foliage::kEnabled)
+    {
+        logStartup("init foliage renderer");
+        m_foliageRenderer.initialize(
+            m_renderer.device(),
+            m_renderer.swapchainFormat(),
+            m_renderer.viewportDepthFormat(),
+            shaderDirectory
+        );
+    }
     if constexpr (AppConfig::Water::kEnabled)
     {
         logStartup("init water mesh renderer");
@@ -247,6 +259,10 @@ void App::shutdown()
     PerformanceCapture::instance().shutdown();
     m_gamepadInput.shutdown();
     m_quadtreeMeshRenderer.shutdown();
+    if constexpr (AppConfig::Foliage::kEnabled)
+    {
+        m_foliageRenderer.shutdown();
+    }
     if constexpr (AppConfig::Water::kEnabled)
     {
         m_waterMeshRenderer.shutdown();
@@ -292,6 +308,8 @@ void App::buildUi()
         .gamepadName = m_gamepadInput.gamepadName(),
         .lightingSystem = m_lightingSystem,
         .skyboxRenderer = m_skyboxRenderer,
+        .foliageRenderer = m_foliageRenderer,
+        .foliageManager = m_foliageManager,
         .waterMeshRenderer = m_waterMeshRenderer,
         .waterManager = m_waterManager,
         .worldGridQuadtree = m_worldGridQuadtree,
@@ -319,11 +337,17 @@ void App::updateSceneForFrame()
             cameraPosition,
             m_triangleRenderer,
             m_quadtreeMeshRenderer,
+            m_foliageRenderer,
             m_waterMeshRenderer,
             m_lineRenderer);
         m_quadtreeMeshRenderer.setTerrainHeightParams(
             static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
             static_cast<float>(terrainNoiseMaxAmplitude(m_worldGridQuadtree.terrainSettings())));
+        if constexpr (AppConfig::Foliage::kEnabled)
+        {
+            m_foliageRenderer.setActiveCamera(cameraPosition);
+            m_foliageManager.setTerrainSettings(m_worldGridQuadtree.terrainSettings());
+        }
         if constexpr (AppConfig::Water::kEnabled)
         {
             m_waterManager.beginFrame();
@@ -337,6 +361,10 @@ void App::updateSceneForFrame()
                 waterSettings.waterLevel - expectedWaveHeight,
                 waterSettings.waterLevel + expectedWaveHeight,
                 waterSettings.enabled);
+            if constexpr (AppConfig::Foliage::kEnabled)
+            {
+                m_foliageManager.setWaterLevel(waterSettings.waterLevel);
+            }
         }
         else
         {
@@ -345,6 +373,10 @@ void App::updateSceneForFrame()
             disabledWaterSettings.drawTerrainCaustics = false;
             m_quadtreeMeshRenderer.setWaterCausticsState(disabledWaterSettings);
             m_worldGridQuadtree.setWaterVisibilityBounds(0.0f, 0.0f, false);
+            if constexpr (AppConfig::Foliage::kEnabled)
+            {
+                m_foliageManager.setWaterLevel(0.0f);
+            }
         }
     }
 
@@ -352,6 +384,19 @@ void App::updateSceneForFrame()
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BuildTriangles");
         m_triangleRenderer.clear();
         m_quadtreeMeshRenderer.clear();
+        if constexpr (AppConfig::Foliage::kEnabled)
+        {
+            m_foliageRenderer.clear();
+            std::vector<QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount> completedLiveCounts;
+            m_quadtreeMeshRenderer.collectCompletedFoliagePageLiveCounts(completedLiveCounts);
+            std::vector<std::pair<WorldGridQuadtreeLeafId, std::uint16_t>> generatedLiveCounts;
+            generatedLiveCounts.reserve(completedLiveCounts.size());
+            for (const QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount& generated : completedLiveCounts)
+            {
+                generatedLiveCounts.emplace_back(generated.leafId, generated.liveCount);
+            }
+            m_foliageManager.applyGeneratedPageLiveCounts(generatedLiveCounts);
+        }
         for (const TriangleInstance& instance : m_instances)
         {
             m_triangleRenderer.addTriangle(instance.position);
@@ -377,12 +422,19 @@ void App::updateSceneForFrame()
 
     {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::UpdateQuadtree");
-        m_worldGridQuadtree.updateTree(m_cameraManager.activeCamera(), viewportExtent);
+        m_worldGridQuadtree.updateTree(
+            m_cameraManager.activeCamera(),
+            viewportExtent,
+            AppConfig::Foliage::kEnabled ? &m_foliageManager : nullptr);
     }
 
     {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EndHeightmapUpdate");
         m_worldGridQuadtree.endHeightmapUpdate(m_quadtreeMeshRenderer);
+        if constexpr (AppConfig::Foliage::kEnabled)
+        {
+            m_foliageManager.dispatchFromQueue(m_quadtreeMeshRenderer);
+        }
     }
 
     RenderEngines renderEngines{
@@ -394,6 +446,14 @@ void App::updateSceneForFrame()
     {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitTerrainDraws");
         m_worldGridQuadtree.emitMeshDraws(renderEngines);
+    }
+
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitFoliageDraws");
+        if constexpr (AppConfig::Foliage::kEnabled)
+        {
+            m_worldGridQuadtree.emitFoliageDraws(m_foliageManager, m_foliageRenderer);
+        }
     }
 
     {

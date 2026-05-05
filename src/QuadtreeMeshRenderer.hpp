@@ -1,10 +1,12 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "FoliageTypes.hpp"
 #include "HeightmapNoiseGenerator.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
+#include "SubmittedGpuFence.hpp"
 #include "WaterTypes.hpp"
 #include "WorldGridQuadtreeHeightmapManager.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
@@ -16,6 +18,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <vector>
 
 class QuadtreeMeshRenderer : private EngineRendererBase
@@ -26,6 +29,12 @@ public:
         WorldGridQuadtreeLeafId leafId{};
         std::uint16_t sliceIndex = 0;
         HeightmapExtents extents{};
+    };
+
+    struct GeneratedFoliagePageLiveCount
+    {
+        WorldGridQuadtreeLeafId leafId{};
+        std::uint16_t liveCount = 0;
     };
 
     // Per-frame shader constants shared by every terrain draw.
@@ -83,8 +92,17 @@ public:
     // Dispatches any queued heightmap compute jobs into the heightmap storage buffer.
     void dispatchHeightmapGenerations(SDL_GPUCommandBuffer* commandBuffer);
     void queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPass);
-    void attachSubmittedFence(SDL_GPUFence* fence);
+    [[nodiscard]] bool queueFoliagePageGeneration(
+        const WorldGridQuadtreeLeafId& foliageLeafId,
+        const WorldGridQuadtreeLeafId& terrainLeafId,
+        std::uint16_t terrainSliceIndex,
+        std::uint16_t pageIndex,
+        float waterLevel);
+    void dispatchFoliageInstanceGenerations(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUBuffer* foliagePagePoolBuffer);
+    void queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass* copyPass);
+    void attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence>& fence);
     void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents);
+    void collectCompletedFoliagePageLiveCounts(std::vector<GeneratedFoliagePageLiveCount>& completedLiveCounts);
 
     // Issues the terrain draws for all queued leaf instances.
     void render(
@@ -153,9 +171,24 @@ private:
     struct PendingExtentsReadback
     {
         SDL_GPUTransferBuffer* transferBuffer = nullptr;
-        SDL_GPUFence* fence = nullptr;
+        std::shared_ptr<SubmittedGpuFence> fence{};
         std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> leafIds{};
         std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> sliceIndices{};
+        std::uint16_t count = 0;
+    };
+
+    struct alignas(16) FoliageInstanceGenerationUniforms
+    {
+        glm::uvec4 dispatchParams{ 0u };
+        glm::vec4 terrainParams{ 0.0f };
+        glm::vec4 worldParams{ 0.0f };
+    };
+
+    struct PendingFoliageLiveCountReadback
+    {
+        SDL_GPUTransferBuffer* transferBuffer = nullptr;
+        std::shared_ptr<SubmittedGpuFence> fence{};
+        std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> leafIds{};
         std::uint16_t count = 0;
     };
 
@@ -172,6 +205,7 @@ private:
     // Creates the terrain graphics pipelines and loads the terrain shaders.
     void createPipelines(const std::filesystem::path& shaderDirectory);
     void createHeightmapComputePipeline(const std::filesystem::path& shaderDirectory);
+    void createFoliageInstanceComputePipeline(const std::filesystem::path& shaderDirectory);
     void createCausticsTextures();
     void destroyCausticsTextures();
     void createCausticsSampler();
@@ -198,6 +232,7 @@ private:
     SDL_GPUGraphicsPipeline* m_mainPipeline = nullptr;
     SDL_GPUGraphicsPipeline* m_bridgePipeline = nullptr;
     SDL_GPUComputePipeline* m_heightmapComputePipeline = nullptr;
+    SDL_GPUComputePipeline* m_foliageInstanceComputePipeline = nullptr;
     SDL_GPUTexture* m_causticsTextureA = nullptr;
     SDL_GPUSampler* m_causticsSampler = nullptr;
     float m_causticsDecodeScaleA = 1.0f;
@@ -226,6 +261,10 @@ private:
     SDL_GPUBuffer *m_heightmapBuffer = nullptr;
     SDL_GPUBuffer* m_heightmapExtentsBuffer = nullptr;
     SDL_GPUTransferBuffer* m_heightmapExtentsInitTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_foliageInstanceGenerationBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_foliageInstanceGenerationTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_foliageInstanceLiveCountBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_foliageInstanceLiveCountInitTransferBuffer = nullptr;
 
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_bridgeInstanceData{};
@@ -235,16 +274,24 @@ private:
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationLeafIds{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedLeafIds{};
     std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedSlices{};
+    std::array<FoliageInstanceGenerationUniforms, FoliageConfig::kGenerationBudgetPerFrame> m_pendingFoliageInstanceGenerations{};
+    std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> m_pendingFoliageInstanceLeafIds{};
+    std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> m_lastDispatchedFoliageInstanceLeafIds{};
     static constexpr std::size_t kHeightmapReadbackSlotCount = 8;
     std::array<PendingExtentsReadback, kHeightmapReadbackSlotCount> m_pendingExtentsReadbacks{};
+    std::array<PendingFoliageLiveCountReadback, kHeightmapReadbackSlotCount> m_pendingFoliageLiveCountReadbacks{};
     std::uint16_t m_instanceCount = 0;
     std::uint16_t m_bridgeInstanceCount = 0;
     std::uint16_t m_coarseBridgeInstanceCount = 0;
     std::uint16_t m_bridgeIndirectCommandCount = 0;
     std::uint16_t m_pendingHeightmapGenerationCount = 0;
     std::uint16_t m_lastDispatchedGenerationCount = 0;
+    std::uint16_t m_pendingFoliageInstanceGenerationCount = 0;
+    std::uint16_t m_lastDispatchedFoliageInstanceGenerationCount = 0;
     std::uint16_t m_pendingFenceReadbackSlot = UINT16_MAX;
+    std::uint16_t m_pendingFoliageLiveCountFenceReadbackSlot = UINT16_MAX;
     std::uint16_t m_nextReadbackSlot = 0;
+    std::uint16_t m_nextFoliageLiveCountReadbackSlot = 0;
     float m_terrainBaseHeight = 0.0f;
     float m_terrainHeightAmplitude = static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude);
     WaterSettings m_waterSettings{};

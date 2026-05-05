@@ -1,0 +1,148 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+struct FoliageInstanceGenerationParams
+{
+    uvec4 dispatchParams;
+    vec4 terrainParams;
+    vec4 worldParams;
+};
+
+layout(set=0, binding=0, std430) readonly buffer FoliageInstanceGenerationBuffer
+{
+    FoliageInstanceGenerationParams params[];
+} generationBuffer;
+
+layout(set=0, binding=1, std430) readonly buffer HeightmapBuffer
+{
+    float heights[];
+} heightmapBuffer;
+
+layout(set=1, binding=0, std430) buffer FoliagePagePoolBuffer
+{
+    uint packedInstances[];
+} foliagePagePoolBuffer;
+
+layout(set=1, binding=1, std430) buffer FoliageLiveCountBuffer
+{
+    uint liveCounts[];
+} liveCountBuffer;
+
+const uint kCandidateGridResolution = 64u;
+const uint kCandidateSlotCount = kCandidateGridResolution * kCandidateGridResolution;
+const float kCandidateCellSizeMeters = 4.0;
+const uint kHeightmapResolution = 259u;
+const float kHeightmapLeafIntervalCount = 256.0;
+const float kBaseDensity = 0.08;
+const float kClusterDensity = 0.18;
+const float kClusterScale = 1.0 / 96.0;
+
+float hash01(uint seed)
+{
+    seed ^= seed >> 16u;
+    seed *= 0x7feb352du;
+    seed ^= seed >> 15u;
+    seed *= 0x846ca68bu;
+    seed ^= seed >> 16u;
+    return float(seed & 0x00FFFFFFu) / float(0x01000000u);
+}
+
+float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
+{
+    ivec2 clampedCoord = clamp(sampleCoord, ivec2(0), ivec2(int(kHeightmapResolution - 1u)));
+    uint linearIndex =
+        (sliceIndex * kHeightmapResolution * kHeightmapResolution) +
+        (uint(clampedCoord.y) * kHeightmapResolution) +
+        uint(clampedCoord.x);
+    return heightmapBuffer.heights[linearIndex];
+}
+
+float sampleHeightBilinear(uint sliceIndex, vec2 normalizedCoord)
+{
+    vec2 clampedCoord = clamp(normalizedCoord, vec2(0.0), vec2(1.0));
+    vec2 sampleCoord = vec2(1.0) + (clampedCoord * kHeightmapLeafIntervalCount);
+    ivec2 baseCoord = ivec2(floor(sampleCoord));
+    vec2 fracCoord = fract(sampleCoord);
+
+    float h00 = sampleHeight(sliceIndex, baseCoord);
+    float h10 = sampleHeight(sliceIndex, baseCoord + ivec2(1, 0));
+    float h01 = sampleHeight(sliceIndex, baseCoord + ivec2(0, 1));
+    float h11 = sampleHeight(sliceIndex, baseCoord + ivec2(1, 1));
+
+    float row0 = mix(h00, h10, fracCoord.x);
+    float row1 = mix(h01, h11, fracCoord.x);
+    return mix(row0, row1, fracCoord.y);
+}
+
+float fractf(float value)
+{
+    return value - floor(value);
+}
+
+uint packFoliageInstance(uint candidateSlot, uint meshId, uint flags)
+{
+    return
+        (candidateSlot & 0x0FFFu) |
+        ((meshId & 0xFFFFu) << 12u) |
+        ((flags & 0x0Fu) << 28u);
+}
+
+void main()
+{
+    uint candidateX = gl_GlobalInvocationID.x;
+    uint candidateZ = gl_GlobalInvocationID.y;
+    uint jobIndex = gl_WorkGroupID.z;
+    if (candidateX >= kCandidateGridResolution || candidateZ >= kCandidateGridResolution)
+    {
+        return;
+    }
+
+    FoliageInstanceGenerationParams params = generationBuffer.params[jobIndex];
+    uint pageIndex = params.dispatchParams.x;
+    uint terrainSliceIndex = params.dispatchParams.y;
+    uint leafSeed = params.dispatchParams.z;
+    float terrainLeafSizeMeters = params.terrainParams.x;
+    vec2 pageOffsetMeters = params.terrainParams.yz;
+    float waterLevel = params.terrainParams.w;
+    vec2 pageWorldMin = params.worldParams.xy;
+
+    uint candidateSlot = (candidateZ * kCandidateGridResolution) + candidateX;
+    vec2 localOffsetMeters = vec2(
+        (float(candidateX) + 0.5) * kCandidateCellSizeMeters,
+        (float(candidateZ) + 0.5) * kCandidateCellSizeMeters);
+
+    vec2 normalizedTerrainCoord = clamp(
+        (pageOffsetMeters + localOffsetMeters) / terrainLeafSizeMeters,
+        vec2(0.0),
+        vec2(1.0));
+    float terrainHeight = sampleHeightBilinear(terrainSliceIndex, normalizedTerrainCoord);
+    if (terrainHeight <= (waterLevel + 5.0))
+    {
+        return;
+    }
+
+    vec2 worldSample = pageWorldMin + localOffsetMeters;
+    float clusterNoise = fractf(
+        sin((worldSample.x * kClusterScale) + (worldSample.y * (kClusterScale * 1.37)) + (terrainHeight * 0.0035)) *
+        43758.5453);
+    float density = clamp(kBaseDensity + (clusterNoise * kClusterDensity), 0.0, 0.9);
+    uint slotSeed = leafSeed ^ (candidateSlot * 0x9e3779b9u);
+    if (hash01(slotSeed) > density)
+    {
+        return;
+    }
+
+    float heightSelector = hash01(slotSeed ^ 0x68bc21ebu);
+    uint meshId =
+        heightSelector < 0.33 ? 0u :
+        (heightSelector < 0.72 ? 1u : 2u);
+    uint liveIndex = atomicAdd(liveCountBuffer.liveCounts[jobIndex], 1u);
+    if (liveIndex >= kCandidateSlotCount)
+    {
+        return;
+    }
+
+    uint outputIndex = (pageIndex * kCandidateSlotCount) + liveIndex;
+    foliagePagePoolBuffer.packedInstances[outputIndex] = packFoliageInstance(candidateSlot, meshId, 0u);
+}

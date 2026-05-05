@@ -12,7 +12,9 @@
 #include <cstdint>
 
 class RenderEngines;
+class FoliageImposterRenderer;
 class QuadtreeMeshRenderer;
+class WorldGridFoliageManager;
 class WorldGridQuadtreeWaterManager;
 
 struct QuadtreeNode
@@ -26,21 +28,23 @@ struct QuadtreeNode
         std::uint16_t{0xFFFF},
     };
     std::uint8_t quadrantInParent = 0;
-    std::uint8_t flags = 0;
+    std::uint16_t flags = 0;
     float minHeight = 0.0f;
     float maxHeight = 0.0f;
 
     static constexpr std::uint16_t NullNodeIndex = UINT16_MAX;
-    static constexpr std::uint8_t IsLeafMask = 1;
-    static constexpr std::uint8_t ShouldDrawMask = 2;
-    static constexpr std::uint8_t IsUsedMask = 4;
+    static constexpr std::uint16_t IsLeafMask = 1;
+    static constexpr std::uint16_t ShouldDrawMask = 2;
+    static constexpr std::uint16_t IsUsedMask = 4;
     // Parent remains the draw fallback while children finish becoming drawable.
-    static constexpr std::uint8_t IsSubdividingMask = 8;
+    static constexpr std::uint16_t IsSubdividingMask = 8;
     // Existing children remain the draw fallback while the parent becomes drawable again.
-    static constexpr std::uint8_t IsCollapsingMask = 16;
+    static constexpr std::uint16_t IsCollapsingMask = 16;
     // This node's own slice is not resident yet.
-    static constexpr std::uint8_t IsUploadingMask = 32;
-    static constexpr std::uint8_t HasExtentsMask = 64;
+    static constexpr std::uint16_t IsUploadingMask = 32;
+    static constexpr std::uint16_t HasExtentsMask = 64;
+    static constexpr std::uint16_t FoliageUploadPendingMask = 128;
+    static constexpr std::uint16_t FoliageShouldDrawMask = 256;
 };
 
 class WorldGridQuadtree
@@ -63,9 +67,15 @@ public:
     WorldGridQuadtree& operator=(const WorldGridQuadtree&) = delete;
 
     void beginHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer);
-    void updateTree(const CameraManager::Camera& activeCamera, Extent2D viewportExtent);
+    void updateTree(
+        const CameraManager::Camera& activeCamera,
+        Extent2D viewportExtent,
+        WorldGridFoliageManager* foliageManager);
     void endHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer);
     void emitMeshDraws(RenderEngines& renderEngines);
+    void emitFoliageDraws(
+        WorldGridFoliageManager& foliageManager,
+        FoliageImposterRenderer& foliageRenderer) const;
     void emitWaterDraws(WorldGridQuadtreeWaterManager& waterManager) const;
     void emitDebugDraws(RenderEngines& renderEngines) const;
     void clearTerrainCache();
@@ -95,8 +105,10 @@ private:
         const HeightmapExtents& extents);
     [[nodiscard]] static bool nodeContributesTerrainDraw(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeHasResidentTerrainSurface(const QuadtreeNode& node);
+    [[nodiscard]] static bool nodeShouldDrawFoliage(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeContributesWaterDraw(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeHasWaterSurface(const QuadtreeNode& node);
+    void updateNodeFoliageState(QuadtreeNode& node, WorldGridFoliageManager* foliageManager);
     [[nodiscard]] bool edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasWaterNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
@@ -106,8 +118,8 @@ private:
     [[nodiscard]] bool subtreeEdgeCoveredByTerrain(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool shouldSubdivide(const QuadtreeNode& node, const Position& cameraPosition) const;
-    [[nodiscard]] static bool nodeHasFlag(const QuadtreeNode& node, std::uint8_t mask);
-    static void setNodeFlag(QuadtreeNode& node, std::uint8_t mask, bool enabled);
+    [[nodiscard]] static bool nodeHasFlag(const QuadtreeNode& node, std::uint16_t mask);
+    static void setNodeFlag(QuadtreeNode& node, std::uint16_t mask, bool enabled);
     [[nodiscard]] static double distanceSquaredToBounds(
         double pointX,
         double pointY,
@@ -130,5 +142,6 @@ private:
     bool m_waterVisibilityBoundsEnabled = false;
     float m_waterVisibilityMinHeight = 0.0f;
     float m_waterVisibilityMaxHeight = 0.0f;
+    WorldGridFoliageManager* m_activeFoliageManager = nullptr;
     Extent2D m_viewportExtent{ 16, 9 };
 };
