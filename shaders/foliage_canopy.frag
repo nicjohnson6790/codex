@@ -155,7 +155,7 @@ void main()
         discard;
     }
 
-    vec3 lightDirection = normalize(-canopy.sunDirectionIntensity.xyz);
+    vec3 lightDirection = normalize(canopy.sunDirectionIntensity.xyz);
     float diffuse = clamp(dot(bestNormal, lightDirection), 0.0, 1.0);
     float ambient = 0.42;
     float lighting = ambient + (diffuse * 0.58);
