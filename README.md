@@ -1,6 +1,6 @@
 # SDL3 GPU + ImGui Terrain Sandbox
 
-![rendered screenshot](images\Screenshot 2026-05-06 182448.png)
+![rendered screenshot](images/Screenshot%202026-05-06%20182448.png)
 
 This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage markers, nearby decoded foliage markers, far-distance canopy impostors, and shared-cascade FFT water.
 
