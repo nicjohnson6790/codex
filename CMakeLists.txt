@@ -117,6 +117,9 @@ set(QUADTREE_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh_bridge.vert
 set(QUADTREE_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.frag.spv)
 set(HEIGHTMAP_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/heightmap_generate.comp.spv)
 set(FOLIAGE_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/foliage_generate.comp.spv)
+set(FOLIAGE_CANOPY_VERT_SPV ${SHADER_OUTPUT_DIR}/foliage_canopy.vert.spv)
+set(FOLIAGE_CANOPY_FRAG_SPV ${SHADER_OUTPUT_DIR}/foliage_canopy.frag.spv)
+set(FOLIAGE_CANOPY_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/foliage_canopy_generate.comp.spv)
 set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
 set(SKYBOX_FRAG_SPV ${SHADER_OUTPUT_DIR}/skybox.frag.spv)
 set(FOLIAGE_IMPOSTER_VERT_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter.vert.spv)
@@ -138,6 +141,9 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_GENERATE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_generate.comp ${FOLIAGE_GENERATE_COMP_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_canopy.vert ${FOLIAGE_CANOPY_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_canopy.frag ${FOLIAGE_CANOPY_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_canopy_generate.comp ${FOLIAGE_CANOPY_GENERATE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.vert ${FOLIAGE_IMPOSTER_VERT_SPV})
@@ -161,6 +167,9 @@ add_custom_target(shaders ALL
         ${QUADTREE_MESH_FRAG_SPV}
         ${HEIGHTMAP_GENERATE_COMP_SPV}
         ${FOLIAGE_GENERATE_COMP_SPV}
+        ${FOLIAGE_CANOPY_VERT_SPV}
+        ${FOLIAGE_CANOPY_FRAG_SPV}
+        ${FOLIAGE_CANOPY_GENERATE_COMP_SPV}
         ${SKYBOX_VERT_SPV}
         ${SKYBOX_FRAG_SPV}
         ${FOLIAGE_IMPOSTER_VERT_SPV}
@@ -180,6 +189,7 @@ add_executable(terrain_sandbox
     src/AppPanels.cpp
     src/CameraManager.cpp
     src/EngineRendererBase.cpp
+    src/FoliageCanopyRenderer.cpp
     src/FoliageImposterRenderer.cpp
     src/FreeFlightCameraController.cpp
     src/GamepadInput.cpp
@@ -195,6 +205,7 @@ add_executable(terrain_sandbox
     src/TriangleRenderer.cpp
     src/WorldGridQuadtree.cpp
     src/WorldGridFoliageManager.cpp
+    src/WorldGridFoliageCanopyManager.cpp
     src/WorldGridQuadtreeDebugRenderer.cpp
     src/WorldGridQuadtreeHeightmapManager.cpp
     src/WorldGridQuadtreeWaterManager.cpp

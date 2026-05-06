@@ -1,6 +1,7 @@
 #include "SDLRenderer.hpp"
 
 #include "AppConfig.hpp"
+#include "FoliageCanopyRenderer.hpp"
 #include "FoliageImposterRenderer.hpp"
 #include "LightingSystem.hpp"
 #include "LineRenderer.hpp"
@@ -162,6 +163,7 @@ void SDLRenderer::setActiveCamera(
     const Position& cameraPosition,
     TriangleRenderer& triangleRenderer,
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
+    FoliageCanopyRenderer& canopyRenderer,
     FoliageImposterRenderer& foliageRenderer,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer)
@@ -169,6 +171,10 @@ void SDLRenderer::setActiveCamera(
     m_activeCameraPosition = cameraPosition;
     triangleRenderer.setActiveCamera(cameraPosition);
     quadtreeMeshRenderer.setActiveCamera(cameraPosition);
+    if constexpr (AppConfig::Foliage::kCanopyEnabled)
+    {
+        canopyRenderer.setActiveCamera(cameraPosition);
+    }
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         foliageRenderer.setActiveCamera(cameraPosition);
@@ -194,6 +200,7 @@ ImTextureID SDLRenderer::viewportTextureId() const
 void SDLRenderer::renderFrame(
     TriangleRenderer& triangleRenderer,
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
+    FoliageCanopyRenderer& canopyRenderer,
     FoliageImposterRenderer& foliageRenderer,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer,
@@ -224,6 +231,10 @@ void SDLRenderer::renderFrame(
         }
         triangleRenderer.upload(copyPass);
         quadtreeMeshRenderer.upload(copyPass);
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            canopyRenderer.upload(copyPass);
+        }
         if constexpr (AppConfig::Foliage::kEnabled)
         {
             foliageRenderer.upload(copyPass);
@@ -239,6 +250,10 @@ void SDLRenderer::renderFrame(
     {
         HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::DispatchTerrainCompute", ProfileScopeGroup::Renderer);
         quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            canopyRenderer.dispatchCellGenerations(commandBuffer, quadtreeMeshRenderer.heightmapBuffer());
+        }
         quadtreeMeshRenderer.dispatchFoliageInstanceGenerations(commandBuffer, foliageRenderer.pagePoolBuffer());
     }
     if constexpr (AppConfig::Water::kEnabled)
@@ -331,6 +346,18 @@ void SDLRenderer::renderFrame(
                 viewportExtent,
                 timeSeconds,
                 quadtreeMeshRenderer.heightmapBuffer());
+        }
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderCanopy", ProfileScopeGroup::Renderer);
+            if constexpr (AppConfig::Foliage::kCanopyEnabled)
+            {
+                canopyRenderer.render(
+                    renderPass,
+                    commandBuffer,
+                    viewProjection,
+                    lightingSystem,
+                    quadtreeMeshRenderer.heightmapBuffer());
+            }
         }
         {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderFoliage", ProfileScopeGroup::Renderer);

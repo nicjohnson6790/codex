@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CameraManager.hpp"
+#include "FoliageCanopyRenderer.hpp"
 #include "LightingSystem.hpp"
 #include "PerfPanel.hpp"
 #include "RenderTypes.hpp"
@@ -9,6 +10,7 @@
 #include "SDLRenderer.hpp"
 #include "FoliageImposterRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
+#include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
 #include "WorldGridQuadtree.hpp"
@@ -33,6 +35,8 @@ public:
         std::string_view gamepadName;
         LightingSystem& lightingSystem;
         SkyboxRenderer& skyboxRenderer;
+        FoliageCanopyRenderer& foliageCanopyRenderer;
+        WorldGridFoliageCanopyManager& foliageCanopyManager;
         FoliageImposterRenderer& foliageRenderer;
         WorldGridFoliageManager& foliageManager;
         QuadtreeWaterMeshRenderer& waterMeshRenderer;

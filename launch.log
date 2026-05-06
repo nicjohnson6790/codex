@@ -15,6 +15,7 @@
 [startup] init triangle renderer
 [startup] init line renderer
 [startup] init quadtree mesh renderer
+[startup] init foliage canopy renderer
 [startup] init foliage renderer
 [startup] init water mesh renderer
 [startup] init skybox renderer

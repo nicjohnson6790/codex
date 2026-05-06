@@ -422,6 +422,28 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::Text("Max depth: %u", treeData.maxDepth);
     ImGui::Text("Minimum quad size: %.0f", AppConfig::Quadtree::kMinimumQuadSize);
     ImGui::Spacing();
+    ImGui::TextUnformatted("Terrain Draw Sizes");
+    ImGui::Separator();
+    bool showedTerrainDrawSize = false;
+    for (std::size_t scalePow = 0; scalePow < treeData.terrainDrawCountByScalePow.size(); ++scalePow)
+    {
+        const std::uint16_t drawCount = treeData.terrainDrawCountByScalePow[scalePow];
+        const std::uint16_t totalLeafCount = treeData.terrainLeafCountByScalePow[scalePow];
+        if (drawCount == 0 && totalLeafCount == 0)
+        {
+            continue;
+        }
+
+        const double drawSizeMeters =
+            AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(std::uint64_t{1} << scalePow);
+        ImGui::Text("%.0f m: %u/%u", drawSizeMeters, drawCount, totalLeafCount);
+        showedTerrainDrawSize = true;
+    }
+    if (!showedTerrainDrawSize)
+    {
+        ImGui::TextUnformatted("No terrain draws submitted");
+    }
+    ImGui::Spacing();
     ImGui::TextUnformatted("Heightmap Manager");
     ImGui::Separator();
     ImGui::Text("Resident slices: %u", context.worldGridQuadtree.residentCount());
@@ -429,6 +451,9 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::Spacing();
     ImGui::TextUnformatted("Foliage");
     ImGui::Separator();
+    ImGui::Text("Canopy draws: %u", context.foliageCanopyRenderer.drawCount());
+    ImGui::Text("Resident canopy cells: %u", context.foliageCanopyManager.residentCount());
+    ImGui::Text("Queued canopy cells: %u", context.foliageCanopyManager.queuedCount());
     ImGui::Text("Emitted foliage page draws: %u", context.foliageRenderer.drawCount());
     ImGui::Text("Emitted foliage marker instances: %u", context.foliageRenderer.emittedInstanceCount());
     ImGui::Text("Resident foliage pages: %u", context.foliageManager.residentCount());

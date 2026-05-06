@@ -301,6 +301,8 @@ namespace Foliage
 {
 inline constexpr bool kEnabled = true;
 inline constexpr std::uint32_t kMarkerPageDrawCapacity = 1024u;
+inline constexpr bool kCanopyEnabled = true;
+inline constexpr std::uint32_t kCanopyDrawCapacity = 256u;
 }
 
 namespace Light

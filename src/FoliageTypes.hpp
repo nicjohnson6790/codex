@@ -22,6 +22,22 @@ inline constexpr std::uint16_t kLookupOverflowCapacity = 1024u;
 inline constexpr std::uint16_t kGenerationBudgetPerFrame = 4u;
 inline constexpr float kBaseDensity = 0.08f;
 inline constexpr float kClusterDensity = 0.18f;
+
+inline constexpr std::uint32_t kCanopyNodeSizeMeters = 2048u;
+inline constexpr std::uint32_t kCanopyCellsPerSide = kCanopyNodeSizeMeters / kPageSizeMeters;
+inline constexpr std::uint32_t kCanopyCellCountPerNode = kCanopyCellsPerSide * kCanopyCellsPerSide;
+inline constexpr std::uint32_t kCanopyBitsetWordCount = kCandidateSlotCount / 32u;
+inline constexpr std::uint32_t kCanopyBitsetByteSize = kCanopyBitsetWordCount * sizeof(std::uint32_t);
+inline constexpr std::uint16_t kCanopyCellPoolCapacity = 4096u;
+inline constexpr std::uint16_t kCanopyLookupBucketCount = 1024u;
+inline constexpr std::uint16_t kCanopyLookupBucketEntryCount = 16u;
+inline constexpr std::uint16_t kCanopyLookupOverflowCapacity = 4096u;
+inline constexpr std::uint16_t kCanopyGenerationBudgetPerFrame = 256u;
+inline constexpr std::uint16_t kCanopyMinimumReadyCellCount = 48u;
+inline constexpr float kCanopyFadeStartMeters = 7000.0f;
+inline constexpr float kCanopyFadeEndMeters = 11000.0f;
+inline constexpr float kCanopyEdgeFadeWidthMeters = 384.0f;
+inline constexpr std::uint8_t kCanopyFadeInFrameCount = 12u;
 }
 
 struct FoliageResidentPageEntry
@@ -55,6 +71,34 @@ struct FoliageTerrainSource
 {
     WorldGridQuadtreeLeafId terrainLeafId{};
     std::uint16_t terrainSliceIndex = 0;
+};
+
+struct FoliageCanopyResidentCellEntry
+{
+    WorldGridQuadtreeLeafId leafId{};
+    std::uint16_t slotIndex = 0;
+    std::uint8_t age = 0;
+    std::uint8_t flags = 0;
+};
+
+struct FoliageCanopyReadyCellInfo
+{
+    std::uint16_t slotIndex = 0;
+    std::uint32_t seed = 0;
+};
+
+struct FoliageCanopyDrawReference
+{
+    Position patchOrigin{};
+    Position terrainLeafOrigin{};
+    float patchSizeMeters = 0.0f;
+    float terrainLeafSizeMeters = 0.0f;
+    std::uint16_t terrainSliceIndex = 0;
+    std::uint32_t patchSeed = 0;
+    std::uint8_t drawAgeFrames = 0;
+    std::array<std::uint8_t, 4> edgeFadeStrengths{};
+    std::array<std::uint16_t, FoliageConfig::kCanopyCellCountPerNode> cellSlotIndices{};
+    std::array<std::uint32_t, FoliageConfig::kCanopyCellCountPerNode> cellSeeds{};
 };
 
 [[nodiscard]] inline FoliagePackedInstance packFoliageInstance(

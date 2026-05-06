@@ -13,6 +13,7 @@
 
 class LightingSystem;
 class LineRenderer;
+class FoliageCanopyRenderer;
 class FoliageImposterRenderer;
 class QuadtreeMeshRenderer;
 class QuadtreeWaterMeshRenderer;
@@ -40,6 +41,7 @@ public:
         const Position& cameraPosition,
         TriangleRenderer& triangleRenderer,
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
+        FoliageCanopyRenderer& canopyRenderer,
         FoliageImposterRenderer& foliageRenderer,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer);
@@ -47,6 +49,7 @@ public:
     void renderFrame(
         TriangleRenderer& triangleRenderer,
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
+        FoliageCanopyRenderer& canopyRenderer,
         FoliageImposterRenderer& foliageRenderer,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer,

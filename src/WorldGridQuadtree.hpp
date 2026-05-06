@@ -12,9 +12,11 @@
 #include <cstdint>
 
 class RenderEngines;
+class FoliageCanopyRenderer;
 class FoliageImposterRenderer;
 class QuadtreeMeshRenderer;
 class WorldGridFoliageManager;
+class WorldGridFoliageCanopyManager;
 class WorldGridQuadtreeWaterManager;
 
 struct QuadtreeNode
@@ -31,6 +33,8 @@ struct QuadtreeNode
     std::uint16_t flags = 0;
     float minHeight = 0.0f;
     float maxHeight = 0.0f;
+    std::uint8_t canopyDrawAge = 0;
+    std::array<std::uint8_t, 4> canopyEdgeFadeFrames{};
 
     static constexpr std::uint16_t NullNodeIndex = UINT16_MAX;
     static constexpr std::uint16_t IsLeafMask = 1;
@@ -58,6 +62,8 @@ public:
         std::uint16_t subdivisionCountThisFrame = 0;
         std::uint16_t collapseCountThisFrame = 0;
         std::uint32_t maxDepth = 0;
+        std::array<std::uint16_t, 16> terrainDrawCountByScalePow{};
+        std::array<std::uint16_t, 16> terrainLeafCountByScalePow{};
     };
 
     static constexpr std::size_t kNodeCapacity = 512;
@@ -72,12 +78,20 @@ public:
     void updateTree(
         const CameraManager::Camera& activeCamera,
         Extent2D viewportExtent,
-        WorldGridFoliageManager* foliageManager);
+        WorldGridFoliageManager* foliageManager,
+        WorldGridFoliageCanopyManager* canopyManager);
     void endHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer);
     void emitMeshDraws(RenderEngines& renderEngines);
     void emitFoliageDraws(
         WorldGridFoliageManager& foliageManager,
+        WorldGridFoliageCanopyManager& canopyManager,
         FoliageImposterRenderer& foliageRenderer) const;
+    void queueFoliageResidencyHints(WorldGridFoliageManager& foliageManager) const;
+    void queueCanopyResidencyHints(WorldGridFoliageCanopyManager& canopyManager) const;
+    void queueCanopyResidency(WorldGridFoliageCanopyManager& canopyManager) const;
+    void emitCanopyDraws(
+        WorldGridFoliageCanopyManager& canopyManager,
+        FoliageCanopyRenderer& canopyRenderer) const;
     void emitWaterDraws(WorldGridQuadtreeWaterManager& waterManager) const;
     void emitDebugDraws(RenderEngines& renderEngines) const;
     void clearTerrainCache();
@@ -108,9 +122,20 @@ private:
     [[nodiscard]] static bool nodeContributesTerrainDraw(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeHasResidentTerrainSurface(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeShouldDrawFoliage(const QuadtreeNode& node);
+    [[nodiscard]] bool nodeIntersectsCanopyRange(const QuadtreeNode& node) const;
+    [[nodiscard]] bool nodeShouldMaintainCanopyResidency(const QuadtreeNode& node) const;
+    [[nodiscard]] bool nodeShouldDrawCanopy(std::uint16_t nodeIndex, const WorldGridFoliageCanopyManager& canopyManager) const;
+    [[nodiscard]] bool nodeShouldSuppressFoliageForCanopyTransition(
+        std::uint16_t nodeIndex,
+        const WorldGridFoliageCanopyManager& canopyManager) const;
     [[nodiscard]] static bool nodeContributesWaterDraw(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeHasWaterSurface(const QuadtreeNode& node);
+    [[nodiscard]] bool canopyReadyForNode(const QuadtreeNode& node, const WorldGridFoliageCanopyManager& canopyManager) const;
+    [[nodiscard]] bool subtreeCanRenderFoliageWithoutCanopyFallback(std::uint16_t nodeIndex) const;
     void updateNodeFoliageState(QuadtreeNode& node, WorldGridFoliageManager* foliageManager);
+    void updateCanopyDrawAges();
+    void updateCanopyEdgeFadeFrames();
+    void recordTerrainLeafCount(const QuadtreeNode& node);
     [[nodiscard]] bool edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasWaterNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
@@ -145,5 +170,7 @@ private:
     float m_waterVisibilityMinHeight = 0.0f;
     float m_waterVisibilityMaxHeight = 0.0f;
     WorldGridFoliageManager* m_activeFoliageManager = nullptr;
+    WorldGridFoliageCanopyManager* m_activeCanopyManager = nullptr;
+    Position m_activeCameraPosition{};
     Extent2D m_viewportExtent{ 16, 9 };
 };

@@ -2,6 +2,7 @@
 
 #include "AppPanels.hpp"
 #include "CameraManager.hpp"
+#include "FoliageCanopyRenderer.hpp"
 #include "FoliageImposterRenderer.hpp"
 #include "FreeFlightCameraController.hpp"
 #include "GamepadInput.hpp"
@@ -16,6 +17,7 @@
 #include "SkyboxRenderer.hpp"
 #include "TriangleRenderer.hpp"
 #include "WorldGridQuadtree.hpp"
+#include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
 
@@ -56,6 +58,7 @@ private:
     TriangleRenderer m_triangleRenderer;
     LineRenderer m_lineRenderer;
     QuadtreeMeshRenderer m_quadtreeMeshRenderer;
+    FoliageCanopyRenderer m_foliageCanopyRenderer;
     FoliageImposterRenderer m_foliageRenderer;
     QuadtreeWaterMeshRenderer m_waterMeshRenderer;
     SkyboxRenderer m_skyboxRenderer;
@@ -64,6 +67,7 @@ private:
     FreeFlightCameraController m_cameraController;
     AppPanels m_panels;
     WorldGridQuadtree m_worldGridQuadtree;
+    WorldGridFoliageCanopyManager m_foliageCanopyManager;
     WorldGridFoliageManager m_foliageManager;
     WorldGridQuadtreeWaterManager m_waterManager;
     LightingSystem m_lightingSystem;

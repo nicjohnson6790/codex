@@ -94,6 +94,7 @@ void App::run()
         m_renderer.renderFrame(
             m_triangleRenderer,
             m_quadtreeMeshRenderer,
+            m_foliageCanopyRenderer,
             m_foliageRenderer,
             m_waterMeshRenderer,
             m_lineRenderer,
@@ -190,6 +191,16 @@ void App::initialize()
         m_renderer.viewportDepthFormat(),
         shaderDirectory
     );
+    if constexpr (AppConfig::Foliage::kCanopyEnabled)
+    {
+        logStartup("init foliage canopy renderer");
+        m_foliageCanopyRenderer.initialize(
+            m_renderer.device(),
+            m_renderer.swapchainFormat(),
+            m_renderer.viewportDepthFormat(),
+            shaderDirectory
+        );
+    }
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         logStartup("init foliage renderer");
@@ -259,6 +270,10 @@ void App::shutdown()
     PerformanceCapture::instance().shutdown();
     m_gamepadInput.shutdown();
     m_quadtreeMeshRenderer.shutdown();
+    if constexpr (AppConfig::Foliage::kCanopyEnabled)
+    {
+        m_foliageCanopyRenderer.shutdown();
+    }
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         m_foliageRenderer.shutdown();
@@ -308,6 +323,8 @@ void App::buildUi()
         .gamepadName = m_gamepadInput.gamepadName(),
         .lightingSystem = m_lightingSystem,
         .skyboxRenderer = m_skyboxRenderer,
+        .foliageCanopyRenderer = m_foliageCanopyRenderer,
+        .foliageCanopyManager = m_foliageCanopyManager,
         .foliageRenderer = m_foliageRenderer,
         .foliageManager = m_foliageManager,
         .waterMeshRenderer = m_waterMeshRenderer,
@@ -337,12 +354,18 @@ void App::updateSceneForFrame()
             cameraPosition,
             m_triangleRenderer,
             m_quadtreeMeshRenderer,
+            m_foliageCanopyRenderer,
             m_foliageRenderer,
             m_waterMeshRenderer,
             m_lineRenderer);
         m_quadtreeMeshRenderer.setTerrainHeightParams(
             static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
             static_cast<float>(terrainNoiseMaxAmplitude(m_worldGridQuadtree.terrainSettings())));
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            m_foliageCanopyRenderer.setActiveCamera(cameraPosition);
+            m_foliageCanopyManager.setTerrainSettings(m_worldGridQuadtree.terrainSettings());
+        }
         if constexpr (AppConfig::Foliage::kEnabled)
         {
             m_foliageRenderer.setActiveCamera(cameraPosition);
@@ -365,6 +388,10 @@ void App::updateSceneForFrame()
             {
                 m_foliageManager.setWaterLevel(waterSettings.waterLevel);
             }
+            if constexpr (AppConfig::Foliage::kCanopyEnabled)
+            {
+                m_foliageCanopyManager.setWaterLevel(waterSettings.waterLevel);
+            }
         }
         else
         {
@@ -377,6 +404,10 @@ void App::updateSceneForFrame()
             {
                 m_foliageManager.setWaterLevel(0.0f);
             }
+            if constexpr (AppConfig::Foliage::kCanopyEnabled)
+            {
+                m_foliageCanopyManager.setWaterLevel(0.0f);
+            }
         }
     }
 
@@ -384,6 +415,10 @@ void App::updateSceneForFrame()
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BuildTriangles");
         m_triangleRenderer.clear();
         m_quadtreeMeshRenderer.clear();
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            m_foliageCanopyRenderer.clear();
+        }
         if constexpr (AppConfig::Foliage::kEnabled)
         {
             m_foliageRenderer.clear();
@@ -425,14 +460,22 @@ void App::updateSceneForFrame()
         m_worldGridQuadtree.updateTree(
             m_cameraManager.activeCamera(),
             viewportExtent,
-            AppConfig::Foliage::kEnabled ? &m_foliageManager : nullptr);
+            AppConfig::Foliage::kEnabled ? &m_foliageManager : nullptr,
+            AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyManager : nullptr);
     }
 
     {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EndHeightmapUpdate");
         m_worldGridQuadtree.endHeightmapUpdate(m_quadtreeMeshRenderer);
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            m_worldGridQuadtree.queueCanopyResidency(m_foliageCanopyManager);
+            m_worldGridQuadtree.queueCanopyResidencyHints(m_foliageCanopyManager);
+            m_foliageCanopyManager.dispatchFromQueue(m_foliageCanopyRenderer);
+        }
         if constexpr (AppConfig::Foliage::kEnabled)
         {
+            m_worldGridQuadtree.queueFoliageResidencyHints(m_foliageManager);
             m_foliageManager.dispatchFromQueue(m_quadtreeMeshRenderer);
         }
     }
@@ -449,10 +492,21 @@ void App::updateSceneForFrame()
     }
 
     {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitCanopyDraws");
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            m_worldGridQuadtree.emitCanopyDraws(m_foliageCanopyManager, m_foliageCanopyRenderer);
+        }
+    }
+
+    {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EmitFoliageDraws");
         if constexpr (AppConfig::Foliage::kEnabled)
         {
-            m_worldGridQuadtree.emitFoliageDraws(m_foliageManager, m_foliageRenderer);
+            m_worldGridQuadtree.emitFoliageDraws(
+                m_foliageManager,
+                m_foliageCanopyManager,
+                m_foliageRenderer);
         }
     }
 

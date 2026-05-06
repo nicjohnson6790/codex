@@ -1,20 +1,25 @@
 # SDL3 GPU + ImGui Terrain Sandbox
 
-![rendered screenshot](images\Screenshot 2026-05-05 175930.png)
+![rendered screenshot](images\Screenshot 2026-05-06 024555.png)
 
-This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage markers, and shared-cascade FFT water.
+This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage markers, far-distance canopy impostors, and shared-cascade FFT water.
 
 ## Overview
 
 The app renders into an offscreen viewport that is shown inside an ImGui layout. Terrain is managed as quadtree patches, with heightmaps cached in an LRU and rendered through a reusable indexed patch mesh. Heightmaps are generated on the GPU with a compute shader, and per-slice min/max extents are reduced on the GPU and read back asynchronously for culling, subdivision, and debug bounds.
 
-Foliage follows the same broad ownership split as terrain: visible `256m`, `512m`, and `1024m` quadtree leaves expand into canonical `256m x 256m` foliage pages, those pages are tracked in a fixed-capacity resident cache, and a GPU compute pass writes compact packed marker instances directly into a fixed resident page pool.
+Foliage now has two distance bands that follow the same broad ownership split as terrain:
+
+- visible `256m`, `512m`, and `1024m` quadtree leaves expand into canonical `256m x 256m` foliage pages, those pages are tracked in a fixed-capacity resident cache, and a GPU compute pass writes compact packed marker instances directly into a fixed resident page pool
+- visible `2048m` quadtree leaves can draw a separate far-canopy impostor surface built from canonical `256m x 256m` canopy bitsets, with residency managed through its own fixed-capacity LRU and GPU bitset-generation pass
 
 Water follows the same broad ownership split as terrain, but stays globally simulated:
 
 - `WorldGridQuadtree` decides which leaves are visible
 - `WorldGridFoliageManager` decides which canonical foliage pages should be resident
+- `WorldGridFoliageCanopyManager` decides which canonical canopy cells should be resident
 - `FoliageImposterRenderer` owns the resident foliage page pool and foliage marker draw path
+- `FoliageCanopyRenderer` owns the far-canopy cell bitset pool, canopy generation compute path, and canopy draw path
 - `WorldGridQuadtreeWaterManager` decides which of those leaves should draw water
 - `QuadtreeWaterMeshRenderer` owns the reusable water meshes, FFT compute resources, and water draw path
 - `SDLRenderer` orchestrates the terrain, foliage, and water compute/render order each frame
@@ -23,6 +28,8 @@ Rendering highlights:
 
 - Terrain is drawn as reusable quadtree patch meshes backed by GPU-generated heightmap slices, async min/max extent readback, and tree-based bridge stitching for equal-LOD and `2:1` seams.
 - Foliage is generated on the GPU directly from resident terrain heightmaps, stored in a fixed `1024`-page pool of canonical `256m x 256m` pages, and drawn as simple vertical markers through indirect draws.
+- Far-canopy impostors use a separate `4096`-cell canopy-bitset pool. Each visible `2048m` canopy patch references `64` canonical canopy cells and reconstructs rounded canopy crowns procedurally in the fragment shader instead of drawing individual trees.
+- Canopy patches use a dedicated `16 x 16` quad surface over each `2048m` terrain leaf, support dithered fade-in, and dither their outer edge only on true `2048m -> 4096m` canopy termination borders.
 - Foliage currently only appears where terrain is more than `5m` above the water level, and markers within `20m` of the camera are suppressed so nearby terrain remains readable while the prototype is still marker-only.
 - Water uses four shared `512 x 512` FFT cascades, sampled globally in world space and instanced across visible quadtree leaves with matching interior, equal-LOD, and `2:1` bridge meshes.
 - The water draw reuses resident terrain heightmaps to estimate local depth for shallow-wave damping, per-cascade shallow-depth thresholds, transparency, shoreline transmission, and shoreline foam placement.
@@ -37,12 +44,14 @@ Core pieces:
 - `TriangleRenderer`: simple instanced triangle rendering
 - `LineRenderer`: immediate-style debug line rendering
 - `QuadtreeMeshRenderer`: terrain draw path, compute heightmap generation, and async extents readback
+- `FoliageCanopyRenderer`: far-canopy draw path, canopy-bitset compute generation, and canopy patch rendering
 - `FoliageImposterRenderer`: foliage page-pool draw path and indirect marker rendering
 - `WorldGridQuadtreeWaterManager`: CPU-side water leaf selection and staging
 - `QuadtreeWaterMeshRenderer`: water draw path, FFT compute passes, and shared displacement/slope/foam maps
 - `SkyboxRenderer`: fullscreen skybox pass using a cubemap and inverse view-projection ray reconstruction
 - `WorldGridQuadtree`: quadtree update, draw selection, subdivision/collapse, tree-based neighbor lookup for stitching, and debug draw emission
 - `WorldGridQuadtreeHeightmapManager`: heightmap residency, LRU replacement, and compute dispatch queueing
+- `WorldGridFoliageCanopyManager`: far-canopy residency, canonical canopy-cell expansion, ready-cell tracking, and GPU bitset generation queueing
 - `WorldGridFoliageManager`: foliage residency, canonical page expansion, ready-page tracking, and GPU generation queueing
 - `CameraManager` + `FreeFlightCameraController`: camera storage and free-flight controls
 - `LightingSystem`: global sun direction, color, intensity, and time-of-day cycle controls
@@ -58,27 +67,36 @@ Each frame, terrain, foliage, and water work are split into a few clear phases:
    The quadtree updates from cached residency/extents state, decides subdivision/collapse, and marks nodes for drawing.
 3. `endHeightmapUpdate`
    Queued leaf requests are pushed from the heightmap manager into the compute generation path.
-4. `emitFoliageDraws`
+4. `queueCanopyResidency` and `queueCanopyResidencyHints`
+   Visible `2048m` canopy leaves queue canonical canopy-bitset residency. Off-screen `2048m` leaf nodes also hint canopy residency so turning the camera can reuse warmed far-canopy cells instead of starting from an empty queue.
+5. `queueFoliageResidencyHints`
+   Off-screen `256m`, `512m`, and `1024m` leaf nodes with resident terrain hint canonical foliage-page residency so nearby foliage pages can warm in the background before they become visible.
+6. `emitCanopyDraws`
+   Visible stable `2048m` canopy leaves reference their `64` canonical canopy cells. Once enough cells are ready, they emit canopy draws that reconstruct rounded distant canopy blobs procedurally in the shader.
+7. `emitFoliageDraws`
    Visible stable quadtree leaves at `256m`, `512m`, and `1024m` expand into canonical `256m x 256m` foliage pages. Missing pages are queued for GPU generation, and ready pages emit indirect marker draws.
-5. `emitWaterDraws`
+8. `emitWaterDraws`
    Visible quadtree leaves are offered to the water manager, which filters out dry leaves, including leaves whose terrain min height is more than a configurable cutoff above the water level.
-6. `emitMeshDraws`
+9. `emitMeshDraws`
    Visible terrain and water leaves emit their base patch draws plus stitch-bridge draws, using tree traversal through parent/child links to find same-LOD, finer, and `2:1` coarser edge neighbors without scanning all allocated nodes.
 
 The renderer then:
 
 1. sorts terrain and water draw instances front-to-back, then uploads draw-instance data
 2. dispatches compute jobs for queued terrain slices
-3. dispatches compute jobs for queued foliage pages, writing compact packed instances directly into the resident foliage page pool and queueing an async per-page `liveCount` download
-4. dispatches water simulation:
+3. dispatches compute jobs for queued canopy cells, writing compact `4096`-bit canopy coverage masks into the resident canopy-cell pool
+4. dispatches compute jobs for queued foliage pages, writing compact packed instances directly into the resident foliage page pool and queueing an async per-page `liveCount` download
+5. dispatches water simulation:
    - optional one-time spectrum initialization when water settings change
    - per-frame spectrum evolution from cached `h0`
    - shared-memory FFT passes over SSBO working buffers
    - displacement/slope map assembly plus crest-foam generation and persistence into texture arrays
-5. queues an async terrain extents download
-6. renders terrain, foliage, water, triangles, and debug lines into the offscreen viewport
+6. queues an async terrain extents download
+7. renders terrain, canopy, foliage, water, triangles, and debug lines into the offscreen viewport
    - terrain uses an interior patch mesh plus equal-LOD and `2:1` bridge meshes to close cracks between quadtree nodes
    - terrain submits both bridge variants through one shared bridge indirect draw
+   - canopy renders a terrain-following `16 x 16` quad patch over visible `2048m` leaves, sampling resident canopy-cell bitsets and reconstructing clustered canopy crowns from only the nearest four candidate slots per fragment
+   - canopy supports dithered patch fade-in plus dithered edge fade on true `2048m -> 4096m` canopy termination borders
    - foliage currently renders simple vertical markers selected by packed `meshId` height classes instead of real tree meshes or impostor atlases
    - submerged terrain can add texture-driven caustics, with the caustic evolution warped and modulated from the shared water displacement/slope maps
    - shoreline terrain shading blends from dry sand into darker wetted sand around the waterline and extends the submerged sand tint into shallow water
@@ -105,10 +123,14 @@ The renderer then:
 - Terrain equal-LOD and `2:1` bridge draws batched through one indirect bridge submission
 - GPU compute terrain generation with async GPU extents readback
 - Canonical `256m x 256m` foliage pages stored in a fixed `1024`-page GPU pool
+- Separate far-canopy residency for canonical `256m x 256m` canopy cells stored in a fixed `4096`-cell GPU bitset pool
 - GPU foliage generation directly from resident terrain heightmaps, with only per-page `liveCount` read back to the CPU
+- GPU far-canopy generation into compact per-cell `4096`-bit coverage masks instead of full tree instances
 - Indirect foliage marker draws that validate placement and residency before real tree meshes/impostors are added
+- Far-distance canopy impostor draws for `2048m` leaves, with procedural rounded canopy reconstruction in the fragment shader
 - Foliage placement gated to terrain more than `5m` above the water level
 - Near-camera foliage marker suppression within `20m`
+- Off-screen foliage residency hints for leaf nodes so foliage and canopy can warm in the background before a camera turn
 - Shared-cascade FFT water with an interior base mesh plus reusable equal-LOD and `2:1` bridge meshes
 - Water equal-LOD and `2:1` bridge draws batched through one indirect bridge submission
 - Four `512 x 512` water cascades sampled in world space across visible water leaves, with cascade usage reduced on larger quadtree patches
@@ -158,11 +180,13 @@ The renderer then:
 - `src/AppPanels.*`: UI layout and editor panels
 - `src/SDLRenderer.*`: SDL GPU setup and frame submission
 - `src/QuadtreeMeshRenderer.*`: terrain draw path, bridge meshes, and compute integration
+- `src/FoliageCanopyRenderer.*`: far-canopy draw path and canopy-bitset compute integration
 - `src/FoliageImposterRenderer.*`: foliage marker draw path and resident page-pool handling
 - `src/QuadtreeWaterMeshRenderer.*`: water draw path, bridge meshes, and FFT compute integration
 - `src/SkyboxRenderer.*`: cubemap loading and fullscreen skybox rendering
 - `src/WorldGridQuadtree.*`: quadtree state and traversal
 - `src/WorldGridQuadtreeHeightmapManager.*`: heightmap LRU and compute queue management
+- `src/WorldGridFoliageCanopyManager.*`: far-canopy LRU and canopy-cell generation queue management
 - `src/WorldGridFoliageManager.*`: foliage residency, canonical page expansion, and GPU generation staging
 - `src/WorldGridQuadtreeWaterManager.*`: water draw filtering and leaf staging
 - `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug box rendering
@@ -182,9 +206,12 @@ The renderer then:
 - `shaders/line.*`: line shaders
 - `shaders/quadtree_mesh.*`: terrain graphics shaders
 - `shaders/quadtree_mesh_bridge.vert`: terrain bridge vertex shader
+- `shaders/foliage_canopy.vert`: far-canopy vertex shader
+- `shaders/foliage_canopy.frag`: far-canopy fragment shader
 - `shaders/foliage_imposter.*`: foliage marker shaders
 - `shaders/skybox.*`: skybox fullscreen shaders
 - `shaders/heightmap_generate.comp`: terrain compute shader
+- `shaders/foliage_canopy_generate.comp`: far-canopy bitset generation compute shader
 - `shaders/foliage_generate.comp`: foliage instance generation compute shader
 - `shaders/water_mesh.*`: water graphics shaders
 - `shaders/water_mesh_bridge.vert`: water bridge vertex shader
@@ -276,7 +303,9 @@ Windows GPU preference:
 - The maintained terrain path is the runtime GPU compute path; the older standalone quadtree sanity executable has been removed.
 - Terrain extents are produced on the GPU and read back asynchronously, so newly generated slices may briefly fall back to conservative bounds until their readback completes.
 - Foliage uses canonical `256m x 256m` pages only. Visible `512m` leaves expand into `4` canonical foliage pages and visible `1024m` leaves expand into `16`.
+- Far-canopy uses the same canonical `256m x 256m` identity rules as near foliage, but only for visible `2048m` leaf nodes. Each canopy patch references `64` canonical canopy cells and reconstructs distant canopy mass procedurally from compact bitsets instead of storing full tree instances.
 - The current foliage pass is intentionally a minimal baseline: compact packed instances are generated on the GPU and drawn as vertical markers instead of full tree meshes, impostor atlases, or sway-animated vegetation.
+- Off-screen foliage warming now also follows leaf ownership: off-screen `2048m` leaf nodes hint canopy residency, while off-screen `256m`, `512m`, and `1024m` leaf nodes hint marker-foliage residency. The hint paths only warm caches; they do not emit draws by themselves.
 - The quadtree processes all allocated nodes during update; draw selection is separate from subdivision/collapse decisions.
 - Stitching lookups now follow the quadtree structure directly through parent/child links and only hop across the active base-node ring when a lookup reaches a world-grid border.
 - Terrain and water bridge selection is exhaustive for drawn nodes: each drawn edge resolves to either an equal-LOD bridge or a `2:1` coarse bridge, including border fallback when a neighboring root tile is not resident.
