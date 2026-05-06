@@ -1,0 +1,75 @@
+#version 450
+
+#include "foliage_common.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct DecodeRequest
+{
+    uvec4 sourcePageData;
+};
+
+struct DecodedNearbyInstance
+{
+    vec2 localOffset;
+    uint meshId;
+    uint flags;
+};
+
+layout(set=0, binding=0, std430) readonly buffer DecodeRequestBuffer
+{
+    DecodeRequest requests[];
+} requestBuffer;
+
+layout(set=0, binding=1, std430) readonly buffer FoliagePagePoolBuffer
+{
+    uint packedInstances[];
+} foliagePagePoolBuffer;
+
+layout(set=1, binding=0, std430) buffer DecodedNearbyPageBuffer
+{
+    DecodedNearbyInstance decodedInstances[];
+} decodedPageBuffer;
+
+const uint kCandidateGridResolution = 64u;
+const uint kCandidateSlotCount = kCandidateGridResolution * kCandidateGridResolution;
+const float kCandidateCellSizeMeters = 4.0;
+const uint kResidentFlag = 1u;
+
+void main()
+{
+    uint liveIndex = gl_GlobalInvocationID.x;
+    uint requestIndex = gl_WorkGroupID.z;
+    if (liveIndex >= kCandidateSlotCount)
+    {
+        return;
+    }
+
+    DecodeRequest request = requestBuffer.requests[requestIndex];
+    uint sourcePageIndex = request.sourcePageData.x;
+    uint sourceLiveCount = request.sourcePageData.y;
+    uint pageSeed = request.sourcePageData.z;
+    uint outputPageIndex = request.sourcePageData.w;
+    if (liveIndex >= sourceLiveCount)
+    {
+        return;
+    }
+
+    uint packedInstance =
+        foliagePagePoolBuffer.packedInstances[(sourcePageIndex * kCandidateSlotCount) + liveIndex];
+    uint candidateSlot = packedInstance & 0x0FFFu;
+    uint meshId = (packedInstance >> 12u) & 0xFFFFu;
+    uint candidateX = candidateSlot & 63u;
+    uint candidateZ = candidateSlot >> 6u;
+    vec2 jitter = foliageJitterOffset(pageSeed ^ candidateSlot);
+    vec2 localOffset =
+        vec2(
+            (float(candidateX) + 0.5) * kCandidateCellSizeMeters,
+            (float(candidateZ) + 0.5) * kCandidateCellSizeMeters) +
+        jitter;
+
+    uint outputIndex = (outputPageIndex * kCandidateSlotCount) + candidateSlot;
+    decodedPageBuffer.decodedInstances[outputIndex].localOffset = localOffset;
+    decodedPageBuffer.decodedInstances[outputIndex].meshId = meshId;
+    decodedPageBuffer.decodedInstances[outputIndex].flags = kResidentFlag;
+}

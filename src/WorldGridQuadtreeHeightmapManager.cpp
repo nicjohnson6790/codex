@@ -134,9 +134,9 @@ void WorldGridQuadtreeHeightmapManager::setComputeDispatchBudget(std::uint16_t b
     m_computeDispatchBudget = std::max<std::uint16_t>(1, budget);
 }
 
-void WorldGridQuadtreeHeightmapManager::dispatchFromQueue(QuadtreeMeshRenderer& meshRenderer)
+void WorldGridQuadtreeHeightmapManager::scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer)
 {
-    HELLO_PROFILE_SCOPE("WorldGridQuadtreeHeightmapManager::DispatchFromQueue");
+    HELLO_PROFILE_SCOPE("WorldGridQuadtreeHeightmapManager::ScheduleQueuedGenerations");
 
     for (std::uint16_t dispatchIndex = 0; dispatchIndex < m_computeDispatchBudget; ++dispatchIndex)
     {

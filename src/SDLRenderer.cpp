@@ -5,6 +5,7 @@
 #include "FoliageImposterRenderer.hpp"
 #include "LightingSystem.hpp"
 #include "LineRenderer.hpp"
+#include "NearbyFoliageRenderer.hpp"
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
@@ -165,6 +166,7 @@ void SDLRenderer::setActiveCamera(
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
     FoliageCanopyRenderer& canopyRenderer,
     FoliageImposterRenderer& foliageRenderer,
+    NearbyFoliageRenderer& nearbyFoliageRenderer,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer)
 {
@@ -178,6 +180,7 @@ void SDLRenderer::setActiveCamera(
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         foliageRenderer.setActiveCamera(cameraPosition);
+        nearbyFoliageRenderer.setActiveCamera(cameraPosition);
     }
     if constexpr (AppConfig::Water::kEnabled)
     {
@@ -202,6 +205,7 @@ void SDLRenderer::renderFrame(
     QuadtreeMeshRenderer& quadtreeMeshRenderer,
     FoliageCanopyRenderer& canopyRenderer,
     FoliageImposterRenderer& foliageRenderer,
+    NearbyFoliageRenderer& nearbyFoliageRenderer,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer,
     SkyboxRenderer& skyboxRenderer,
@@ -238,6 +242,7 @@ void SDLRenderer::renderFrame(
         if constexpr (AppConfig::Foliage::kEnabled)
         {
             foliageRenderer.upload(copyPass);
+            nearbyFoliageRenderer.upload(copyPass);
         }
         if constexpr (AppConfig::Water::kEnabled)
         {
@@ -255,6 +260,7 @@ void SDLRenderer::renderFrame(
             canopyRenderer.dispatchCellGenerations(commandBuffer, quadtreeMeshRenderer.heightmapBuffer());
         }
         quadtreeMeshRenderer.dispatchFoliageInstanceGenerations(commandBuffer, foliageRenderer.pagePoolBuffer());
+        nearbyFoliageRenderer.dispatchDecodedPageExpansions(commandBuffer, foliageRenderer.pagePoolBuffer());
     }
     if constexpr (AppConfig::Water::kEnabled)
     {
@@ -271,6 +277,7 @@ void SDLRenderer::renderFrame(
         }
         quadtreeMeshRenderer.queueHeightmapExtentsDownload(copyPass);
         quadtreeMeshRenderer.queueFoliageInstanceLiveCountDownloads(copyPass);
+        nearbyFoliageRenderer.queueDecodedPageDownloads(copyPass);
         SDL_EndGPUCopyPass(copyPass);
     }
 
@@ -371,6 +378,17 @@ void SDLRenderer::renderFrame(
             }
         }
         {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderNearbyFoliage", ProfileScopeGroup::Renderer);
+            if constexpr (AppConfig::Foliage::kEnabled)
+            {
+                nearbyFoliageRenderer.render(
+                    renderPass,
+                    commandBuffer,
+                    viewProjection,
+                    quadtreeMeshRenderer.heightmapBuffer());
+            }
+        }
+        {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderDebugPrimitives", ProfileScopeGroup::Renderer);
             triangleRenderer.render(renderPass, commandBuffer, viewProjection);
             lineRenderer.render(renderPass, commandBuffer, viewProjection);
@@ -464,6 +482,7 @@ void SDLRenderer::renderFrame(
     const std::shared_ptr<SubmittedGpuFence> sharedFence =
         std::make_shared<SubmittedGpuFence>(m_device, submittedFence);
     quadtreeMeshRenderer.attachSubmittedFence(sharedFence);
+    nearbyFoliageRenderer.attachSubmittedFence(sharedFence);
 
     // ImGui draw data for this frame may still reference the previous viewport texture,
     // so defer resizing until after the command buffer using it has been submitted.

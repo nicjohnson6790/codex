@@ -24,11 +24,12 @@ public:
         const WorldGridQuadtreeLeafId& leafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex);
-    void dispatchFromQueue(FoliageCanopyRenderer& renderer);
+    void scheduleQueuedGenerations(FoliageCanopyRenderer& renderer);
 
     [[nodiscard]] bool getReadyCellInfo(
         const WorldGridQuadtreeLeafId& leafId,
         FoliageCanopyReadyCellInfo& cellInfo) const;
+    void noteRenderedCell(const WorldGridQuadtreeLeafId& leafId);
 
     [[nodiscard]] std::uint16_t residentCount() const { return m_residentCount; }
     [[nodiscard]] std::uint16_t queuedCount() const { return m_queueCount; }
@@ -70,7 +71,7 @@ private:
     [[nodiscard]] bool dequeueLeaf(QueuedLeafRequest& request);
     [[nodiscard]] std::uint16_t findOldestEvictableResidentIndex() const;
     void assignResidentCell(std::uint16_t residentIndex, const WorldGridQuadtreeLeafId& leafId);
-    void clearResidentCell(std::uint16_t residentIndex);
+    void clearResidentCell(std::uint16_t residentIndex, bool removeFromActiveSet = true);
     void resetCacheState();
     [[nodiscard]] static bool residentHasFlag(const FoliageCanopyResidentCellEntry& entry, std::uint8_t mask);
     static void setResidentFlag(FoliageCanopyResidentCellEntry& entry, std::uint8_t mask, bool enabled);
@@ -84,6 +85,8 @@ private:
     std::array<bool, kCapacity> m_residentUsed{};
     std::array<bool, kCapacity> m_generationLocked{};
     std::array<FoliageTerrainSource, kCapacity> m_terrainSources{};
+    std::array<std::uint16_t, kCapacity> m_activeResidentIndices{};
+    std::array<std::uint16_t, kCapacity> m_residentActiveSlots{};
     std::array<std::array<LookupBucketEntry, FoliageConfig::kCanopyLookupBucketEntryCount>, FoliageConfig::kCanopyLookupBucketCount>
         m_lookupBuckets{};
     std::array<bool, FoliageConfig::kCanopyLookupBucketCount> m_lookupBucketHasOverflow{};

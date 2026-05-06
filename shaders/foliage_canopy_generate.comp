@@ -125,7 +125,7 @@ void main()
             sin((worldSample.x * kClusterScale) + (worldSample.y * (kClusterScale * 1.37)) + (terrainHeight * 0.0035)) *
             43758.5453);
         float density = clamp(kBaseDensity + (clusterNoise * kClusterDensity), 0.0, 0.9);
-        uint slotSeed = leafSeed ^ (candidateSlot * 0x9e3779b9u);
+        uint slotSeed = leafSeed ^ candidateSlot;
         if (hash01(slotSeed) <= density)
         {
             wordMask |= (1u << bitIndex);

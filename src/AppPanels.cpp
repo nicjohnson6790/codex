@@ -412,8 +412,7 @@ void AppPanels::drawDebugTab(Context& context)
     HELLO_PROFILE_SCOPE("AppPanels::DrawDebugTab");
     const WorldGridQuadtree::TreeData& treeData = context.worldGridQuadtree.treeData;
 
-    ImGui::TextUnformatted("Quadtree");
-    ImGui::Separator();
+    ImGui::SeparatorText("Quadtree");
     ImGui::Checkbox("Show quadtree borders", &m_showQuadtreeBorders);
     ImGui::Text("Generated cells: 9");
     ImGui::Text("Drawable nodes: %u", treeData.drawableNodeCount);
@@ -421,9 +420,8 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::Text("Started collapsing this frame: %u", treeData.collapseCountThisFrame);
     ImGui::Text("Max depth: %u", treeData.maxDepth);
     ImGui::Text("Minimum quad size: %.0f", AppConfig::Quadtree::kMinimumQuadSize);
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Terrain Draw Sizes");
-    ImGui::Separator();
+
+    ImGui::SeparatorText("Terrain Draw Sizes");
     bool showedTerrainDrawSize = false;
     for (std::size_t scalePow = 0; scalePow < treeData.terrainDrawCountByScalePow.size(); ++scalePow)
     {
@@ -443,35 +441,47 @@ void AppPanels::drawDebugTab(Context& context)
     {
         ImGui::TextUnformatted("No terrain draws submitted");
     }
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Heightmap Manager");
-    ImGui::Separator();
+
+    ImGui::SeparatorText("Heightmap Cache");
     ImGui::Text("Resident slices: %u", context.worldGridQuadtree.residentCount());
     ImGui::Text("Queued leaves: %u", context.worldGridQuadtree.queuedCount());
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Foliage");
-    ImGui::Separator();
+
+    ImGui::SeparatorText("Foliage Overview");
     ImGui::Text("Canopy draws: %u", context.foliageCanopyRenderer.drawCount());
-    ImGui::Text("Resident canopy cells: %u", context.foliageCanopyManager.residentCount());
-    ImGui::Text("Queued canopy cells: %u", context.foliageCanopyManager.queuedCount());
     ImGui::Text("Emitted foliage page draws: %u", context.foliageRenderer.drawCount());
     ImGui::Text("Emitted foliage marker instances: %u", context.foliageRenderer.emittedInstanceCount());
+    ImGui::Text("Nearby foliage draw calls: %u", context.nearbyFoliageRenderer.drawCallCount());
+    ImGui::Text("Nearby foliage marker instances: %u", context.nearbyFoliageRenderer.emittedInstanceCount());
+
+    ImGui::SeparatorText("Foliage GPU Residency");
     ImGui::Text("Resident foliage pages: %u", context.foliageManager.residentCount());
     ImGui::Text("Queued foliage pages: %u", context.foliageManager.queuedCount());
     ImGui::Text("GPU page-generation pending: %u", context.foliageManager.maskPendingCount());
     ImGui::Text("GPU generation pending pages: %u", context.foliageManager.uploadPendingCount());
     ImGui::Text("Ready foliage pages: %u", context.foliageManager.readyCount());
     ImGui::Text("Foliage page-pool capacity: %u", FoliageConfig::kPagePoolCapacity);
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Water");
-    ImGui::Separator();
+
+    ImGui::SeparatorText("Nearby Foliage LRU");
+    ImGui::Text("Decoded CPU-resident pages: %u", context.nearbyFoliageRenderer.decodedResidentCount());
+    ImGui::Text("Decoded-page readbacks pending: %u", context.nearbyFoliageRenderer.decodedPendingCount());
+    ImGui::Text("Decoded-page LRU capacity: %u", FoliageConfig::kNearbyDecodedPageLruCapacity);
+    ImGui::Text("Nearby radius: %.1f m", FoliageConfig::kNearbyDefaultRadiusMeters);
+    ImGui::Text("Candidate slots/page: %u", FoliageConfig::kCandidateSlotCount);
+
+    ImGui::SeparatorText("Canopy Residency");
+    ImGui::Text("Resident canopy cells: %u", context.foliageCanopyManager.residentCount());
+    ImGui::Text("Queued canopy cells: %u", context.foliageCanopyManager.queuedCount());
+    ImGui::Text("Canopy cell-pool capacity: %u", FoliageConfig::kCanopyCellPoolCapacity);
+
+    ImGui::SeparatorText("Water");
     ImGui::Text("Queued water instances: %u", context.waterManager.queuedCount());
     ImGui::Text("Water mesh instances: %u", context.waterMeshRenderer.instanceCount());
     ImGui::Text(
         "Water mesh resolution: %u x %u vertices",
         AppConfig::Water::kMeshVertexResolution,
         AppConfig::Water::kMeshVertexResolution);
-    ImGui::Spacing();
+
+    ImGui::SeparatorText("Notes");
     ImGui::TextWrapped("The quadtree is rebuilt around the active camera and includes the current grid cell plus the eight surrounding cells.");
 }
 

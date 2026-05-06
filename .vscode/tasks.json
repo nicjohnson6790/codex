@@ -67,7 +67,7 @@
     {
       "label": "Run Debug",
       "type": "shell",
-      "command": "${workspaceFolder}\\build\\Debug\\hello_triangle.exe",
+      "command": "${workspaceFolder}\\build\\Debug\\terrain_sandbox.exe",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -77,7 +77,7 @@
     {
       "label": "Run Release",
       "type": "shell",
-      "command": "${workspaceFolder}\\build\\Release\\hello_triangle.exe",
+      "command": "${workspaceFolder}\\build\\Release\\terrain_sandbox.exe",
       "options": {
         "cwd": "${workspaceFolder}"
       },

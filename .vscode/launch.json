@@ -5,7 +5,7 @@
       "name": "Launch Debug",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}\\build\\Debug\\hello_triangle.exe",
+      "program": "${workspaceFolder}\\build\\Debug\\terrain_sandbox.exe",
       "args": [],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
@@ -15,7 +15,7 @@
       "name": "Launch Debug (Verbose Startup)",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}\\build\\Debug\\hello_triangle.exe",
+      "program": "${workspaceFolder}\\build\\Debug\\terrain_sandbox.exe",
       "args": [
         "--verbose-startup"
       ],
@@ -27,7 +27,7 @@
       "name": "Launch Debug (First Frame)",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}\\build\\Debug\\hello_triangle.exe",
+      "program": "${workspaceFolder}\\build\\Debug\\terrain_sandbox.exe",
       "args": [
         "--verbose-startup",
         "--quit-after-first-frame"
@@ -40,7 +40,7 @@
       "name": "Launch Release",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}\\build\\Release\\hello_triangle.exe",
+      "program": "${workspaceFolder}\\build\\Release\\terrain_sandbox.exe",
       "args": [],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",

@@ -131,9 +131,9 @@ bool WorldGridFoliageManager::makeResident(
     return false;
 }
 
-void WorldGridFoliageManager::dispatchFromQueue(QuadtreeMeshRenderer& meshRenderer)
+void WorldGridFoliageManager::scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer)
 {
-    HELLO_PROFILE_SCOPE("WorldGridFoliageManager::DispatchFromQueue");
+    HELLO_PROFILE_SCOPE("WorldGridFoliageManager::ScheduleQueuedGenerations");
 
     for (std::uint16_t dispatchIndex = 0; dispatchIndex < FoliageConfig::kGenerationBudgetPerFrame; ++dispatchIndex)
     {
@@ -214,6 +214,7 @@ void WorldGridFoliageManager::applyGeneratedPageLiveCounts(
 
         FoliageResidentPageEntry& entry = m_residentEntries[residentIndex];
         entry.liveCount = liveCount;
+        entry.contentVersion = m_nextContentVersion++;
         setResidentFlag(entry, MaskPendingMask, false);
         setResidentFlag(entry, UploadPendingMask, false);
         setResidentFlag(entry, ReadyMask, residentHasFlag(entry, MaskValidMask));
@@ -242,6 +243,7 @@ bool WorldGridFoliageManager::getReadyPageInfo(
     pageInfo = {
         .pageIndex = entry.pageIndex,
         .liveCount = entry.liveCount,
+        .contentVersion = entry.contentVersion,
         .seed = static_cast<std::uint32_t>(hashLeafId(entry.leafId)),
     };
     return true;
@@ -561,6 +563,7 @@ void WorldGridFoliageManager::assignResidentPage(std::uint16_t residentIndex, co
         .leafId = leafId,
         .pageIndex = residentIndex,
         .liveCount = 0,
+        .contentVersion = 0u,
         .age = 0,
         .flags = 0,
     };
@@ -596,6 +599,7 @@ void WorldGridFoliageManager::resetCacheState()
     m_residentCount = 0;
     m_lookupOverflowCount = 0;
     m_freeResidentIndexCount = kCapacity;
+    m_nextContentVersion = 1u;
 }
 
 bool WorldGridFoliageManager::queueGpuPageGeneration(

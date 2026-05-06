@@ -1,5 +1,7 @@
 #version 450
 
+#include "foliage_common.glsl"
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 struct FoliageInstanceGenerationParams
@@ -37,16 +39,6 @@ const float kHeightmapLeafIntervalCount = 256.0;
 const float kBaseDensity = 0.08;
 const float kClusterDensity = 0.18;
 const float kClusterScale = 1.0 / 96.0;
-
-float hash01(uint seed)
-{
-    seed ^= seed >> 16u;
-    seed *= 0x7feb352du;
-    seed ^= seed >> 15u;
-    seed *= 0x846ca68bu;
-    seed ^= seed >> 16u;
-    return float(seed & 0x00FFFFFFu) / float(0x01000000u);
-}
 
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {
@@ -128,12 +120,12 @@ void main()
         43758.5453);
     float density = clamp(kBaseDensity + (clusterNoise * kClusterDensity), 0.0, 0.9);
     uint slotSeed = leafSeed ^ (candidateSlot * 0x9e3779b9u);
-    if (hash01(slotSeed) > density)
+    if (foliageHash01(slotSeed) > density)
     {
         return;
     }
 
-    float heightSelector = hash01(slotSeed ^ 0x68bc21ebu);
+    float heightSelector = foliageHash01(slotSeed ^ 0x68bc21ebu);
     uint meshId =
         heightSelector < 0.33 ? 0u :
         (heightSelector < 0.72 ? 1u : 2u);

@@ -33,7 +33,7 @@ public:
     void ageMap();
     bool makeResident(const WorldGridQuadtreeLeafId& leafId);
     void requestLeaf(const WorldGridQuadtreeLeafId& leafId, QuadtreeMeshRenderer& meshRenderer);
-    void dispatchFromQueue(QuadtreeMeshRenderer& meshRenderer);
+    void scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer);
     void applyGeneratedExtents(
         const WorldGridQuadtreeLeafId& leafId,
         std::uint16_t sliceIndex,

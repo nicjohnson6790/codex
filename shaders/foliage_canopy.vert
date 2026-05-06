@@ -39,7 +39,7 @@ layout(location = 2) flat out uint fragDrawIndex;
 
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
-const float kCanopyBaseHeightMeters = 9.0;
+const float kCanopyBaseHeightMeters = 12.0;
 
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {

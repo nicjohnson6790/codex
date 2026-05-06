@@ -1,5 +1,7 @@
 #version 450
 
+#include "foliage_common.glsl"
+
 layout(set=3, binding=0) uniform FoliageCanopyUniforms
 {
     mat4 viewProjection;
@@ -44,16 +46,6 @@ const vec3 kPalette[4] = vec3[](
     vec3(0.25, 0.43, 0.20),
     vec3(0.18, 0.35, 0.19));
 
-float hash01(uint seed)
-{
-    seed ^= seed >> 16u;
-    seed *= 0x7feb352du;
-    seed ^= seed >> 15u;
-    seed *= 0x846ca68bu;
-    seed ^= seed >> 16u;
-    return float(seed & 0x00FFFFFFu) / float(0x01000000u);
-}
-
 uint hashU32(uint seed)
 {
     seed ^= seed >> 16u;
@@ -62,13 +54,6 @@ uint hashU32(uint seed)
     seed *= 0x846ca68bu;
     seed ^= seed >> 16u;
     return seed;
-}
-
-vec2 jitterOffset(uint seed)
-{
-    float jitterX = (hash01(seed ^ 0x68bc21ebu) * 2.0) - 1.0;
-    float jitterZ = (hash01(seed ^ 0x02e5be93u) * 2.0) - 1.0;
-    return vec2(jitterX, jitterZ) * 1.2;
 }
 
 bool canopyCandidateResident(uint cellSlotIndex, uint candidateSlot)
@@ -126,12 +111,12 @@ void main()
             continue;
         }
 
-        uint slotSeed = cellSeed ^ (candidateSlot * 0x9e3779b9u);
+        uint slotSeed = cellSeed ^ candidateSlot;
         vec2 crownCenter =
             vec2(candidateGrid) * kCandidateCellSizeMeters +
             vec2(kCandidateCellSizeMeters * 0.5) +
-            jitterOffset(slotSeed);
-        float radius = mix(5.5, 11.5, hash01(slotSeed ^ 0x31f123bbu));
+            foliageJitterOffset(slotSeed);
+        float radius = mix(5.5, 11.5, foliageHash01(slotSeed ^ 0x31f123bbu));
         vec2 delta = localCellMeters - crownCenter;
         float normalizedDistance = length(delta) / radius;
         if (normalizedDistance > 1.0)
@@ -143,10 +128,11 @@ void main()
         vec3 normal = normalize(vec3(delta.x / max(radius, 0.001), hemisphere * 1.65, delta.y / max(radius, 0.001)));
         if (!covered || hemisphere > bestShape)
         {
+            uint colorSeed = hashU32(slotSeed ^ 0x31f123bbu);
             covered = true;
             bestShape = hemisphere;
             bestNormal = normal;
-            bestColor = kPalette[(slotSeed >> 3u) & 3u];
+            bestColor = kPalette[colorSeed & 3u];
         }
     }
 
@@ -197,7 +183,7 @@ void main()
         (uint(fadeCell.x) * 0x9e3779b9u) ^
         (uint(fadeCell.y) * 0x85ebca6bu) ^
         (flatCellIndex * 0xc2b2ae35u);
-    if (hash01(hashU32(fadeSeed)) > combinedFade)
+    if (foliageHash01(hashU32(fadeSeed)) > combinedFade)
     {
         discard;
     }

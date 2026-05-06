@@ -3,6 +3,7 @@
 #include "CameraManager.hpp"
 #include "FoliageCanopyRenderer.hpp"
 #include "LightingSystem.hpp"
+#include "NearbyFoliageRenderer.hpp"
 #include "PerfPanel.hpp"
 #include "RenderTypes.hpp"
 #include "SceneTypes.hpp"
@@ -38,6 +39,7 @@ public:
         FoliageCanopyRenderer& foliageCanopyRenderer;
         WorldGridFoliageCanopyManager& foliageCanopyManager;
         FoliageImposterRenderer& foliageRenderer;
+        NearbyFoliageRenderer& nearbyFoliageRenderer;
         WorldGridFoliageManager& foliageManager;
         QuadtreeWaterMeshRenderer& waterMeshRenderer;
         WorldGridQuadtreeWaterManager& waterManager;

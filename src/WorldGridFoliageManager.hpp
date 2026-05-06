@@ -26,7 +26,7 @@ public:
         const WorldGridQuadtreeLeafId& leafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex);
-    void dispatchFromQueue(QuadtreeMeshRenderer& meshRenderer);
+    void scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer);
     void applyGeneratedPageLiveCounts(
         const std::vector<std::pair<WorldGridQuadtreeLeafId, std::uint16_t>>& generatedLiveCounts);
 
@@ -104,6 +104,7 @@ private:
     std::uint16_t m_residentCount = 0;
     std::uint16_t m_lookupOverflowCount = 0;
     std::uint16_t m_freeResidentIndexCount = 0;
+    std::uint32_t m_nextContentVersion = 1u;
     TerrainNoiseSettings m_terrainSettings = sanitizeTerrainNoiseSettings(TerrainNoiseSettings{});
     float m_waterLevel = AppConfig::Water::kDefaultWaterLevel;
 };

@@ -17,6 +17,7 @@
 [startup] init quadtree mesh renderer
 [startup] init foliage canopy renderer
 [startup] init foliage renderer
+[startup] init nearby foliage renderer
 [startup] init water mesh renderer
 [startup] init skybox renderer
 [startup] create ImGui context
@@ -24,7 +25,6 @@
 [startup] init ImGui SDL GPU backend
 [startup] initialize complete
 [startup] first frame submitted
-[startup] quit-after-first-frame requested
 [startup] shutdown begin
 [startup] wait for device idle
 [startup] shutdown ImGui

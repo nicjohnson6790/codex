@@ -8,6 +8,7 @@
 #include "GamepadInput.hpp"
 #include "LineRenderer.hpp"
 #include "LightingSystem.hpp"
+#include "NearbyFoliageRenderer.hpp"
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
@@ -60,6 +61,7 @@ private:
     QuadtreeMeshRenderer m_quadtreeMeshRenderer;
     FoliageCanopyRenderer m_foliageCanopyRenderer;
     FoliageImposterRenderer m_foliageRenderer;
+    NearbyFoliageRenderer m_nearbyFoliageRenderer;
     QuadtreeWaterMeshRenderer m_waterMeshRenderer;
     SkyboxRenderer m_skyboxRenderer;
     GamepadInput m_gamepadInput;

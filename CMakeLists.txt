@@ -102,8 +102,8 @@ function(compile_shader SOURCE_FILE OUTPUT_FILE)
     add_custom_command(
         OUTPUT ${OUTPUT_FILE}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
-        COMMAND ${VULKAN_GLSLC_EXECUTABLE} -o ${OUTPUT_FILE} ${SOURCE_FILE}
-        DEPENDS ${SOURCE_FILE}
+        COMMAND ${VULKAN_GLSLC_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/shaders -o ${OUTPUT_FILE} ${SOURCE_FILE}
+        DEPENDS ${SOURCE_FILE} ${ARGN}
         VERBATIM
     )
 endfunction()
@@ -124,6 +124,9 @@ set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
 set(SKYBOX_FRAG_SPV ${SHADER_OUTPUT_DIR}/skybox.frag.spv)
 set(FOLIAGE_IMPOSTER_VERT_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter.vert.spv)
 set(FOLIAGE_IMPOSTER_FRAG_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter.frag.spv)
+set(NEARBY_FOLIAGE_VERT_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage.vert.spv)
+set(NEARBY_FOLIAGE_FRAG_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage.frag.spv)
+set(NEARBY_FOLIAGE_DECODE_COMP_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage_decode.comp.spv)
 set(WATER_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh.vert.spv)
 set(WATER_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh_bridge.vert.spv)
 set(WATER_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/water_mesh.frag.spv)
@@ -140,14 +143,32 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.vert ${QUADTREE_MESH_VE
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_MESH_BRIDGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_GENERATE_COMP_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_generate.comp ${FOLIAGE_GENERATE_COMP_SPV})
+compile_shader(
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_generate.comp
+    ${FOLIAGE_GENERATE_COMP_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_canopy.vert ${FOLIAGE_CANOPY_VERT_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_canopy.frag ${FOLIAGE_CANOPY_FRAG_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_canopy_generate.comp ${FOLIAGE_CANOPY_GENERATE_COMP_SPV})
+compile_shader(
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_canopy.frag
+    ${FOLIAGE_CANOPY_FRAG_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
+compile_shader(
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_canopy_generate.comp
+    ${FOLIAGE_CANOPY_GENERATE_COMP_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.vert ${FOLIAGE_IMPOSTER_VERT_SPV})
+compile_shader(
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.vert
+    ${FOLIAGE_IMPOSTER_VERT_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.frag ${FOLIAGE_IMPOSTER_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.vert ${NEARBY_FOLIAGE_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.frag ${NEARBY_FOLIAGE_FRAG_SPV})
+compile_shader(
+    ${CMAKE_SOURCE_DIR}/shaders/nearby_foliage_decode.comp
+    ${NEARBY_FOLIAGE_DECODE_COMP_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh_bridge.vert ${WATER_MESH_BRIDGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV})
@@ -174,6 +195,9 @@ add_custom_target(shaders ALL
         ${SKYBOX_FRAG_SPV}
         ${FOLIAGE_IMPOSTER_VERT_SPV}
         ${FOLIAGE_IMPOSTER_FRAG_SPV}
+        ${NEARBY_FOLIAGE_VERT_SPV}
+        ${NEARBY_FOLIAGE_FRAG_SPV}
+        ${NEARBY_FOLIAGE_DECODE_COMP_SPV}
         ${WATER_MESH_VERT_SPV}
         ${WATER_MESH_BRIDGE_VERT_SPV}
         ${WATER_MESH_FRAG_SPV}
@@ -196,6 +220,7 @@ add_executable(terrain_sandbox
     src/HeightmapNoiseGenerator.cpp
     src/LineRenderer.cpp
     src/LightingSystem.cpp
+    src/NearbyFoliageRenderer.cpp
     src/PerfPanel.cpp
     src/PerformanceCapture.cpp
     src/QuadtreeMeshRenderer.cpp

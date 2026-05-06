@@ -15,6 +15,7 @@ class LightingSystem;
 class LineRenderer;
 class FoliageCanopyRenderer;
 class FoliageImposterRenderer;
+class NearbyFoliageRenderer;
 class QuadtreeMeshRenderer;
 class QuadtreeWaterMeshRenderer;
 class SkyboxRenderer;
@@ -43,6 +44,7 @@ public:
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
         FoliageCanopyRenderer& canopyRenderer,
         FoliageImposterRenderer& foliageRenderer,
+        NearbyFoliageRenderer& nearbyFoliageRenderer,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer);
     void setViewportSize(Extent2D extent);
@@ -51,6 +53,7 @@ public:
         QuadtreeMeshRenderer& quadtreeMeshRenderer,
         FoliageCanopyRenderer& canopyRenderer,
         FoliageImposterRenderer& foliageRenderer,
+        NearbyFoliageRenderer& nearbyFoliageRenderer,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer,
         SkyboxRenderer& skyboxRenderer,

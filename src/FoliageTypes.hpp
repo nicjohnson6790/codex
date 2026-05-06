@@ -22,6 +22,12 @@ inline constexpr std::uint16_t kLookupOverflowCapacity = 1024u;
 inline constexpr std::uint16_t kGenerationBudgetPerFrame = 4u;
 inline constexpr float kBaseDensity = 0.08f;
 inline constexpr float kClusterDensity = 0.18f;
+inline constexpr std::uint16_t kNearbyDecodedPageLruCapacity = 16u;
+inline constexpr std::uint16_t kNearbyDecodeDispatchBudgetPerFrame = 16u;
+inline constexpr std::uint16_t kNearbyReadbackSlotCount = 16u;
+inline constexpr float kNearbyDefaultRadiusMeters = 100.0f;
+inline constexpr float kNearbyDecodeRangePaddingMeters = 4.0f;
+inline constexpr std::uint32_t kNearbyDecodedInstanceLayoutVersion = 1u;
 
 inline constexpr std::uint32_t kCanopyNodeSizeMeters = 2048u;
 inline constexpr std::uint32_t kCanopyCellsPerSide = kCanopyNodeSizeMeters / kPageSizeMeters;
@@ -45,6 +51,7 @@ struct FoliageResidentPageEntry
     WorldGridQuadtreeLeafId leafId{};
     std::uint16_t pageIndex = 0;
     std::uint16_t liveCount = 0;
+    std::uint32_t contentVersion = 0;
     std::uint8_t age = 0;
     std::uint8_t flags = 0;
 };
@@ -53,6 +60,7 @@ struct FoliageReadyPageInfo
 {
     std::uint16_t pageIndex = 0;
     std::uint16_t liveCount = 0;
+    std::uint32_t contentVersion = 0;
     std::uint32_t seed = 0;
 };
 
@@ -73,11 +81,25 @@ struct FoliageTerrainSource
     std::uint16_t terrainSliceIndex = 0;
 };
 
+enum NearbyFoliageInstanceFlags : std::uint32_t
+{
+    NearbyFoliageInstance_Resident = 1u << 0u,
+};
+
+struct DecodedNearbyFoliageInstance
+{
+    float localX = 0.0f;
+    float localZ = 0.0f;
+    std::uint32_t meshId = 0u;
+    std::uint32_t flags = 0u;
+};
+
 struct FoliageCanopyResidentCellEntry
 {
     WorldGridQuadtreeLeafId leafId{};
     std::uint16_t slotIndex = 0;
-    std::uint8_t age = 0;
+    std::uint8_t evictionAge = 0;
+    std::uint8_t residentFrameAge = 0;
     std::uint8_t flags = 0;
 };
 
@@ -85,6 +107,7 @@ struct FoliageCanopyReadyCellInfo
 {
     std::uint16_t slotIndex = 0;
     std::uint32_t seed = 0;
+    std::uint8_t residentFrameAge = 0;
 };
 
 struct FoliageCanopyDrawReference
