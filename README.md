@@ -4,6 +4,8 @@
 
 This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage markers, nearby decoded foliage markers, far-distance canopy impostors, and shared-cascade FFT water.
 
+It also now includes a standalone offline asset-conversion subproject under [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md) for importing source FBX/TGA content into simple runtime binary asset packs.
+
 ## Overview
 
 The app renders into an offscreen viewport that is shown inside an ImGui layout. Terrain is managed as quadtree patches, with heightmaps cached in an LRU and rendered through a reusable indexed patch mesh. Heightmaps are generated on the GPU with a compute shader, and per-slice min/max extents are reduced on the GPU and read back asynchronously for culling, subdivision, and debug bounds.
@@ -201,6 +203,7 @@ The renderer then:
 - `src/Position.hpp`: large-world grid/local position type
 - `src/WorldGridQuadtreeTypes.hpp`: quadtree leaf ids and bounds helpers
 - `src/AppConfig.hpp`: shared constants and tuning defaults
+- `src/assets/RuntimeAssetFormat.hpp` + `src/assets/RuntimeAssetReader.*`: shared runtime asset binary format definitions and validated SDL file readers
 - `shaders/triangle.*`: triangle shaders
 - `shaders/line.*`: line shaders
 - `shaders/quadtree_mesh.*`: terrain graphics shaders
@@ -220,6 +223,7 @@ The renderer then:
 - `shaders/water_spectrum_update.comp`: per-frame spectrum evolution from cached initial spectrum
 - `shaders/water_fft_stage.comp`: shared-memory 1D FFT pass over water working buffers
 - `shaders/water_build_maps.comp`: displacement/slope texture assembly plus crest-foam generation and persistence
+- `tools/converter/*`: standalone offline converter project for building runtime asset packs from source FBX/TGA content
 
 ## Dependencies
 
@@ -234,6 +238,10 @@ Fetched dependencies:
 - SDL_image `release-3.2.4`
 - Dear ImGui `v1.92.5-docking`
 - GLM `1.0.1`
+
+Converter-only fetched dependencies:
+
+- Assimp `v5.4.3`
 
 ## Configure And Build
 
@@ -262,6 +270,16 @@ Build-speed notes:
 - MSVC compilation uses `/MP` for parallel translation-unit compilation
 - SDL examples/tests, the `SDL3_test` helper library, and GLM's optional compiled library target are disabled during dependency configure
 - the current scripts still use `NMake Makefiles`; moving the project over to Ninja is a likely next step if you want more build throughput
+
+Standalone converter:
+
+```powershell
+cmake -S tools/converter -B build/converter
+cmake --build build/converter
+.\build\converter\converter.exe pinetreepack
+```
+
+The converter project is intentionally separate from the main runtime target so Assimp and source-format parsing stay out of the application build and load path.
 
 ## Run
 
