@@ -22,9 +22,26 @@ layout(set=0, binding=1, std430) readonly buffer HeightmapBuffer
     float heights[];
 } heightmapBuffer;
 
-layout(location = 0) in float inEndpoint;
+struct NearbyDrawMetadata
+{
+    uvec4 instanceOffsetAndMaterial;
+};
 
-layout(location = 0) out vec3 fragColor;
+layout(set=0, binding=2, std430) readonly buffer NearbyDrawMetadataBuffer
+{
+    NearbyDrawMetadata draws[];
+} drawMetadataBuffer;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec4 inTangent;
+layout(location = 3) in vec2 inUv0;
+
+layout(location = 0) out vec2 fragUv0;
+layout(location = 1) out vec3 fragNormal;
+layout(location = 2) out vec3 fragTangent;
+layout(location = 3) out vec3 fragBitangent;
+layout(location = 4) flat out uint fragMaterialIndex;
 
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
@@ -58,21 +75,27 @@ float sampleHeightBilinear(uint sliceIndex, vec2 normalizedCoord)
 
 void main()
 {
-    NearbyDrawInstance instance = drawInstanceBuffer.instances[gl_InstanceIndex];
+    NearbyDrawMetadata draw = drawMetadataBuffer.draws[gl_DrawIDARB];
+    uint instanceIndex = draw.instanceOffsetAndMaterial.x + uint(gl_InstanceIndex);
+    NearbyDrawInstance instance = drawInstanceBuffer.instances[instanceIndex];
     vec3 pageOrigin = instance.pageOriginAndSlice.xyz;
     uint terrainSliceIndex = uint(instance.pageOriginAndSlice.w + 0.5);
     vec2 localOffset = instance.localOffsetAndMesh.xy;
-    uint meshId = uint(instance.localOffsetAndMesh.w + 0.5);
     float terrainHeight = sampleHeightBilinear(terrainSliceIndex, localOffset / 256.0);
-    float markerHeight =
-        meshId == 0u ? 8.0 :
-        (meshId == 1u ? 14.0 : 22.0);
+
     vec3 worldPosition = vec3(
-        pageOrigin.x + localOffset.x,
-        pageOrigin.y + terrainHeight + (inEndpoint * markerHeight),
-        pageOrigin.z + localOffset.y);
+        pageOrigin.x + localOffset.x + inPosition.x,
+        pageOrigin.y + terrainHeight + inPosition.y,
+        pageOrigin.z + localOffset.y + inPosition.z);
+
+    vec3 tangent = normalize(inTangent.xyz);
+    vec3 normal = normalize(inNormal);
+    vec3 bitangent = normalize(cross(normal, tangent)) * inTangent.w;
+
     gl_Position = foliage.viewProjection * vec4(worldPosition, 1.0);
-    fragColor =
-        meshId == 0u ? vec3(1.0, 0.05, 0.9) :
-        (meshId == 1u ? vec3(1.0, 0.1, 0.45) : vec3(1.0, 0.35, 0.1));
+    fragUv0 = vec2(inUv0.x, 1.0 - inUv0.y);
+    fragNormal = normal;
+    fragTangent = tangent;
+    fragBitangent = bitangent;
+    fragMaterialIndex = draw.instanceOffsetAndMaterial.y;
 }

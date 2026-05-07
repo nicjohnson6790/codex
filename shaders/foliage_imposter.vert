@@ -99,12 +99,12 @@ void main()
     float terrainHeight = sampleHeightBilinear(terrainSliceIndex, normalizedTerrainCoord);
 
     float markerHeight =
-        meshId == 0u ? 8.0 :
-        (meshId == 1u ? 14.0 : 22.0);
+        meshId == 0u ? 14.56 :
+        (meshId == 1u ? 23.22 : 29.04);
     if (length(vec3(
             pageOrigin.x + localOffset.x,
             pageOrigin.y + terrainHeight,
-            pageOrigin.z + localOffset.y)) < 20.0)
+            pageOrigin.z + localOffset.y)) < 100.0)
     {
         markerHeight = 0.0;
     }

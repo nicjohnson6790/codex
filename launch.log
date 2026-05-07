@@ -25,6 +25,7 @@
 [startup] init ImGui SDL GPU backend
 [startup] initialize complete
 [startup] first frame submitted
+[startup] quit-after-first-frame requested
 [startup] shutdown begin
 [startup] wait for device idle
 [startup] shutdown ImGui

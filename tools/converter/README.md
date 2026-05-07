@@ -61,7 +61,7 @@ That separation keeps the import code format-aware while keeping the runtime for
 ### Import Layer
 
 - [FbxImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FbxImport.cpp)
-  Uses Assimp to load FBX meshes, triangulate faces, generate normals/tangents when needed, preserve material assignment, and compute per-mesh bounds.
+  Uses Assimp to load FBX meshes, convert FBX units to meters, traverse FBX node hierarchy, preserve per-node LOD grouping, bake node transforms into vertices, preserve tangent handedness, infer pack-specific material assignments, and compute per-mesh bounds.
 - [TextureImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TextureImport.cpp)
   Decodes TGA textures into RGBA8, infers sRGB versus linear usage from filenames, and deduplicates textures by normalized basename.
 - [PineTreePackConverter.hpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.hpp)
@@ -90,6 +90,34 @@ That reader:
 - only exposes typed spans after validation succeeds
 
 This is the same reader the main runtime can use later, which helps keep offline output and runtime expectations in lockstep.
+
+## Current Runtime Use
+
+The generated `pinetreepack` runtime bins are now used directly by the main app's nearby foliage path:
+
+- `NearbyFoliageRenderer` loads `meshbin`, `texbin`, and `assetbin` at startup
+- the selected nearby tree classes use real mesh LODs at `25m`, `50m`, and `100m`
+- textures are uploaded once into shared `2D` texture arrays
+- material metadata is uploaded once into a static GPU storage buffer
+
+That makes converter correctness directly visible at runtime for:
+
+- FBX unit conversion to meters
+- LOD grouping
+- material-to-texture assignment
+- alpha-mask flags and cutoff values
+- tangent-space correctness for normal maps
+
+## Pine Pack Notes
+
+For the current pine pack, the converter applies a few pack-specific rules to keep the runtime data sane:
+
+- explicit `LOD0` / `LOD1` / `LOD2` / billboard grouping is inferred from FBX node names
+- pine foliage materials are mapped onto the needles atlas textures instead of trusting ambiguous FBX references blindly
+- billboard materials stay separate from nearby geometry materials
+- `Bark_Bottom_Mat` is emitted as alpha-masked because its source color texture uses cutout alpha
+
+These rules are intentionally local to the offline converter so the runtime stays source-format agnostic.
 
 ## Why Three Files
 

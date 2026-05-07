@@ -1,6 +1,8 @@
 #include "FbxImport.hpp"
 
 #include <assimp/Importer.hpp>
+#include <assimp/config.h>
+#include <assimp/matrix3x3.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
@@ -8,7 +10,9 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <string_view>
@@ -43,6 +47,24 @@ std::uint32_t InferLodIndex(const std::string& name)
     return 0;
 }
 
+std::optional<std::uint32_t> InferExplicitLodIndex(std::string_view name)
+{
+    if (ToLower(std::string(name)).find("billboard") != std::string::npos)
+    {
+        return 3u;
+    }
+
+    std::regex lodRegex("lod\\s*([0-9]+)", std::regex::icase);
+    std::smatch match;
+    const std::string ownedName(name);
+    if (std::regex_search(ownedName, match, lodRegex))
+    {
+        return static_cast<std::uint32_t>(std::stoul(match[1].str()));
+    }
+
+    return std::nullopt;
+}
+
 float DefaultLodDistance(std::uint32_t lodIndex)
 {
     switch (lodIndex)
@@ -53,8 +75,196 @@ float DefaultLodDistance(std::uint32_t lodIndex)
         return 50.0f;
     case 2:
         return 100.0f;
+    case 3:
+        return 200.0f;
     default:
         return 100.0f;
+    }
+}
+
+bool EqualsInsensitive(std::string_view lhs, std::string_view rhs)
+{
+    if (lhs.size() != rhs.size())
+    {
+        return false;
+    }
+
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+    {
+        if (static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(lhs[i]))) !=
+            static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(rhs[i]))))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ContainsInsensitive(std::string_view haystack, std::string_view needle)
+{
+    if (needle.empty())
+    {
+        return true;
+    }
+    const std::string loweredHaystack = ToLower(std::string(haystack));
+    const std::string loweredNeedle = ToLower(std::string(needle));
+    return loweredHaystack.find(loweredNeedle) != std::string::npos;
+}
+
+std::string TrimMaterialSuffix(std::string value)
+{
+    static constexpr std::string_view kSuffixes[] = {
+        "_mat",
+        "_material",
+    };
+
+    for (std::string_view suffix : kSuffixes)
+    {
+        if (value.size() >= suffix.size() &&
+            value.compare(value.size() - suffix.size(), suffix.size(), suffix.data()) == 0)
+        {
+            value.resize(value.size() - suffix.size());
+            break;
+        }
+    }
+    return value;
+}
+
+std::uint32_t FindTextureByTokens(
+    const ImportedPack& pack,
+    std::initializer_list<std::string_view> requiredTokens,
+    std::initializer_list<std::string_view> rejectedTokens = {})
+{
+    for (std::uint32_t textureIndex = 0; textureIndex < pack.textures.size(); ++textureIndex)
+    {
+        const ImportedTexture& texture = pack.textures[textureIndex];
+        bool matches = true;
+        for (std::string_view token : requiredTokens)
+        {
+            if (!ContainsInsensitive(texture.name, token))
+            {
+                matches = false;
+                break;
+            }
+        }
+        if (!matches)
+        {
+            continue;
+        }
+        for (std::string_view token : rejectedTokens)
+        {
+            if (ContainsInsensitive(texture.name, token))
+            {
+                matches = false;
+                break;
+            }
+        }
+        if (matches)
+        {
+            return textureIndex;
+        }
+    }
+    return std::numeric_limits<std::uint32_t>::max();
+}
+
+void ResetMaterialTextureAssignments(ImportedMaterial* material)
+{
+    material->record.baseColorTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    material->record.normalTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    material->record.roughnessTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    material->record.specularTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    material->record.aoTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    material->record.subsurfaceTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    material->record.displacementTextureIndex = std::numeric_limits<std::uint32_t>::max();
+}
+
+void AssignTextureByTokens(
+    const ImportedPack& pack,
+    std::uint32_t* field,
+    std::initializer_list<std::string_view> requiredTokens,
+    std::initializer_list<std::string_view> rejectedTokens = {})
+{
+    *field = FindTextureByTokens(pack, requiredTokens, rejectedTokens);
+}
+
+void ApplyPackSpecificMaterialInference(ImportedPack* pack, ImportedMaterial* imported)
+{
+    const std::string& lowerName = imported->normalizedName;
+    const bool isBillboard = ContainsInsensitive(lowerName, "billboard");
+    const bool isNeedles = ContainsInsensitive(lowerName, "pine_sylvestris") || ContainsInsensitive(lowerName, "needle");
+
+    if (ContainsInsensitive(lowerName, "barktop"))
+    {
+        ResetMaterialTextureAssignments(imported);
+        AssignTextureByTokens(*pack, &imported->record.baseColorTextureIndex, { "barktop", "color" });
+        AssignTextureByTokens(*pack, &imported->record.normalTextureIndex, { "barktop", "normal" });
+        AssignTextureByTokens(*pack, &imported->record.roughnessTextureIndex, { "barktop", "roughness" });
+        AssignTextureByTokens(*pack, &imported->record.specularTextureIndex, { "barktop", "specular" });
+        AssignTextureByTokens(*pack, &imported->record.aoTextureIndex, { "barktop", "ao" });
+    }
+    else if (ContainsInsensitive(lowerName, "bark_bottom"))
+    {
+        ResetMaterialTextureAssignments(imported);
+        AssignTextureByTokens(*pack, &imported->record.baseColorTextureIndex, { "bark_bottom", "color" });
+        AssignTextureByTokens(*pack, &imported->record.normalTextureIndex, { "bark_bottom", "normal" });
+        AssignTextureByTokens(*pack, &imported->record.roughnessTextureIndex, { "bark_bottom", "roughness" });
+        AssignTextureByTokens(*pack, &imported->record.specularTextureIndex, { "bark_bottom", "specular" });
+        AssignTextureByTokens(*pack, &imported->record.aoTextureIndex, { "bark_bottom", "ao" });
+        AssignTextureByTokens(*pack, &imported->record.displacementTextureIndex, { "bark_bottom", "displacement" });
+    }
+    else if (ContainsInsensitive(lowerName, "old_branch"))
+    {
+        ResetMaterialTextureAssignments(imported);
+        AssignTextureByTokens(*pack, &imported->record.baseColorTextureIndex, { "old_branch", "color" }, { "roughness" });
+        AssignTextureByTokens(*pack, &imported->record.normalTextureIndex, { "old_branch", "normal" });
+        AssignTextureByTokens(*pack, &imported->record.roughnessTextureIndex, { "old_branch", "roughness" });
+        AssignTextureByTokens(*pack, &imported->record.specularTextureIndex, { "old_branch", "specular" });
+        AssignTextureByTokens(*pack, &imported->record.aoTextureIndex, { "old_branch", "ao" });
+    }
+    else if (isBillboard)
+    {
+        ResetMaterialTextureAssignments(imported);
+        const std::string billboardPrefix = TrimMaterialSuffix(lowerName);
+        AssignTextureByTokens(*pack, &imported->record.baseColorTextureIndex, { billboardPrefix, "color" });
+        AssignTextureByTokens(*pack, &imported->record.normalTextureIndex, { billboardPrefix, "normal" });
+        AssignTextureByTokens(*pack, &imported->record.subsurfaceTextureIndex, { billboardPrefix, "subsurface" });
+        if (imported->record.subsurfaceTextureIndex == std::numeric_limits<std::uint32_t>::max())
+        {
+            AssignTextureByTokens(*pack, &imported->record.subsurfaceTextureIndex, { billboardPrefix, "_ss" });
+        }
+    }
+    else if (isNeedles)
+    {
+        ResetMaterialTextureAssignments(imported);
+        AssignTextureByTokens(*pack, &imported->record.baseColorTextureIndex, { "pine_needles_atlas", "_bc" });
+        AssignTextureByTokens(*pack, &imported->record.normalTextureIndex, { "pine_needles_atlas", "normal" });
+        AssignTextureByTokens(*pack, &imported->record.roughnessTextureIndex, { "pine_needles_atlas", "roughness" });
+        AssignTextureByTokens(*pack, &imported->record.specularTextureIndex, { "pine_needles_atlas", "specular" });
+        AssignTextureByTokens(*pack, &imported->record.aoTextureIndex, { "pine_needles_atlas", "ao" });
+        AssignTextureByTokens(*pack, &imported->record.subsurfaceTextureIndex, { "pine_needles", "subsurface" });
+    }
+
+    imported->record.flags &= ~(RuntimeAssets::MaterialFlagAlphaMasked |
+        RuntimeAssets::MaterialFlagDoubleSided |
+        RuntimeAssets::MaterialFlagSrgbBaseColor);
+    imported->record.alphaCutoff = 0.0f;
+
+    if (isNeedles || isBillboard)
+    {
+        imported->record.flags |= RuntimeAssets::MaterialFlagAlphaMasked;
+        imported->record.flags |= RuntimeAssets::MaterialFlagDoubleSided;
+        imported->record.alphaCutoff = 0.5f;
+    }
+    else if (ContainsInsensitive(lowerName, "bark_bottom"))
+    {
+        imported->record.flags |= RuntimeAssets::MaterialFlagAlphaMasked;
+        imported->record.alphaCutoff = 0.5f;
+    }
+
+    if (imported->record.baseColorTextureIndex != std::numeric_limits<std::uint32_t>::max())
+    {
+        imported->record.flags |= RuntimeAssets::MaterialFlagSrgbBaseColor;
     }
 }
 
@@ -220,17 +430,7 @@ bool PopulateMaterialTextures(
         }
     }
 
-    const bool alphaMasked = lowerName.find("needle") != std::string::npos || lowerName.find("billboard") != std::string::npos;
-    if (alphaMasked)
-    {
-        imported.record.flags |= RuntimeAssets::MaterialFlagAlphaMasked;
-        imported.record.alphaCutoff = 0.5f;
-    }
-
-    if (imported.record.baseColorTextureIndex != std::numeric_limits<std::uint32_t>::max())
-    {
-        imported.record.flags |= RuntimeAssets::MaterialFlagSrgbBaseColor;
-    }
+    ApplyPackSpecificMaterialInference(pack, &imported);
 
     return true;
 }
@@ -263,6 +463,9 @@ bool ImportFbxFolder(
     for (const std::filesystem::path& fbxPath : fbxFiles)
     {
         Assimp::Importer importer;
+        importer.SetPropertyBool(AI_CONFIG_FBX_CONVERT_TO_M, true);
+        importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
+        importer.SetPropertyFloat(AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY, 1.0f);
         const aiScene* scene = importer.ReadFile(
             fbxPath.string(),
             aiProcess_Triangulate |
@@ -270,6 +473,7 @@ bool ImportFbxFolder(
             aiProcess_CalcTangentSpace |
             aiProcess_GenSmoothNormals |
             aiProcess_ImproveCacheLocality |
+            aiProcess_GlobalScale |
             aiProcess_ValidateDataStructure);
         if (scene == nullptr)
         {
@@ -282,73 +486,172 @@ bool ImportFbxFolder(
         asset.name = assetName;
         std::unordered_set<std::uint32_t> materialSet;
 
-        for (unsigned meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
-        {
-            const aiMesh* aiMeshPtr = scene->mMeshes[meshIndex];
-            if (aiMeshPtr == nullptr || aiMeshPtr->mNumVertices == 0 || aiMeshPtr->mNumFaces == 0)
+        std::function<void(const aiNode*, const aiMatrix4x4&, std::optional<std::uint32_t>)> visitNode;
+        const std::function<bool(const aiNode*)> hasExplicitLodNodes = [&](const aiNode* node) -> bool {
+            if (node == nullptr)
             {
-                continue;
+                return false;
             }
-
-            ImportedMesh mesh;
-            mesh.sourceFile = fbxPath.filename().string();
-            mesh.meshName = aiMeshPtr->mName.length > 0 ? aiMeshPtr->mName.C_Str() : assetName;
-            mesh.assetName = assetName;
-            mesh.lodIndex = InferLodIndex(mesh.meshName + "_" + assetName);
-            mesh.lodMaxDistance = DefaultLodDistance(mesh.lodIndex);
-            mesh.boundsMin = {
-                std::numeric_limits<float>::max(),
-                std::numeric_limits<float>::max(),
-                std::numeric_limits<float>::max()
-            };
-            mesh.boundsMax = {
-                std::numeric_limits<float>::lowest(),
-                std::numeric_limits<float>::lowest(),
-                std::numeric_limits<float>::lowest()
-            };
-
-            aiMaterial* aiMaterialPtr = scene->mMaterials != nullptr && aiMeshPtr->mMaterialIndex < scene->mNumMaterials
-                ? scene->mMaterials[aiMeshPtr->mMaterialIndex]
-                : nullptr;
-            mesh.materialIndex = FindOrCreateMaterial(outPack, aiMaterialPtr, assetName + "_material");
-            PopulateMaterialTextures(outPack, mesh.materialIndex, aiMaterialPtr);
-            materialSet.insert(mesh.materialIndex);
-
-            mesh.vertices.reserve(aiMeshPtr->mNumVertices);
-            for (unsigned vertexIndex = 0; vertexIndex < aiMeshPtr->mNumVertices; ++vertexIndex)
+            if (InferExplicitLodIndex(node->mName.C_Str()).has_value())
             {
-                RuntimeAssets::MeshVertex vertex{};
-                const aiVector3D position = aiMeshPtr->mVertices[vertexIndex];
-                const aiVector3D normal = aiMeshPtr->HasNormals() ? aiMeshPtr->mNormals[vertexIndex] : aiVector3D(0.0f, 1.0f, 0.0f);
-                const aiVector3D tangent = aiMeshPtr->HasTangentsAndBitangents() ? aiMeshPtr->mTangents[vertexIndex] : aiVector3D(1.0f, 0.0f, 0.0f);
-                const aiVector3D uv = aiMeshPtr->HasTextureCoords(0) ? aiMeshPtr->mTextureCoords[0][vertexIndex] : aiVector3D(0.0f, 0.0f, 0.0f);
-
-                vertex.position = { position.x, position.y, position.z };
-                vertex.normal = { normal.x, normal.y, normal.z };
-                vertex.tangent = { tangent.x, tangent.y, tangent.z, 1.0f };
-                vertex.uv0 = { uv.x, uv.y };
-                mesh.vertices.push_back(vertex);
-                AccumulateBounds(&mesh.boundsMin, &mesh.boundsMax, position);
+                return true;
             }
-
-            mesh.indices.reserve(aiMeshPtr->mNumFaces * 3u);
-            for (unsigned faceIndex = 0; faceIndex < aiMeshPtr->mNumFaces; ++faceIndex)
+            for (unsigned childIndex = 0; childIndex < node->mNumChildren; ++childIndex)
             {
-                const aiFace& face = aiMeshPtr->mFaces[faceIndex];
-                if (face.mNumIndices != 3)
+                if (hasExplicitLodNodes(node->mChildren[childIndex]))
                 {
-                    *error = "non-triangle face survived triangulation in " + fbxPath.string();
-                    return false;
+                    return true;
                 }
-                mesh.indices.push_back(face.mIndices[0]);
-                mesh.indices.push_back(face.mIndices[1]);
-                mesh.indices.push_back(face.mIndices[2]);
+            }
+            return false;
+        };
+        const bool sceneHasExplicitLodNodes = hasExplicitLodNodes(scene->mRootNode);
+
+        visitNode = [&](const aiNode* node, const aiMatrix4x4& parentTransform, std::optional<std::uint32_t> inheritedLod) {
+            if (node == nullptr)
+            {
+                return;
             }
 
-            FinalizeBounds(&mesh);
-            asset.meshIndices.push_back(static_cast<std::uint32_t>(outPack->meshes.size()));
-            outPack->meshes.push_back(std::move(mesh));
+            const aiMatrix4x4 worldTransform = parentTransform * node->mTransformation;
+            const std::optional<std::uint32_t> explicitLod = InferExplicitLodIndex(node->mName.C_Str());
+            const std::optional<std::uint32_t> activeLod = explicitLod.has_value() ? explicitLod : inheritedLod;
+            const bool emitMeshes = !sceneHasExplicitLodNodes || activeLod.has_value();
+
+            if (emitMeshes)
+            {
+                aiMatrix3x3 normalTransform(worldTransform);
+                normalTransform.Inverse().Transpose();
+
+                for (unsigned nodeMeshIndex = 0; nodeMeshIndex < node->mNumMeshes; ++nodeMeshIndex)
+                {
+                    const unsigned sceneMeshIndex = node->mMeshes[nodeMeshIndex];
+                    if (sceneMeshIndex >= scene->mNumMeshes)
+                    {
+                        continue;
+                    }
+
+                    const aiMesh* aiMeshPtr = scene->mMeshes[sceneMeshIndex];
+                    if (aiMeshPtr == nullptr || aiMeshPtr->mNumVertices == 0 || aiMeshPtr->mNumFaces == 0)
+                    {
+                        continue;
+                    }
+
+                    ImportedMesh mesh;
+                    mesh.sourceFile = fbxPath.filename().string();
+                    mesh.meshName = node->mName.length > 0 ? node->mName.C_Str() :
+                        (aiMeshPtr->mName.length > 0 ? aiMeshPtr->mName.C_Str() : assetName);
+                    if (node->mNumMeshes > 1)
+                    {
+                        mesh.meshName += "_";
+                        mesh.meshName += std::to_string(nodeMeshIndex);
+                    }
+                    mesh.assetName = assetName;
+                    mesh.lodIndex = activeLod.value_or(InferLodIndex(mesh.meshName + "_" + assetName));
+                    mesh.lodMaxDistance = DefaultLodDistance(mesh.lodIndex);
+                    mesh.boundsMin = {
+                        std::numeric_limits<float>::max(),
+                        std::numeric_limits<float>::max(),
+                        std::numeric_limits<float>::max()
+                    };
+                    mesh.boundsMax = {
+                        std::numeric_limits<float>::lowest(),
+                        std::numeric_limits<float>::lowest(),
+                        std::numeric_limits<float>::lowest()
+                    };
+
+                    aiMaterial* aiMaterialPtr = scene->mMaterials != nullptr && aiMeshPtr->mMaterialIndex < scene->mNumMaterials
+                        ? scene->mMaterials[aiMeshPtr->mMaterialIndex]
+                        : nullptr;
+                    mesh.materialIndex = FindOrCreateMaterial(outPack, aiMaterialPtr, assetName + "_material");
+                    PopulateMaterialTextures(outPack, mesh.materialIndex, aiMaterialPtr);
+                    materialSet.insert(mesh.materialIndex);
+
+                    mesh.vertices.reserve(aiMeshPtr->mNumVertices);
+                    for (unsigned vertexIndex = 0; vertexIndex < aiMeshPtr->mNumVertices; ++vertexIndex)
+                    {
+                        RuntimeAssets::MeshVertex vertex{};
+                        const aiVector3D transformedPosition = worldTransform * aiMeshPtr->mVertices[vertexIndex];
+
+                        aiVector3D transformedNormal = aiMeshPtr->HasNormals()
+                            ? (normalTransform * aiMeshPtr->mNormals[vertexIndex])
+                            : aiVector3D(0.0f, 1.0f, 0.0f);
+                        transformedNormal.NormalizeSafe();
+
+                        aiVector3D transformedTangent = aiMeshPtr->HasTangentsAndBitangents()
+                            ? (normalTransform * aiMeshPtr->mTangents[vertexIndex])
+                            : aiVector3D(1.0f, 0.0f, 0.0f);
+                        transformedTangent.NormalizeSafe();
+                        aiVector3D transformedBitangent = aiMeshPtr->HasTangentsAndBitangents()
+                            ? (normalTransform * aiMeshPtr->mBitangents[vertexIndex])
+                            : aiVector3D(0.0f, 0.0f, 1.0f);
+                        transformedBitangent.NormalizeSafe();
+
+                        float tangentHandedness = 1.0f;
+                        if (aiMeshPtr->HasTangentsAndBitangents())
+                        {
+                            const aiVector3D recomputedBitangent = transformedNormal ^ transformedTangent;
+                            tangentHandedness = (recomputedBitangent * transformedBitangent) < 0.0f ? -1.0f : 1.0f;
+                        }
+
+                        const aiVector3D uv = aiMeshPtr->HasTextureCoords(0) ? aiMeshPtr->mTextureCoords[0][vertexIndex] : aiVector3D(0.0f, 0.0f, 0.0f);
+
+                        vertex.position = { transformedPosition.x, transformedPosition.y, transformedPosition.z };
+                        vertex.normal = { transformedNormal.x, transformedNormal.y, transformedNormal.z };
+                        vertex.tangent = { transformedTangent.x, transformedTangent.y, transformedTangent.z, tangentHandedness };
+                        vertex.uv0 = { uv.x, uv.y };
+                        mesh.vertices.push_back(vertex);
+                        AccumulateBounds(&mesh.boundsMin, &mesh.boundsMax, transformedPosition);
+                    }
+
+                    mesh.indices.reserve(aiMeshPtr->mNumFaces * 3u);
+                    for (unsigned faceIndex = 0; faceIndex < aiMeshPtr->mNumFaces; ++faceIndex)
+                    {
+                        const aiFace& face = aiMeshPtr->mFaces[faceIndex];
+                        if (face.mNumIndices != 3)
+                        {
+                            *error = "non-triangle face survived triangulation in " + fbxPath.string();
+                            return;
+                        }
+                        mesh.indices.push_back(face.mIndices[0]);
+                        mesh.indices.push_back(face.mIndices[1]);
+                        mesh.indices.push_back(face.mIndices[2]);
+                    }
+
+                    FinalizeBounds(&mesh);
+                    asset.meshIndices.push_back(static_cast<std::uint32_t>(outPack->meshes.size()));
+                    outPack->meshes.push_back(std::move(mesh));
+                }
+            }
+
+            for (unsigned childIndex = 0; childIndex < node->mNumChildren; ++childIndex)
+            {
+                visitNode(node->mChildren[childIndex], worldTransform, activeLod);
+            }
+        };
+
+        visitNode(scene->mRootNode, aiMatrix4x4(), std::nullopt);
+        if (error != nullptr && !error->empty())
+        {
+            return false;
         }
+        if (asset.meshIndices.empty())
+        {
+            *error = "No drawable meshes were imported from " + fbxPath.string();
+            return false;
+        }
+        std::stable_sort(
+            asset.meshIndices.begin(),
+            asset.meshIndices.end(),
+            [&](std::uint32_t lhs, std::uint32_t rhs) {
+                const ImportedMesh& left = outPack->meshes[lhs];
+                const ImportedMesh& right = outPack->meshes[rhs];
+                if (left.lodIndex != right.lodIndex)
+                {
+                    return left.lodIndex < right.lodIndex;
+                }
+                return left.materialIndex < right.materialIndex;
+            });
 
         asset.materialIndices.assign(materialSet.begin(), materialSet.end());
         std::sort(asset.materialIndices.begin(), asset.materialIndices.end());

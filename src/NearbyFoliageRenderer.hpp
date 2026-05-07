@@ -3,27 +3,45 @@
 #include "EngineRendererBase.hpp"
 #include "FoliageTypes.hpp"
 #include "SubmittedGpuFence.hpp"
+#include "assets/RuntimeAssetReader.hpp"
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
 #include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+class LightingSystem;
 
 class NearbyFoliageRenderer : private EngineRendererBase
 {
 public:
     struct Vertex
     {
-        float endpoint = 0.0f;
+        glm::vec3 position{ 0.0f };
+        glm::vec3 normal{ 0.0f, 1.0f, 0.0f };
+        glm::vec4 tangent{ 1.0f, 0.0f, 0.0f, 1.0f };
+        glm::vec2 uv0{ 0.0f };
     };
 
-    struct Uniforms
+    struct VertexUniforms
     {
         glm::mat4 viewProjection{ 1.0f };
+    };
+
+    struct FragmentUniforms
+    {
+        glm::vec4 sunDirectionIntensity{ 0.0f, 1.0f, 0.0f, 1.0f };
+        glm::vec4 sunColorAmbient{ 1.0f };
     };
 
     struct alignas(16) DrawInstanceGpu
@@ -67,10 +85,11 @@ public:
         SDL_GPURenderPass* renderPass,
         SDL_GPUCommandBuffer* commandBuffer,
         const glm::mat4& viewProjection,
+        const LightingSystem& lightingSystem,
         SDL_GPUBuffer* terrainHeightmapBuffer) const;
 
     [[nodiscard]] std::uint32_t drawCount() const { return m_drawCount; }
-    [[nodiscard]] std::uint32_t drawCallCount() const { return m_drawCount > 0u ? 1u : 0u; }
+    [[nodiscard]] std::uint32_t drawCallCount() const;
     [[nodiscard]] std::uint32_t emittedInstanceCount() const { return m_drawCount; }
     [[nodiscard]] std::uint32_t decodedResidentCount() const;
     [[nodiscard]] std::uint32_t decodedPendingCount() const;
@@ -115,14 +134,24 @@ private:
     static constexpr std::uint32_t kDecodedPageByteSize =
         sizeof(DecodedNearbyFoliageInstance) * FoliageConfig::kCandidateSlotCount;
 
-    [[nodiscard]] static SDL_GPUIndirectDrawCommand makeDrawCommand(
-        std::uint32_t vertexCount,
+    struct alignas(16) MaterialGpu
+    {
+        glm::uvec4 layersAndFlags{ 0u };
+        glm::vec4 params{ 0.0f };
+    };
+
+    struct alignas(16) DrawMetadataGpu
+    {
+        glm::uvec4 instanceOffsetAndMaterial{ 0u };
+    };
+
+    [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(
+        std::uint32_t indexCount,
         std::uint32_t instanceCount,
-        std::uint32_t firstVertex,
-        std::uint32_t firstInstance);
+        std::uint32_t firstIndex,
+        std::int32_t vertexOffset);
     void createPipeline(const std::filesystem::path& shaderDirectory);
     void createDecodeComputePipeline(const std::filesystem::path& shaderDirectory);
-    void createMarkerVertexBuffer();
     void createDecodeBuffers();
     void createDrawBuffers();
     void resetTransientState();
@@ -134,11 +163,62 @@ private:
     [[nodiscard]] bool entryIsHintedThisFrame(const WorldGridQuadtreeLeafId& pageKey) const;
     void addTopologyHint(const WorldGridQuadtreeLeafId& pageKey);
     [[nodiscard]] std::uint16_t findReusableEntryIndex() const;
+    void loadRuntimeAssets();
+    void createMaterialSampler();
+    void createDefaultTextures();
+    void createMeshBuffers(
+        std::span<const Vertex> vertices,
+        std::span<const std::uint32_t> indices);
+    [[nodiscard]] SDL_GPUTexture* createTexture2d(
+        SDL_GPUTextureFormat format,
+        std::uint32_t width,
+        std::uint32_t height,
+        const std::byte* bytes,
+        std::size_t byteCount) const;
+    void createMaterialResources(
+        const RuntimeAssets::LoadedTexBinView& texBin,
+        const RuntimeAssets::LoadedAssetBinView& assetBin,
+        const std::unordered_map<std::uint32_t, std::uint32_t>& usedBaseColorTextures,
+        const std::unordered_map<std::uint32_t, std::uint32_t>& usedNormalTextures);
+    [[nodiscard]] std::vector<std::byte> resampleTextureRgba(
+        const std::byte* sourcePixels,
+        std::uint32_t sourceWidth,
+        std::uint32_t sourceHeight,
+        std::uint32_t targetWidth,
+        std::uint32_t targetHeight) const;
+
+    struct LoadedMaterialGpu
+    {
+        std::uint32_t baseColorLayer = 0u;
+        std::uint32_t normalLayer = 0u;
+        float alphaCutoff = 0.0f;
+        std::uint32_t flags = 0u;
+    };
+
+    struct LoadedDrawPart
+    {
+        std::uint32_t indexCount = 0u;
+        std::uint32_t firstIndex = 0u;
+        std::int32_t vertexOffset = 0;
+        std::uint32_t materialIndex = 0u;
+    };
+
+    struct LoadedLodAsset
+    {
+        std::string name;
+        std::vector<LoadedDrawPart> drawParts;
+    };
+
+    static constexpr std::uint32_t kNearbyTreeClassCount = 3u;
+    static constexpr std::uint32_t kNearbyLodCount = 3u;
+    static constexpr std::uint32_t kNearbyDrawGroupCount = kNearbyTreeClassCount * kNearbyLodCount;
 
     SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
     SDL_GPUComputePipeline* m_decodeComputePipeline = nullptr;
-    SDL_GPUBuffer* m_markerVertexBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_markerVertexTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_meshVertexBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_meshVertexTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_meshIndexBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_meshIndexTransferBuffer = nullptr;
     SDL_GPUBuffer* m_decodeRequestBuffer = nullptr;
     SDL_GPUTransferBuffer* m_decodeRequestTransferBuffer = nullptr;
     SDL_GPUBuffer* m_decodedOutputBuffer = nullptr;
@@ -147,6 +227,13 @@ private:
     SDL_GPUTransferBuffer* m_drawInstanceTransferBuffer = nullptr;
     SDL_GPUBuffer* m_indirectBuffer = nullptr;
     SDL_GPUTransferBuffer* m_indirectTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_drawMetadataBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_drawMetadataTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_materialBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_materialTransferBuffer = nullptr;
+    SDL_GPUSampler* m_materialSampler = nullptr;
+    SDL_GPUTexture* m_baseColorTextureArray = nullptr;
+    SDL_GPUTexture* m_normalTextureArray = nullptr;
 
     std::array<DecodedPageEntry, FoliageConfig::kNearbyDecodedPageLruCapacity> m_decodedPages{};
     std::array<PendingDecodeRequest, FoliageConfig::kNearbyDecodeDispatchBudgetPerFrame> m_pendingDecodeRequests{};
@@ -156,10 +243,20 @@ private:
     std::array<std::uint16_t, FoliageConfig::kNearbyReadbackSlotCount> m_pendingFenceReadbackSlots{};
     std::array<WorldGridQuadtreeLeafId, 9> m_topologyHints{};
     std::array<DrawInstanceGpu, AppConfig::Foliage::kNearbyMarkerInstanceCapacity> m_drawInstances{};
+    std::array<DrawInstanceGpu, AppConfig::Foliage::kNearbyMarkerInstanceCapacity> m_groupedDrawInstances{};
+    std::array<std::uint32_t, kNearbyDrawGroupCount> m_groupFirstInstances{};
+    std::array<std::uint32_t, kNearbyDrawGroupCount> m_groupInstanceCounts{};
+    std::vector<LoadedMaterialGpu> m_loadedMaterials;
+    std::vector<MaterialGpu> m_materialGpuRecords;
+    std::vector<DrawMetadataGpu> m_drawMetadataGpu;
+    std::vector<SDL_GPUIndexedIndirectDrawCommand> m_drawCommands;
+    std::array<std::array<LoadedLodAsset, kNearbyLodCount>, kNearbyTreeClassCount> m_loadedClassLods{};
+    std::uint32_t m_activeDrawCommandCount = 0u;
     std::uint16_t m_pendingDecodeCount = 0u;
     std::uint16_t m_lastDispatchedDecodeCount = 0u;
     std::uint16_t m_pendingFenceReadbackCount = 0u;
     std::uint16_t m_topologyHintCount = 0u;
     std::uint32_t m_drawCount = 0u;
     std::uint64_t m_frameIndex = 0u;
+    bool m_runtimeAssetsLoaded = false;
 };

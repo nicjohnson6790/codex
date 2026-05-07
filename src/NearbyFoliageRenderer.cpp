@@ -1,17 +1,60 @@
 #include "NearbyFoliageRenderer.hpp"
 
+#include "AppConfig.hpp"
+#include "LightingSystem.hpp"
 #include "PerformanceCapture.hpp"
+#include "assets/RuntimeAssetReader.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
+#include <limits>
+#include <span>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace
 {
 constexpr std::uint32_t kDecodeComputeThreadCountX = 64u;
 constexpr std::uint32_t kDecodeComputeThreadCountY = 1u;
 constexpr std::uint32_t kDecodeComputeThreadCountZ = 1u;
+constexpr float kNearbyLod0MaxDistanceMeters = 25.0f;
+constexpr float kNearbyLod1MaxDistanceMeters = 50.0f;
+constexpr float kNearbyLod2MaxDistanceMeters = 100.0f;
+constexpr std::array<const char*, 3> kNearbyRuntimeAssetNames{
+    "Pine_Sylvestris_crooked_1",
+    "Pine_Sylvestris_Hight_5",
+    "Pine_Sylvestris_Hight_2",
+};
+
+bool containsInsensitive(std::string_view haystack, std::string_view needle)
+{
+    auto lower = [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    };
+
+    return std::search(
+        haystack.begin(),
+        haystack.end(),
+        needle.begin(),
+        needle.end(),
+        [&](char lhs, char rhs) {
+            return lower(static_cast<unsigned char>(lhs)) == lower(static_cast<unsigned char>(rhs));
+        }) != haystack.end();
+}
+
+SDL_GPUTextureFormat textureFormatFromRuntimeFormat(RuntimeAssets::TextureFormat format)
+{
+    switch (format)
+    {
+    case RuntimeAssets::TextureFormat::RGBA8_SRGB:
+        return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+    case RuntimeAssets::TextureFormat::RGBA8_UNORM:
+    default:
+        return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    }
+}
 }
 
 void NearbyFoliageRenderer::initialize(
@@ -21,8 +64,10 @@ void NearbyFoliageRenderer::initialize(
     const std::filesystem::path& shaderDirectory)
 {
     initializeRendererBase(device, colorFormat, depthFormat);
-    createMarkerVertexBuffer();
     createDecodeBuffers();
+    createMaterialSampler();
+    createDefaultTextures();
+    loadRuntimeAssets();
     createDrawBuffers();
     createPipeline(shaderDirectory);
     createDecodeComputePipeline(shaderDirectory);
@@ -40,6 +85,53 @@ void NearbyFoliageRenderer::shutdown()
     {
         SDL_ReleaseGPUComputePipeline(m_device, m_decodeComputePipeline);
         m_decodeComputePipeline = nullptr;
+    }
+    if (m_baseColorTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_baseColorTextureArray);
+        m_baseColorTextureArray = nullptr;
+    }
+    if (m_normalTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_normalTextureArray);
+        m_normalTextureArray = nullptr;
+    }
+    m_loadedMaterials.clear();
+    m_materialGpuRecords.clear();
+    m_drawMetadataGpu.clear();
+    m_drawCommands.clear();
+    for (auto& classLods : m_loadedClassLods)
+    {
+        for (LoadedLodAsset& lod : classLods)
+        {
+            lod.name.clear();
+            lod.drawParts.clear();
+        }
+    }
+    if (m_materialSampler != nullptr)
+    {
+        SDL_ReleaseGPUSampler(m_device, m_materialSampler);
+        m_materialSampler = nullptr;
+    }
+    if (m_materialTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_materialTransferBuffer);
+        m_materialTransferBuffer = nullptr;
+    }
+    if (m_materialBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_materialBuffer);
+        m_materialBuffer = nullptr;
+    }
+    if (m_drawMetadataTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_drawMetadataTransferBuffer);
+        m_drawMetadataTransferBuffer = nullptr;
+    }
+    if (m_drawMetadataBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_drawMetadataBuffer);
+        m_drawMetadataBuffer = nullptr;
     }
     if (m_indirectTransferBuffer != nullptr)
     {
@@ -91,19 +183,30 @@ void NearbyFoliageRenderer::shutdown()
         SDL_ReleaseGPUBuffer(m_device, m_decodeRequestBuffer);
         m_decodeRequestBuffer = nullptr;
     }
-    if (m_markerVertexTransferBuffer != nullptr)
+    if (m_meshIndexTransferBuffer != nullptr)
     {
-        SDL_ReleaseGPUTransferBuffer(m_device, m_markerVertexTransferBuffer);
-        m_markerVertexTransferBuffer = nullptr;
+        SDL_ReleaseGPUTransferBuffer(m_device, m_meshIndexTransferBuffer);
+        m_meshIndexTransferBuffer = nullptr;
     }
-    if (m_markerVertexBuffer != nullptr)
+    if (m_meshIndexBuffer != nullptr)
     {
-        SDL_ReleaseGPUBuffer(m_device, m_markerVertexBuffer);
-        m_markerVertexBuffer = nullptr;
+        SDL_ReleaseGPUBuffer(m_device, m_meshIndexBuffer);
+        m_meshIndexBuffer = nullptr;
+    }
+    if (m_meshVertexTransferBuffer != nullptr)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_meshVertexTransferBuffer);
+        m_meshVertexTransferBuffer = nullptr;
+    }
+    if (m_meshVertexBuffer != nullptr)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_meshVertexBuffer);
+        m_meshVertexBuffer = nullptr;
     }
 
     resetTransientState();
     m_decodedPages.fill({});
+    m_runtimeAssetsLoaded = false;
 }
 
 void NearbyFoliageRenderer::setActiveCamera(const Position& cameraPosition)
@@ -286,7 +389,8 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
 
             const float deltaX = instance.localX - localNearX;
             const float deltaZ = instance.localZ - localNearZ;
-            if ((deltaX * deltaX) + (deltaZ * deltaZ) > radiusSquared)
+            const float distanceSquared = (deltaX * deltaX) + (deltaZ * deltaZ);
+            if (distanceSquared > radiusSquared)
             {
                 continue;
             }
@@ -295,6 +399,11 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
             {
                 return;
             }
+
+            const std::uint32_t meshClass = std::min(instance.meshId, 2u);
+            const std::uint32_t lodIndex =
+                distanceSquared <= (kNearbyLod0MaxDistanceMeters * kNearbyLod0MaxDistanceMeters) ? 0u :
+                (distanceSquared <= (kNearbyLod1MaxDistanceMeters * kNearbyLod1MaxDistanceMeters) ? 1u : 2u);
 
             m_drawInstances[m_drawCount++] = {
                 .pageOriginAndSlice = glm::vec4(
@@ -305,8 +414,8 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
                 .localOffsetAndMesh = glm::vec4(
                     instance.localX,
                     instance.localZ,
-                    0.0f,
-                    static_cast<float>(instance.meshId)),
+                    static_cast<float>(meshClass),
+                    static_cast<float>(lodIndex)),
             };
         }
     }
@@ -316,13 +425,40 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
 {
     HELLO_PROFILE_SCOPE("NearbyFoliageRenderer::Upload");
 
-    if (m_drawCount == 0)
+    if (m_drawCount == 0 || !m_runtimeAssetsLoaded || m_drawCommands.empty())
     {
+        m_activeDrawCommandCount = 0u;
         return;
     }
 
+    std::uint32_t writeIndex = 0u;
+    for (std::uint32_t treeClass = 0; treeClass < kNearbyTreeClassCount; ++treeClass)
+    {
+        for (std::uint32_t lodIndex = 0; lodIndex < kNearbyLodCount; ++lodIndex)
+        {
+            const std::uint32_t groupIndex = (treeClass * kNearbyLodCount) + lodIndex;
+            m_groupFirstInstances[groupIndex] = writeIndex;
+            for (std::uint32_t drawIndex = 0; drawIndex < m_drawCount; ++drawIndex)
+            {
+                const std::uint32_t instanceClass = std::min(
+                    static_cast<std::uint32_t>(m_drawInstances[drawIndex].localOffsetAndMesh.z + 0.5f),
+                    kNearbyTreeClassCount - 1u);
+                const std::uint32_t instanceLod = std::min(
+                    static_cast<std::uint32_t>(m_drawInstances[drawIndex].localOffsetAndMesh.w + 0.5f),
+                    kNearbyLodCount - 1u);
+                if (instanceClass != treeClass || instanceLod != lodIndex)
+                {
+                    continue;
+                }
+
+                m_groupedDrawInstances[writeIndex++] = m_drawInstances[drawIndex];
+            }
+            m_groupInstanceCounts[groupIndex] = writeIndex - m_groupFirstInstances[groupIndex];
+        }
+    }
+
     void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_drawInstanceTransferBuffer, true);
-    std::memcpy(mappedInstances, m_drawInstances.data(), sizeof(DrawInstanceGpu) * m_drawCount);
+    std::memcpy(mappedInstances, m_groupedDrawInstances.data(), sizeof(DrawInstanceGpu) * m_drawCount);
     SDL_UnmapGPUTransferBuffer(m_device, m_drawInstanceTransferBuffer);
 
     SDL_GPUTransferBufferLocation instanceSource{};
@@ -332,16 +468,60 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
     instanceDestination.size = static_cast<Uint32>(sizeof(DrawInstanceGpu) * m_drawCount);
     SDL_UploadToGPUBuffer(copyPass, &instanceSource, &instanceDestination, true);
 
-    const SDL_GPUIndirectDrawCommand drawCommand = makeDrawCommand(2u, m_drawCount, 0u, 0u);
+    m_activeDrawCommandCount = 0u;
+    for (std::uint32_t treeClass = 0; treeClass < kNearbyTreeClassCount; ++treeClass)
+    {
+        for (std::uint32_t lodIndex = 0; lodIndex < kNearbyLodCount; ++lodIndex)
+        {
+            const std::uint32_t groupIndex = (treeClass * kNearbyLodCount) + lodIndex;
+            if (m_groupInstanceCounts[groupIndex] == 0u)
+            {
+                continue;
+            }
+
+            for (const LoadedDrawPart& drawPart : m_loadedClassLods[treeClass][lodIndex].drawParts)
+            {
+                m_drawMetadataGpu[m_activeDrawCommandCount].instanceOffsetAndMaterial = glm::uvec4(
+                    m_groupFirstInstances[groupIndex],
+                    drawPart.materialIndex,
+                    0u,
+                    0u);
+                m_drawCommands[m_activeDrawCommandCount] = makeDrawCommand(
+                    drawPart.indexCount,
+                    m_groupInstanceCounts[groupIndex],
+                    drawPart.firstIndex,
+                    drawPart.vertexOffset);
+                ++m_activeDrawCommandCount;
+            }
+        }
+    }
+
+    void* mappedMetadata = SDL_MapGPUTransferBuffer(m_device, m_drawMetadataTransferBuffer, true);
+    std::memcpy(
+        mappedMetadata,
+        m_drawMetadataGpu.data(),
+        sizeof(DrawMetadataGpu) * m_activeDrawCommandCount);
+    SDL_UnmapGPUTransferBuffer(m_device, m_drawMetadataTransferBuffer);
+
+    SDL_GPUTransferBufferLocation metadataSource{};
+    metadataSource.transfer_buffer = m_drawMetadataTransferBuffer;
+    SDL_GPUBufferRegion metadataDestination{};
+    metadataDestination.buffer = m_drawMetadataBuffer;
+    metadataDestination.size = static_cast<Uint32>(sizeof(DrawMetadataGpu) * m_activeDrawCommandCount);
+    SDL_UploadToGPUBuffer(copyPass, &metadataSource, &metadataDestination, true);
+
     void* mappedIndirect = SDL_MapGPUTransferBuffer(m_device, m_indirectTransferBuffer, true);
-    std::memcpy(mappedIndirect, &drawCommand, sizeof(drawCommand));
+    std::memcpy(
+        mappedIndirect,
+        m_drawCommands.data(),
+        sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_activeDrawCommandCount);
     SDL_UnmapGPUTransferBuffer(m_device, m_indirectTransferBuffer);
 
     SDL_GPUTransferBufferLocation indirectSource{};
     indirectSource.transfer_buffer = m_indirectTransferBuffer;
     SDL_GPUBufferRegion indirectDestination{};
     indirectDestination.buffer = m_indirectBuffer;
-    indirectDestination.size = sizeof(SDL_GPUIndirectDrawCommand);
+    indirectDestination.size = static_cast<Uint32>(sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_activeDrawCommandCount);
     SDL_UploadToGPUBuffer(copyPass, &indirectSource, &indirectDestination, true);
 }
 
@@ -484,30 +664,67 @@ void NearbyFoliageRenderer::render(
     SDL_GPURenderPass* renderPass,
     SDL_GPUCommandBuffer* commandBuffer,
     const glm::mat4& viewProjection,
+    const LightingSystem& lightingSystem,
     SDL_GPUBuffer* terrainHeightmapBuffer) const
 {
     HELLO_PROFILE_SCOPE("NearbyFoliageRenderer::Render");
 
-    if (m_drawCount == 0 || terrainHeightmapBuffer == nullptr)
+    if (m_drawCount == 0 ||
+        terrainHeightmapBuffer == nullptr ||
+        !m_runtimeAssetsLoaded ||
+        m_meshVertexBuffer == nullptr ||
+        m_meshIndexBuffer == nullptr ||
+        m_materialSampler == nullptr ||
+        m_activeDrawCommandCount == 0u ||
+        m_baseColorTextureArray == nullptr ||
+        m_normalTextureArray == nullptr ||
+        m_drawMetadataBuffer == nullptr ||
+        m_materialBuffer == nullptr)
     {
         return;
     }
 
-    Uniforms uniforms{};
-    uniforms.viewProjection = viewProjection;
-    SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+    VertexUniforms vertexUniforms{};
+    vertexUniforms.viewProjection = viewProjection;
+    SDL_PushGPUVertexUniformData(commandBuffer, 0, &vertexUniforms, sizeof(vertexUniforms));
 
     SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
 
-    const SDL_GPUBufferBinding vertexBinding{ m_markerVertexBuffer, 0 };
+    const SDL_GPUBufferBinding vertexBinding{ m_meshVertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+    const SDL_GPUBufferBinding indexBinding{ m_meshIndexBuffer, 0 };
+    SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-    SDL_GPUBuffer* storageBuffers[]{
+    SDL_GPUBuffer* vertexStorageBuffers[]{
         m_drawInstanceBuffer,
         terrainHeightmapBuffer,
+        m_drawMetadataBuffer,
     };
-    SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-    SDL_DrawGPUPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
+    SDL_BindGPUVertexStorageBuffers(renderPass, 0, vertexStorageBuffers, 3);
+
+    SDL_GPUTextureSamplerBinding samplerBindings[2]{
+        { m_baseColorTextureArray, m_materialSampler },
+        { m_normalTextureArray, m_materialSampler },
+    };
+    SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 2);
+
+    SDL_GPUBuffer* fragmentStorageBuffers[]{
+        m_materialBuffer,
+    };
+    SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
+
+    const glm::vec3 sunDirection = lightingSystem.sunDirection();
+    FragmentUniforms fragmentUniforms{};
+    fragmentUniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
+    fragmentUniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
+    SDL_PushGPUFragmentUniformData(commandBuffer, 0, &fragmentUniforms, sizeof(fragmentUniforms));
+
+    SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, m_activeDrawCommandCount);
+}
+
+std::uint32_t NearbyFoliageRenderer::drawCallCount() const
+{
+    return m_activeDrawCommandCount;
 }
 
 std::uint32_t NearbyFoliageRenderer::decodedResidentCount() const
@@ -536,17 +753,18 @@ std::uint32_t NearbyFoliageRenderer::decodedPendingCount() const
     return count;
 }
 
-SDL_GPUIndirectDrawCommand NearbyFoliageRenderer::makeDrawCommand(
-    std::uint32_t vertexCount,
+SDL_GPUIndexedIndirectDrawCommand NearbyFoliageRenderer::makeDrawCommand(
+    std::uint32_t indexCount,
     std::uint32_t instanceCount,
-    std::uint32_t firstVertex,
-    std::uint32_t firstInstance)
+    std::uint32_t firstIndex,
+    std::int32_t vertexOffset)
 {
-    SDL_GPUIndirectDrawCommand command{};
-    command.num_vertices = vertexCount;
+    SDL_GPUIndexedIndirectDrawCommand command{};
+    command.num_indices = indexCount;
     command.num_instances = instanceCount;
-    command.first_vertex = firstVertex;
-    command.first_instance = firstInstance;
+    command.first_index = firstIndex;
+    command.vertex_offset = vertexOffset;
+    command.first_instance = 0u;
     return command;
 }
 
@@ -556,25 +774,39 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
         shaderDirectory / "nearby_foliage.vert.spv",
         SDL_GPU_SHADERSTAGE_VERTEX,
         1,
-        2);
+        3);
     SDL_GPUShader* fragmentShader = createShader(
         shaderDirectory / "nearby_foliage.frag.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT,
-        0);
+        1,
+        1,
+        2);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
     vertexBufferDescription.pitch = sizeof(Vertex);
     vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
-    SDL_GPUVertexAttribute vertexAttribute{};
-    vertexAttribute.location = 0;
-    vertexAttribute.buffer_slot = 0;
-    vertexAttribute.format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT;
-    vertexAttribute.offset = offsetof(Vertex, endpoint);
+    SDL_GPUVertexAttribute vertexAttributes[4]{};
+    vertexAttributes[0].location = 0;
+    vertexAttributes[0].buffer_slot = 0;
+    vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    vertexAttributes[0].offset = offsetof(Vertex, position);
+    vertexAttributes[1].location = 1;
+    vertexAttributes[1].buffer_slot = 0;
+    vertexAttributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    vertexAttributes[1].offset = offsetof(Vertex, normal);
+    vertexAttributes[2].location = 2;
+    vertexAttributes[2].buffer_slot = 0;
+    vertexAttributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+    vertexAttributes[2].offset = offsetof(Vertex, tangent);
+    vertexAttributes[3].location = 3;
+    vertexAttributes[3].buffer_slot = 0;
+    vertexAttributes[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    vertexAttributes[3].offset = offsetof(Vertex, uv0);
 
     SDL_GPUColorTargetBlendState blendState{};
-    blendState.enable_blend = true;
+    blendState.enable_blend = false;
     blendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
     blendState.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     blendState.color_blend_op = SDL_GPU_BLENDOP_ADD;
@@ -594,14 +826,14 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.vertex_shader = vertexShader;
     pipelineInfo.fragment_shader = fragmentShader;
-    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     pipelineInfo.rasterizer_state.enable_depth_clip = true;
     pipelineInfo.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
     pipelineInfo.depth_stencil_state.enable_depth_test = true;
-    pipelineInfo.depth_stencil_state.enable_depth_write = false;
+    pipelineInfo.depth_stencil_state.enable_depth_write = true;
     pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
     pipelineInfo.target_info.num_color_targets = 1;
     pipelineInfo.target_info.color_target_descriptions = &colorTargetDescription;
@@ -609,15 +841,15 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
     pipelineInfo.target_info.depth_stencil_format = m_depthFormat;
     pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
     pipelineInfo.vertex_input_state.vertex_buffer_descriptions = &vertexBufferDescription;
-    pipelineInfo.vertex_input_state.num_vertex_attributes = 1;
-    pipelineInfo.vertex_input_state.vertex_attributes = &vertexAttribute;
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 4;
+    pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
     m_pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
     SDL_ReleaseGPUShader(m_device, fragmentShader);
     SDL_ReleaseGPUShader(m_device, vertexShader);
     if (m_pipeline == nullptr)
     {
-        throwSdlError("Failed to create nearby foliage marker pipeline.");
+        throwSdlError("Failed to create nearby foliage mesh pipeline.");
     }
 }
 
@@ -647,56 +879,572 @@ void NearbyFoliageRenderer::createDecodeComputePipeline(const std::filesystem::p
     }
 }
 
-void NearbyFoliageRenderer::createMarkerVertexBuffer()
+void NearbyFoliageRenderer::createMaterialSampler()
 {
-    const std::array<Vertex, 2> vertices{ Vertex{ 0.0f }, Vertex{ 1.0f } };
-
-    SDL_GPUBufferCreateInfo vertexBufferInfo{};
-    vertexBufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-    vertexBufferInfo.size = static_cast<Uint32>(sizeof(Vertex) * vertices.size());
-    m_markerVertexBuffer = SDL_CreateGPUBuffer(m_device, &vertexBufferInfo);
-    if (m_markerVertexBuffer == nullptr)
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.min_lod = 0.0f;
+    samplerInfo.max_lod = 0.0f;
+    m_materialSampler = SDL_CreateGPUSampler(m_device, &samplerInfo);
+    if (m_materialSampler == nullptr)
     {
-        throwSdlError("Failed to create nearby foliage marker vertex buffer.");
+        throwSdlError("Failed to create nearby foliage material sampler.");
+    }
+}
+
+SDL_GPUTexture* NearbyFoliageRenderer::createTexture2d(
+    SDL_GPUTextureFormat format,
+    std::uint32_t width,
+    std::uint32_t height,
+    const std::byte* bytes,
+    std::size_t byteCount) const
+{
+    SDL_GPUTextureCreateInfo textureInfo{};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = format;
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    textureInfo.width = width;
+    textureInfo.height = height;
+    textureInfo.layer_count_or_depth = 1;
+    textureInfo.num_levels = 1;
+    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    SDL_GPUTexture* texture = SDL_CreateGPUTexture(m_device, &textureInfo);
+    if (texture == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage material texture.");
     }
 
-    SDL_GPUTransferBufferCreateInfo vertexTransferInfo{};
-    vertexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    vertexTransferInfo.size = vertexBufferInfo.size;
-    m_markerVertexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &vertexTransferInfo);
-    if (m_markerVertexTransferBuffer == nullptr)
+    SDL_GPUTransferBufferCreateInfo transferInfo{};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = static_cast<Uint32>(byteCount);
+    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+    if (transferBuffer == nullptr)
     {
-        throwSdlError("Failed to create nearby foliage marker vertex transfer buffer.");
+        SDL_ReleaseGPUTexture(m_device, texture);
+        throwSdlError("Failed to create nearby foliage texture upload buffer.");
     }
 
-    void* mappedVertices = SDL_MapGPUTransferBuffer(m_device, m_markerVertexTransferBuffer, true);
-    std::memcpy(mappedVertices, vertices.data(), sizeof(Vertex) * vertices.size());
-    SDL_UnmapGPUTransferBuffer(m_device, m_markerVertexTransferBuffer);
+    void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
+    std::memcpy(mapped, bytes, byteCount);
+    SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
 
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
     if (commandBuffer == nullptr)
     {
-        throwSdlError("Failed to acquire command buffer for nearby foliage marker upload.");
+        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+        SDL_ReleaseGPUTexture(m_device, texture);
+        throwSdlError("Failed to acquire command buffer for nearby foliage texture upload.");
     }
 
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
     if (copyPass == nullptr)
     {
-        throwSdlError("Failed to begin nearby foliage marker copy pass.");
+        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+        SDL_ReleaseGPUTexture(m_device, texture);
+        throwSdlError("Failed to begin nearby foliage texture upload copy pass.");
     }
 
-    SDL_GPUTransferBufferLocation source{};
-    source.transfer_buffer = m_markerVertexTransferBuffer;
-    SDL_GPUBufferRegion destination{};
-    destination.buffer = m_markerVertexBuffer;
-    destination.size = vertexBufferInfo.size;
-    SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
+    SDL_GPUTextureTransferInfo source{};
+    source.transfer_buffer = transferBuffer;
+    source.offset = 0u;
+    source.pixels_per_row = width;
+    source.rows_per_layer = height;
+
+    SDL_GPUTextureRegion destination{};
+    destination.texture = texture;
+    destination.w = width;
+    destination.h = height;
+    destination.d = 1;
+    SDL_UploadToGPUTexture(copyPass, &source, &destination, true);
     SDL_EndGPUCopyPass(copyPass);
 
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
-        throwSdlError("Failed to submit nearby foliage marker upload.");
+        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+        SDL_ReleaseGPUTexture(m_device, texture);
+        throwSdlError("Failed to submit nearby foliage texture upload.");
     }
+
+    SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+    return texture;
+}
+
+void NearbyFoliageRenderer::createDefaultTextures()
+{
+}
+
+void NearbyFoliageRenderer::createMeshBuffers(
+    std::span<const Vertex> vertices,
+    std::span<const std::uint32_t> indices)
+{
+    SDL_GPUBufferCreateInfo vertexBufferInfo{};
+    vertexBufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+    vertexBufferInfo.size = static_cast<Uint32>(vertices.size_bytes());
+    m_meshVertexBuffer = SDL_CreateGPUBuffer(m_device, &vertexBufferInfo);
+    if (m_meshVertexBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage mesh vertex buffer.");
+    }
+
+    SDL_GPUBufferCreateInfo indexBufferInfo{};
+    indexBufferInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+    indexBufferInfo.size = static_cast<Uint32>(indices.size_bytes());
+    m_meshIndexBuffer = SDL_CreateGPUBuffer(m_device, &indexBufferInfo);
+    if (m_meshIndexBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage mesh index buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo vertexTransferInfo{};
+    vertexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    vertexTransferInfo.size = vertexBufferInfo.size;
+    m_meshVertexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &vertexTransferInfo);
+    if (m_meshVertexTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage mesh vertex transfer buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo indexTransferInfo{};
+    indexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    indexTransferInfo.size = indexBufferInfo.size;
+    m_meshIndexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &indexTransferInfo);
+    if (m_meshIndexTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage mesh index transfer buffer.");
+    }
+
+    void* mappedVertices = SDL_MapGPUTransferBuffer(m_device, m_meshVertexTransferBuffer, true);
+    std::memcpy(mappedVertices, vertices.data(), vertices.size_bytes());
+    SDL_UnmapGPUTransferBuffer(m_device, m_meshVertexTransferBuffer);
+
+    void* mappedIndices = SDL_MapGPUTransferBuffer(m_device, m_meshIndexTransferBuffer, true);
+    std::memcpy(mappedIndices, indices.data(), indices.size_bytes());
+    SDL_UnmapGPUTransferBuffer(m_device, m_meshIndexTransferBuffer);
+
+    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+    if (commandBuffer == nullptr)
+    {
+        throwSdlError("Failed to acquire command buffer for nearby foliage mesh upload.");
+    }
+
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    if (copyPass == nullptr)
+    {
+        throwSdlError("Failed to begin nearby foliage mesh copy pass.");
+    }
+
+    SDL_GPUTransferBufferLocation vertexSource{};
+    vertexSource.transfer_buffer = m_meshVertexTransferBuffer;
+    SDL_GPUBufferRegion vertexDestination{};
+    vertexDestination.buffer = m_meshVertexBuffer;
+    vertexDestination.size = vertexBufferInfo.size;
+    SDL_UploadToGPUBuffer(copyPass, &vertexSource, &vertexDestination, false);
+
+    SDL_GPUTransferBufferLocation indexSource{};
+    indexSource.transfer_buffer = m_meshIndexTransferBuffer;
+    SDL_GPUBufferRegion indexDestination{};
+    indexDestination.buffer = m_meshIndexBuffer;
+    indexDestination.size = indexBufferInfo.size;
+    SDL_UploadToGPUBuffer(copyPass, &indexSource, &indexDestination, false);
+    SDL_EndGPUCopyPass(copyPass);
+
+    if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
+    {
+        throwSdlError("Failed to submit nearby foliage mesh upload.");
+    }
+}
+
+std::vector<std::byte> NearbyFoliageRenderer::resampleTextureRgba(
+    const std::byte* sourcePixels,
+    std::uint32_t sourceWidth,
+    std::uint32_t sourceHeight,
+    std::uint32_t targetWidth,
+    std::uint32_t targetHeight) const
+{
+    std::vector<std::byte> result(static_cast<std::size_t>(targetWidth) * targetHeight * 4u);
+    for (std::uint32_t y = 0; y < targetHeight; ++y)
+    {
+        const std::uint32_t sourceY = sourceHeight == targetHeight
+            ? y
+            : std::min(sourceHeight - 1u, static_cast<std::uint32_t>((static_cast<std::uint64_t>(y) * sourceHeight) / targetHeight));
+        for (std::uint32_t x = 0; x < targetWidth; ++x)
+        {
+            const std::uint32_t sourceX = sourceWidth == targetWidth
+                ? x
+                : std::min(sourceWidth - 1u, static_cast<std::uint32_t>((static_cast<std::uint64_t>(x) * sourceWidth) / targetWidth));
+            const std::size_t sourceIndex = (static_cast<std::size_t>(sourceY) * sourceWidth + sourceX) * 4u;
+            const std::size_t targetIndex = (static_cast<std::size_t>(y) * targetWidth + x) * 4u;
+            std::memcpy(result.data() + targetIndex, sourcePixels + sourceIndex, 4u);
+        }
+    }
+    return result;
+}
+
+void NearbyFoliageRenderer::createMaterialResources(
+    const RuntimeAssets::LoadedTexBinView& texBin,
+    const RuntimeAssets::LoadedAssetBinView& assetBin,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& usedBaseColorTextures,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& usedNormalTextures)
+{
+    std::uint32_t baseColorWidth = 1u;
+    std::uint32_t baseColorHeight = 1u;
+    for (const auto& [textureIndex, layerIndex] : usedBaseColorTextures)
+    {
+        if (textureIndex == std::numeric_limits<std::uint32_t>::max())
+        {
+            continue;
+        }
+        const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
+        baseColorWidth = std::max(baseColorWidth, record.width);
+        baseColorHeight = std::max(baseColorHeight, record.height);
+        (void)layerIndex;
+    }
+
+    std::uint32_t normalWidth = 1u;
+    std::uint32_t normalHeight = 1u;
+    for (const auto& [textureIndex, layerIndex] : usedNormalTextures)
+    {
+        if (textureIndex == std::numeric_limits<std::uint32_t>::max())
+        {
+            continue;
+        }
+        const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
+        normalWidth = std::max(normalWidth, record.width);
+        normalHeight = std::max(normalHeight, record.height);
+        (void)layerIndex;
+    }
+
+    auto createArray = [&](SDL_GPUTextureFormat format, std::uint32_t width, std::uint32_t height, std::uint32_t layers) -> SDL_GPUTexture* {
+        SDL_GPUTextureCreateInfo textureInfo{};
+        textureInfo.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        textureInfo.format = format;
+        textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        textureInfo.width = width;
+        textureInfo.height = height;
+        textureInfo.layer_count_or_depth = layers;
+        textureInfo.num_levels = 1;
+        textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        SDL_GPUTexture* texture = SDL_CreateGPUTexture(m_device, &textureInfo);
+        if (texture == nullptr)
+        {
+            throwSdlError("Failed to create nearby foliage texture array.");
+        }
+        return texture;
+    };
+
+    m_baseColorTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
+        baseColorWidth,
+        baseColorHeight,
+        static_cast<std::uint32_t>(usedBaseColorTextures.size()));
+    m_normalTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        normalWidth,
+        normalHeight,
+        static_cast<std::uint32_t>(usedNormalTextures.size()));
+
+    auto uploadArray = [&](SDL_GPUTexture* texture,
+        SDL_GPUTextureFormat format,
+        std::uint32_t width,
+        std::uint32_t height,
+        const std::unordered_map<std::uint32_t, std::uint32_t>& textureToLayer,
+        const std::array<std::byte, 4>& defaultPixel) {
+        const std::size_t layerSize = static_cast<std::size_t>(width) * height * 4u;
+        SDL_GPUTransferBufferCreateInfo transferInfo{};
+        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        transferInfo.size = static_cast<Uint32>(layerSize * textureToLayer.size());
+        SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+        if (transferBuffer == nullptr)
+        {
+            throwSdlError("Failed to create nearby foliage texture-array upload buffer.");
+        }
+
+        std::byte* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(m_device, transferBuffer, false));
+        for (const auto& [textureIndex, layerIndex] : textureToLayer)
+        {
+            std::vector<std::byte> layerPixels;
+            if (textureIndex == std::numeric_limits<std::uint32_t>::max())
+            {
+                layerPixels.assign(layerSize, std::byte{});
+                for (std::size_t pixel = 0; pixel < width * height; ++pixel)
+                {
+                    std::memcpy(layerPixels.data() + (pixel * 4u), defaultPixel.data(), 4u);
+                }
+            }
+            else
+            {
+                const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
+                const std::byte* sourcePixels =
+                    reinterpret_cast<const std::byte*>(texBin.bytes.data() + record.dataOffset);
+                layerPixels = resampleTextureRgba(sourcePixels, record.width, record.height, width, height);
+                (void)format;
+            }
+
+            std::memcpy(mapped + (static_cast<std::size_t>(layerIndex) * layerSize), layerPixels.data(), layerSize);
+        }
+        SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
+
+        SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+        if (commandBuffer == nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+            throwSdlError("Failed to acquire command buffer for nearby foliage texture array upload.");
+        }
+
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+        if (copyPass == nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+            throwSdlError("Failed to begin nearby foliage texture array copy pass.");
+        }
+
+        for (const auto& [textureIndex, layerIndex] : textureToLayer)
+        {
+            SDL_GPUTextureTransferInfo source{};
+            source.transfer_buffer = transferBuffer;
+            source.offset = static_cast<Uint32>(static_cast<std::size_t>(layerIndex) * layerSize);
+            source.pixels_per_row = width;
+            source.rows_per_layer = height;
+
+            SDL_GPUTextureRegion destination{};
+            destination.texture = texture;
+            destination.layer = layerIndex;
+            destination.w = width;
+            destination.h = height;
+            destination.d = 1;
+            SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
+            (void)textureIndex;
+        }
+
+        SDL_EndGPUCopyPass(copyPass);
+        if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+            throwSdlError("Failed to submit nearby foliage texture array upload.");
+        }
+        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+    };
+
+    uploadArray(
+        m_baseColorTextureArray,
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
+        baseColorWidth,
+        baseColorHeight,
+        usedBaseColorTextures,
+        { std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF } });
+    uploadArray(
+        m_normalTextureArray,
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        normalWidth,
+        normalHeight,
+        usedNormalTextures,
+        { std::byte{ 0x80 }, std::byte{ 0x80 }, std::byte{ 0xFF }, std::byte{ 0xFF } });
+
+    m_materialGpuRecords.assign(assetBin.materials.size(), {});
+    for (std::uint32_t materialIndex = 0; materialIndex < assetBin.materials.size(); ++materialIndex)
+    {
+        const RuntimeAssets::MaterialRecord& material = assetBin.materials[materialIndex];
+        const std::uint32_t baseLayer = usedBaseColorTextures.contains(material.baseColorTextureIndex)
+            ? usedBaseColorTextures.at(material.baseColorTextureIndex)
+            : 0u;
+        const std::uint32_t normalLayer = usedNormalTextures.contains(material.normalTextureIndex)
+            ? usedNormalTextures.at(material.normalTextureIndex)
+            : 0u;
+        m_materialGpuRecords[materialIndex].layersAndFlags = glm::uvec4(
+            baseLayer,
+            normalLayer,
+            material.flags,
+            0u);
+        m_materialGpuRecords[materialIndex].params = glm::vec4(material.alphaCutoff, 0.0f, 0.0f, 0.0f);
+    }
+
+    SDL_GPUBufferCreateInfo materialBufferInfo{};
+    materialBufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+    materialBufferInfo.size = static_cast<Uint32>(sizeof(MaterialGpu) * m_materialGpuRecords.size());
+    m_materialBuffer = SDL_CreateGPUBuffer(m_device, &materialBufferInfo);
+    if (m_materialBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage material buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo materialTransferInfo{};
+    materialTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    materialTransferInfo.size = materialBufferInfo.size;
+    m_materialTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &materialTransferInfo);
+    if (m_materialTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage material transfer buffer.");
+    }
+
+    void* mappedMaterials = SDL_MapGPUTransferBuffer(m_device, m_materialTransferBuffer, true);
+    std::memcpy(mappedMaterials, m_materialGpuRecords.data(), materialBufferInfo.size);
+    SDL_UnmapGPUTransferBuffer(m_device, m_materialTransferBuffer);
+
+    SDL_GPUCommandBuffer* materialCommandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+    if (materialCommandBuffer == nullptr)
+    {
+        throwSdlError("Failed to acquire command buffer for nearby foliage material upload.");
+    }
+    SDL_GPUCopyPass* materialCopyPass = SDL_BeginGPUCopyPass(materialCommandBuffer);
+    if (materialCopyPass == nullptr)
+    {
+        throwSdlError("Failed to begin nearby foliage material upload copy pass.");
+    }
+    SDL_GPUTransferBufferLocation materialSource{};
+    materialSource.transfer_buffer = m_materialTransferBuffer;
+    SDL_GPUBufferRegion materialDestination{};
+    materialDestination.buffer = m_materialBuffer;
+    materialDestination.size = materialBufferInfo.size;
+    SDL_UploadToGPUBuffer(materialCopyPass, &materialSource, &materialDestination, true);
+    SDL_EndGPUCopyPass(materialCopyPass);
+    if (!SDL_SubmitGPUCommandBuffer(materialCommandBuffer))
+    {
+        throwSdlError("Failed to submit nearby foliage material upload.");
+    }
+}
+
+void NearbyFoliageRenderer::loadRuntimeAssets()
+{
+    RuntimeAssets::LoadedMeshBinView meshBin;
+    RuntimeAssets::LoadedTexBinView texBin;
+    RuntimeAssets::LoadedAssetBinView assetBin;
+    std::string error;
+    const std::filesystem::path assetRoot = TERRAIN_SANDBOX_ASSET_DIR;
+    if (!RuntimeAssets::LoadMeshBinFromSDL((assetRoot / "pinetreepack.meshbin").string().c_str(), &meshBin, &error) ||
+        !RuntimeAssets::LoadTexBinFromSDL((assetRoot / "pinetreepack.texbin").string().c_str(), &texBin, &error) ||
+        !RuntimeAssets::LoadAssetBinFromSDL((assetRoot / "pinetreepack.assetbin").string().c_str(), &assetBin, &error))
+    {
+        throw std::runtime_error("Failed to load nearby foliage runtime assets: " + error);
+    }
+
+    std::vector<Vertex> meshVertices;
+    meshVertices.reserve(meshBin.vertices.size());
+    for (const RuntimeAssets::MeshVertex& sourceVertex : meshBin.vertices)
+    {
+        Vertex vertex{};
+        vertex.position = glm::vec3(sourceVertex.position[0], sourceVertex.position[1], sourceVertex.position[2]);
+        vertex.normal = glm::vec3(sourceVertex.normal[0], sourceVertex.normal[1], sourceVertex.normal[2]);
+        vertex.tangent = glm::vec4(
+            sourceVertex.tangent[0],
+            sourceVertex.tangent[1],
+            sourceVertex.tangent[2],
+            sourceVertex.tangent[3]);
+        vertex.uv0 = glm::vec2(sourceVertex.uv0[0], sourceVertex.uv0[1]);
+        meshVertices.push_back(vertex);
+    }
+    createMeshBuffers(meshVertices, meshBin.indices);
+
+    m_loadedMaterials.assign(assetBin.materials.size(), {});
+    std::unordered_map<std::uint32_t, std::uint32_t> usedBaseColorTextures;
+    std::unordered_map<std::uint32_t, std::uint32_t> usedNormalTextures;
+    usedBaseColorTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
+    usedNormalTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
+
+    for (std::uint32_t treeClass = 0; treeClass < kNearbyRuntimeAssetNames.size(); ++treeClass)
+    {
+        const char* desiredAssetName = kNearbyRuntimeAssetNames[treeClass];
+        const RuntimeAssets::AssetRecord* assetRecord = nullptr;
+        for (const RuntimeAssets::AssetRecord& candidate : assetBin.assets)
+        {
+            if (std::strcmp(assetBin.stringAt(candidate.nameOffset), desiredAssetName) == 0)
+            {
+                assetRecord = &candidate;
+                break;
+            }
+        }
+
+        if (assetRecord == nullptr)
+        {
+            throw std::runtime_error(std::string("Nearby foliage asset was not found in assetbin: ") + desiredAssetName);
+        }
+
+        for (LoadedLodAsset& lod : m_loadedClassLods[treeClass])
+        {
+            lod.name = desiredAssetName;
+            lod.drawParts.clear();
+        }
+
+        for (std::uint32_t meshRefOffset = 0; meshRefOffset < assetRecord->meshRefCount; ++meshRefOffset)
+        {
+            const RuntimeAssets::MeshRefRecord& meshRef = assetBin.meshRefs[assetRecord->firstMeshRef + meshRefOffset];
+            if (meshRef.lodIndex >= kNearbyLodCount)
+            {
+                continue;
+            }
+            if (meshRef.meshIndex >= meshBin.meshes.size())
+            {
+                continue;
+            }
+
+            const RuntimeAssets::MeshRecord& mesh = meshBin.meshes[meshRef.meshIndex];
+            LoadedLodAsset& lod = m_loadedClassLods[treeClass][meshRef.lodIndex];
+            for (std::uint32_t submeshOffset = 0; submeshOffset < mesh.submeshCount; ++submeshOffset)
+            {
+                const RuntimeAssets::SubmeshRecord& submesh = meshBin.submeshes[mesh.firstSubmesh + submeshOffset];
+                if (submesh.materialIndex >= assetBin.materials.size())
+                {
+                    continue;
+                }
+
+                const RuntimeAssets::MaterialRecord& material = assetBin.materials[submesh.materialIndex];
+                const char* materialName = assetBin.stringAt(material.nameOffset);
+                if (containsInsensitive(materialName, "billboard"))
+                {
+                    continue;
+                }
+
+                LoadedMaterialGpu& gpuMaterial = m_loadedMaterials[submesh.materialIndex];
+                if (gpuMaterial.baseColorLayer == 0u &&
+                    gpuMaterial.normalLayer == 0u &&
+                    gpuMaterial.alphaCutoff == 0.0f &&
+                    gpuMaterial.flags == 0u)
+                {
+                    if (!usedBaseColorTextures.contains(material.baseColorTextureIndex))
+                    {
+                        usedBaseColorTextures.emplace(
+                            material.baseColorTextureIndex,
+                            static_cast<std::uint32_t>(usedBaseColorTextures.size()));
+                    }
+                    if (!usedNormalTextures.contains(material.normalTextureIndex))
+                    {
+                        usedNormalTextures.emplace(
+                            material.normalTextureIndex,
+                            static_cast<std::uint32_t>(usedNormalTextures.size()));
+                    }
+                    gpuMaterial.baseColorLayer = usedBaseColorTextures.at(material.baseColorTextureIndex);
+                    gpuMaterial.normalLayer = usedNormalTextures.at(material.normalTextureIndex);
+                    gpuMaterial.alphaCutoff = material.alphaCutoff;
+                    gpuMaterial.flags = material.flags;
+                }
+
+                lod.drawParts.push_back({
+                    .indexCount = submesh.indexCount,
+                    .firstIndex = submesh.firstIndex,
+                    .vertexOffset = static_cast<std::int32_t>(submesh.firstVertex),
+                    .materialIndex = submesh.materialIndex,
+                });
+            }
+        }
+
+        for (std::uint32_t lodIndex = 0; lodIndex < kNearbyLodCount; ++lodIndex)
+        {
+            if (m_loadedClassLods[treeClass][lodIndex].drawParts.empty())
+            {
+                throw std::runtime_error(
+                    std::string("Nearby foliage selected asset is missing drawable LOD") +
+                    std::to_string(lodIndex) + ": " + desiredAssetName);
+            }
+        }
+    }
+
+    createMaterialResources(texBin, assetBin, usedBaseColorTextures, usedNormalTextures);
+    m_runtimeAssetsLoaded = true;
 }
 
 void NearbyFoliageRenderer::createDecodeBuffers()
@@ -777,7 +1525,20 @@ void NearbyFoliageRenderer::createDrawBuffers()
 
     SDL_GPUBufferCreateInfo indirectInfo{};
     indirectInfo.usage = SDL_GPU_BUFFERUSAGE_INDIRECT;
-    indirectInfo.size = sizeof(SDL_GPUIndirectDrawCommand);
+    const std::size_t maxDrawCount = [&]() {
+        std::size_t total = 0;
+        for (const auto& classLods : m_loadedClassLods)
+        {
+            for (const LoadedLodAsset& lod : classLods)
+            {
+                total += lod.drawParts.size();
+            }
+        }
+        return total;
+    }();
+    m_drawCommands.resize(maxDrawCount);
+    m_drawMetadataGpu.resize(maxDrawCount);
+    indirectInfo.size = static_cast<Uint32>(sizeof(SDL_GPUIndexedIndirectDrawCommand) * maxDrawCount);
     m_indirectBuffer = SDL_CreateGPUBuffer(m_device, &indirectInfo);
     if (m_indirectBuffer == nullptr)
     {
@@ -792,6 +1553,24 @@ void NearbyFoliageRenderer::createDrawBuffers()
     {
         throwSdlError("Failed to create nearby foliage indirect transfer buffer.");
     }
+
+    SDL_GPUBufferCreateInfo drawMetadataInfo{};
+    drawMetadataInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+    drawMetadataInfo.size = static_cast<Uint32>(sizeof(DrawMetadataGpu) * maxDrawCount);
+    m_drawMetadataBuffer = SDL_CreateGPUBuffer(m_device, &drawMetadataInfo);
+    if (m_drawMetadataBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage draw-metadata buffer.");
+    }
+
+    SDL_GPUTransferBufferCreateInfo drawMetadataTransferInfo{};
+    drawMetadataTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    drawMetadataTransferInfo.size = drawMetadataInfo.size;
+    m_drawMetadataTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &drawMetadataTransferInfo);
+    if (m_drawMetadataTransferBuffer == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage draw-metadata transfer buffer.");
+    }
 }
 
 void NearbyFoliageRenderer::resetTransientState()
@@ -801,6 +1580,9 @@ void NearbyFoliageRenderer::resetTransientState()
     m_pendingFenceReadbackCount = 0u;
     m_topologyHintCount = 0u;
     m_drawCount = 0u;
+    m_activeDrawCommandCount = 0u;
+    m_groupFirstInstances.fill(0u);
+    m_groupInstanceCounts.fill(0u);
     m_pendingFenceReadbackSlots.fill(0u);
 }
 

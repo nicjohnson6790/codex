@@ -211,6 +211,7 @@ add_executable(terrain_sandbox
     src/main.cpp
     src/App.cpp
     src/AppPanels.cpp
+    src/assets/RuntimeAssetReader.cpp
     src/CameraManager.cpp
     src/EngineRendererBase.cpp
     src/FoliageCanopyRenderer.cpp
@@ -253,6 +254,7 @@ target_compile_definitions(terrain_sandbox
     PRIVATE
         TERRAIN_SANDBOX_SHADER_DIR="${SHADER_OUTPUT_DIR}"
         TERRAIN_SANDBOX_RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources"
+        TERRAIN_SANDBOX_ASSET_DIR="${CMAKE_SOURCE_DIR}/assets/runtime"
         NOMINMAX
 )
 
