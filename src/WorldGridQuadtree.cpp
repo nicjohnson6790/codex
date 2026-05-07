@@ -139,44 +139,18 @@ std::uint32_t foliageLeafSeed(const WorldGridQuadtreeLeafId& leafId)
     return static_cast<std::uint32_t>(hash);
 }
 
+std::int64_t pageCoordinateForLeafAxis(std::int64_t grid, double localMin, std::uint32_t pageSizeMeters)
+{
+    const std::int64_t pagesPerCell =
+        Position::kCellSize / static_cast<std::int64_t>(pageSizeMeters);
+    const std::int64_t localPage =
+        static_cast<std::int64_t>(std::llround(localMin / static_cast<double>(pageSizeMeters)));
+    return (grid * pagesPerCell) + localPage;
+}
+
 bool quadtreeNodeHasFlag(const QuadtreeNode& node, std::uint16_t mask)
 {
     return (node.flags & mask) != 0;
-}
-
-bool subtreeCanRenderWithoutParentFallback(
-    const std::array<QuadtreeNode, WorldGridQuadtree::kNodeCapacity>& nodes,
-    const QuadtreeNode& node)
-{
-    if (!quadtreeNodeHasFlag(node, QuadtreeNode::IsUsedMask))
-    {
-        return true;
-    }
-
-    if (quadtreeNodeHasFlag(node, QuadtreeNode::IsLeafMask))
-    {
-        return !quadtreeNodeHasFlag(node, QuadtreeNode::IsUploadingMask);
-    }
-
-    if (quadtreeNodeHasFlag(node, QuadtreeNode::IsSubdividingMask))
-    {
-        return !quadtreeNodeHasFlag(node, QuadtreeNode::IsUploadingMask);
-    }
-
-    for (const std::uint16_t childIndex : node.children)
-    {
-        if (childIndex == QuadtreeNode::NullNodeIndex)
-        {
-            continue;
-        }
-
-        if (!subtreeCanRenderWithoutParentFallback(nodes, nodes[childIndex]))
-        {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 bool nodeIsParentOfLeaves(
@@ -436,6 +410,11 @@ void WorldGridQuadtree::updateTree(
     m_activeNearbyFoliageRenderer = nearbyFoliageRenderer;
     m_activeCameraPosition = activeCamera.position;
     m_viewportExtent = viewportExtent;
+    const glm::dvec3 cameraWorld = activeCamera.position.worldPosition();
+    m_nearbyCameraPageX = static_cast<std::int64_t>(
+        std::floor(cameraWorld.x / static_cast<double>(FoliageConfig::kPageSizeMeters)));
+    m_nearbyCameraPageZ = static_cast<std::int64_t>(
+        std::floor(cameraWorld.z / static_cast<double>(FoliageConfig::kPageSizeMeters)));
     {
         HELLO_PROFILE_SCOPE("WorldGridQuadtree::RefreshBaseNodes");
         refreshBaseNodes(activeCamera.position);
@@ -1190,10 +1169,7 @@ bool WorldGridQuadtree::nodeIntersectsCanopyRange(const QuadtreeNode& node) cons
 
 bool WorldGridQuadtree::nodeShouldMaintainCanopyResidency(const QuadtreeNode& node) const
 {
-    return
-        nodeHasFlag(node, QuadtreeNode::ShouldDrawMask) &&
-        nodeIntersectsCanopyRange(node) &&
-        std::abs(worldGridQuadtreeLeafSize(node.nodeId) - static_cast<double>(FoliageConfig::kCanopyNodeSizeMeters)) <= 0.001;
+    return nodeHasFlag(node, QuadtreeNode::MaintainCanopyResidencyMask);
 }
 
 bool WorldGridQuadtree::nodeShouldDrawCanopy(const QuadtreeNode& node) const
@@ -1233,26 +1209,7 @@ bool WorldGridQuadtree::subtreeCanRenderFoliageWithoutCanopyFallback(std::uint16
     {
         return true;
     }
-
-    if (nodeShouldDrawFoliage(node))
-    {
-        return true;
-    }
-
-    if (nodeHasFlag(node, QuadtreeNode::IsLeafMask))
-    {
-        return false;
-    }
-
-    for (const std::uint16_t childIndex : node.children)
-    {
-        if (!subtreeCanRenderFoliageWithoutCanopyFallback(childIndex))
-        {
-            return false;
-        }
-    }
-
-    return true;
+    return nodeHasFlag(node, QuadtreeNode::CanRenderWithoutParentFallbackMask);
 }
 
 void WorldGridQuadtree::updateNodeFoliageState(QuadtreeNode& node, WorldGridFoliageManager* foliageManager)
@@ -1393,21 +1350,18 @@ bool WorldGridQuadtree::nodeIsInNearbyFoliageTopology(const QuadtreeNode& node) 
         return false;
     }
 
-    const auto [nodeMinCorner, nodeMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
-    (void)nodeMaxCorner;
-    const glm::dvec3 nodeMinWorld = nodeMinCorner.worldPosition();
-    const glm::dvec3 cameraWorld = m_activeCameraPosition.worldPosition();
-    const std::int64_t cameraPageX = static_cast<std::int64_t>(
-        std::floor(cameraWorld.x / static_cast<double>(FoliageConfig::kPageSizeMeters)));
-    const std::int64_t cameraPageZ = static_cast<std::int64_t>(
-        std::floor(cameraWorld.z / static_cast<double>(FoliageConfig::kPageSizeMeters)));
-    const std::int64_t nodePageX = static_cast<std::int64_t>(
-        std::floor(nodeMinWorld.x / static_cast<double>(FoliageConfig::kPageSizeMeters)));
-    const std::int64_t nodePageZ = static_cast<std::int64_t>(
-        std::floor(nodeMinWorld.z / static_cast<double>(FoliageConfig::kPageSizeMeters)));
+    double localMinX = 0.0;
+    double localMinZ = 0.0;
+    double size = 0.0;
+    worldGridQuadtreeLeafExtents(node.nodeId, localMinX, localMinZ, size);
+    (void)size;
+    const std::int64_t nodePageX =
+        pageCoordinateForLeafAxis(node.nodeId.gridX, localMinX, FoliageConfig::kPageSizeMeters);
+    const std::int64_t nodePageZ =
+        pageCoordinateForLeafAxis(node.nodeId.gridY, localMinZ, FoliageConfig::kPageSizeMeters);
     return
-        std::abs(nodePageX - cameraPageX) <= 1 &&
-        std::abs(nodePageZ - cameraPageZ) <= 1;
+        std::abs(nodePageX - m_nearbyCameraPageX) <= 1 &&
+        std::abs(nodePageZ - m_nearbyCameraPageZ) <= 1;
 }
 
 void WorldGridQuadtree::recordTerrainLeafCount(const QuadtreeNode& node)
@@ -1492,12 +1446,20 @@ void WorldGridQuadtree::updateCanopyNeighborAgeHintsForNode(std::uint16_t nodeIn
 
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
     {
-        if (!edgeHasEqualLodNeighbor(nodeIndex, edgeIndex))
+        const std::uint16_t neighborIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
+        if (neighborIndex == QuadtreeNode::NullNodeIndex)
         {
             continue;
         }
 
-        const std::uint16_t neighborIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
+        const QuadtreeNode& neighbor = m_nodes[neighborIndex];
+        if (std::abs(
+            worldGridQuadtreeLeafSize(neighbor.nodeId) -
+            worldGridQuadtreeLeafSize(node.nodeId)) > kEdgeCoverageEpsilon)
+        {
+            continue;
+        }
+
         std::uint8_t neighborYoungestAge = 255u;
         if (!youngestCanopyResidentAgeForNode(neighborIndex, neighborYoungestAge))
         {
@@ -1708,6 +1670,9 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     }
 
     const double size = worldGridQuadtreeLeafSize(node.nodeId);
+    const bool nodeUsesCanonicalPages = nodeUsesCanonicalFoliagePages(node);
+    const bool nodeIsCanopySize =
+        std::abs(size - static_cast<double>(FoliageConfig::kCanopyNodeSizeMeters)) <= 0.001;
     double drawMinHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
         ? static_cast<double>(node.minHeight)
         : -kVisibilityBoundsHalfHeight;
@@ -1735,36 +1700,154 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         ++treeData.drawableNodeCount;
     }
 
+    const bool maintainCanopyResidency =
+        shouldDraw &&
+        nodeIsCanopySize &&
+        nodeIntersectsCanopyRange(node);
+    setNodeFlag(node, QuadtreeNode::MaintainCanopyResidencyMask, maintainCanopyResidency);
+
+    struct TraversalResidencyCache
+    {
+        bool terrainSliceComputed = false;
+        bool hasTerrainSlice = false;
+        std::uint16_t terrainSliceIndex = 0;
+        bool foliageIdsComputed = false;
+        std::uint32_t foliageLeafCount = 0;
+        std::array<WorldGridQuadtreeLeafId, 16> foliageLeafIds{};
+        bool canopyIdsComputed = false;
+        bool hasCanopyLeafIds = false;
+        std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canopyLeafIds{};
+    } traversalCache;
+
+    const auto getTerrainSliceIndex = [&]() -> bool
+    {
+        if (!traversalCache.terrainSliceComputed)
+        {
+            traversalCache.terrainSliceComputed = true;
+            traversalCache.hasTerrainSlice =
+                m_heightmapManager.getResidentSliceIndex(node.nodeId, traversalCache.terrainSliceIndex);
+        }
+        return traversalCache.hasTerrainSlice;
+    };
+
+    const auto getFoliageLeafIds = [&]() -> bool
+    {
+        if (!traversalCache.foliageIdsComputed)
+        {
+            traversalCache.foliageIdsComputed = true;
+            traversalCache.foliageLeafCount = 0;
+            collectCanonicalFoliageLeafIds(
+                node.nodeId,
+                traversalCache.foliageLeafIds,
+                traversalCache.foliageLeafCount);
+        }
+        return traversalCache.foliageLeafCount > 0;
+    };
+
+    const auto getCanopyLeafIds = [&]() -> bool
+    {
+        if (!traversalCache.canopyIdsComputed)
+        {
+            traversalCache.canopyIdsComputed = true;
+            traversalCache.hasCanopyLeafIds = false;
+            std::uint32_t canopyLeafCount = 0;
+            collectCanonicalFoliageLeafIds(
+                node.nodeId,
+                traversalCache.canopyLeafIds,
+                canopyLeafCount);
+            traversalCache.hasCanopyLeafIds =
+                canopyLeafCount == FoliageConfig::kCanopyCellCountPerNode;
+        }
+        return traversalCache.hasCanopyLeafIds;
+    };
+
+    const auto setCanRenderWithoutParentFallback = [&](bool canRenderWithoutParentFallback)
+    {
+        setNodeFlag(
+            node,
+            QuadtreeNode::CanRenderWithoutParentFallbackMask,
+            canRenderWithoutParentFallback);
+    };
+
+    const auto updateNodeFoliageStateForTraversal = [&]()
+    {
+        if (m_activeFoliageManager == nullptr ||
+            !shouldDraw ||
+            !nodeHasResidentTerrainSurface(node) ||
+            !nodeUsesCanonicalPages)
+        {
+            setNodeFlag(node, QuadtreeNode::FoliageUploadPendingMask, false);
+            setNodeFlag(node, QuadtreeNode::FoliageShouldDrawMask, false);
+            return;
+        }
+
+        if (!getFoliageLeafIds() || !getTerrainSliceIndex())
+        {
+            setNodeFlag(node, QuadtreeNode::FoliageUploadPendingMask, false);
+            setNodeFlag(node, QuadtreeNode::FoliageShouldDrawMask, false);
+            return;
+        }
+
+        bool allPagesReady = true;
+        for (std::uint32_t pageIndex = 0; pageIndex < traversalCache.foliageLeafCount; ++pageIndex)
+        {
+            allPagesReady = m_activeFoliageManager->makeResident(
+                traversalCache.foliageLeafIds[pageIndex],
+                node.nodeId,
+                traversalCache.terrainSliceIndex) && allPagesReady;
+        }
+
+        setNodeFlag(node, QuadtreeNode::FoliageUploadPendingMask, !allPagesReady);
+        setNodeFlag(node, QuadtreeNode::FoliageShouldDrawMask, allPagesReady);
+    };
+
+    const auto updateNodeFoliageResidencyHintsForTraversal = [&]()
+    {
+        if (m_activeFoliageManager == nullptr ||
+            !nodeHasFlag(node, QuadtreeNode::IsLeafMask) ||
+            shouldDraw ||
+            !nodeHasResidentTerrainSurface(node) ||
+            !nodeUsesCanonicalPages ||
+            !getTerrainSliceIndex() ||
+            !getFoliageLeafIds())
+        {
+            return;
+        }
+
+        for (std::uint32_t pageIndex = 0; pageIndex < traversalCache.foliageLeafCount; ++pageIndex)
+        {
+            (void)m_activeFoliageManager->makeResident(
+                traversalCache.foliageLeafIds[pageIndex],
+                node.nodeId,
+                traversalCache.terrainSliceIndex);
+        }
+    };
+
     const auto updateCanopyFlagsForTraversal = [&]()
     {
         bool canopyReady = false;
         bool canopyShouldDraw = false;
-        if (m_activeCanopyManager != nullptr && nodeShouldMaintainCanopyResidency(node))
+        if (m_activeCanopyManager != nullptr && maintainCanopyResidency)
         {
-            std::uint16_t terrainSliceIndex = 0;
-            if (m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex))
+            if (getTerrainSliceIndex() && getCanopyLeafIds())
             {
-                std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canonicalLeafIds{};
-                if (collectNodeCanopyCellIds(node, canonicalLeafIds))
+                canopyReady = true;
+                for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
                 {
-                    canopyReady = true;
-                    for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
-                    {
-                        canopyReady = m_activeCanopyManager->makeResident(
-                            canonicalLeafIds[cellIndex],
-                            node.nodeId,
-                            terrainSliceIndex) && canopyReady;
-                    }
+                    canopyReady = m_activeCanopyManager->makeResident(
+                        traversalCache.canopyLeafIds[cellIndex],
+                        node.nodeId,
+                        traversalCache.terrainSliceIndex) && canopyReady;
+                }
 
-                    if (canopyReady)
+                if (canopyReady)
+                {
+                    canopyShouldDraw = nodeContributesTerrainDraw(node);
+                    if (!canopyShouldDraw &&
+                        !nodeHasFlag(node, QuadtreeNode::IsLeafMask) &&
+                        !subtreeCanRenderFoliageWithoutCanopyFallback(nodeIndex))
                     {
-                        canopyShouldDraw = nodeContributesTerrainDraw(node);
-                        if (!canopyShouldDraw &&
-                            !nodeHasFlag(node, QuadtreeNode::IsLeafMask) &&
-                            !subtreeCanRenderFoliageWithoutCanopyFallback(nodeIndex))
-                        {
-                            canopyShouldDraw = true;
-                        }
+                        canopyShouldDraw = true;
                     }
                 }
             }
@@ -1782,12 +1865,34 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
     };
 
+    const auto updateNodeCanopyResidencyHintsForTraversal = [&]()
+    {
+        if (m_activeCanopyManager == nullptr ||
+            !nodeHasFlag(node, QuadtreeNode::IsLeafMask) ||
+            shouldDraw ||
+            !nodeHasResidentTerrainSurface(node) ||
+            !nodeIsCanopySize ||
+            !getTerrainSliceIndex() ||
+            !getCanopyLeafIds())
+        {
+            return;
+        }
+
+        for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
+        {
+            (void)m_activeCanopyManager->makeResident(
+                traversalCache.canopyLeafIds[cellIndex],
+                node.nodeId,
+                traversalCache.terrainSliceIndex);
+        }
+    };
+
     const auto finalizeNodeTraversalState = [&](bool recordLeafCount)
     {
-        updateNodeFoliageState(node, m_activeFoliageManager);
-        updateNodeFoliageResidencyHints(node);
+        updateNodeFoliageStateForTraversal();
+        updateNodeFoliageResidencyHintsForTraversal();
         updateCanopyFlagsForTraversal();
-        updateNodeCanopyResidencyHints(node);
+        updateNodeCanopyResidencyHintsForTraversal();
         updateCanopyNeighborAgeHintsForNode(nodeIndex);
         updateNodeNearbyFoliageState(node, frameIndex);
         if (recordLeafCount)
@@ -1812,6 +1917,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             }
             setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
             clearTraversalTransitionFlags();
+            setCanRenderWithoutParentFallback(resident);
             finalizeNodeTraversalState(true);
             return;
         }
@@ -1827,13 +1933,14 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
             updateNode(childIndex, activeCamera, frameIndex);
             allChildrenReady = allChildrenReady &&
-                subtreeCanRenderWithoutParentFallback(m_nodes, m_nodes[childIndex]);
+                nodeHasFlag(m_nodes[childIndex], QuadtreeNode::CanRenderWithoutParentFallbackMask);
         }
 
         if (!nodeIsParentOfLeaves(m_nodes, node))
         {
             setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
             clearTraversalTransitionFlags();
+            setCanRenderWithoutParentFallback(allChildrenReady);
             finalizeNodeTraversalState(false);
             return;
         }
@@ -1867,6 +1974,8 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         setNodeFlag(node, QuadtreeNode::IsSubdividingMask, isSubdividing);
         setNodeFlag(node, QuadtreeNode::IsCollapsingMask, false);
         setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
+        setCanRenderWithoutParentFallback(
+            isSubdividing ? resident : allChildrenReady);
         if (isSubdividing && !wasSubdividing)
         {
             ++treeData.subdivisionCountThisFrame;
@@ -1884,15 +1993,19 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         }
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, !resident);
         clearTraversalTransitionFlags();
+        setCanRenderWithoutParentFallback(resident);
         finalizeNodeTraversalState(true);
         return;
     }
 
+    bool allChildrenReady = true;
     for (const std::uint16_t childIndex : node.children)
     {
         if (childIndex != QuadtreeNode::NullNodeIndex)
         {
             updateNode(childIndex, activeCamera, frameIndex);
+            allChildrenReady = allChildrenReady &&
+                nodeHasFlag(m_nodes[childIndex], QuadtreeNode::CanRenderWithoutParentFallbackMask);
         }
     }
 
@@ -1900,6 +2013,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     {
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
         clearTraversalTransitionFlags();
+        setCanRenderWithoutParentFallback(allChildrenReady);
         finalizeNodeTraversalState(false);
         return;
     }
@@ -1936,7 +2050,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
     if (!keepChildrenAsFallback &&
         m_activeCanopyManager != nullptr &&
-        nodeShouldMaintainCanopyResidency(node) &&
+        maintainCanopyResidency &&
         !nodeHasFlag(node, QuadtreeNode::CanopyReadyMask))
     {
         keepChildrenAsFallback = true;
@@ -1959,6 +2073,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         }
         setNodeFlag(node, QuadtreeNode::IsLeafMask, true);
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
+        setCanRenderWithoutParentFallback(true);
         finalizeNodeTraversalState(true);
         return;
     }
@@ -1967,6 +2082,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     {
         ++treeData.collapseCountThisFrame;
     }
+    setCanRenderWithoutParentFallback(allChildrenReady);
     finalizeNodeTraversalState(false);
 }
 

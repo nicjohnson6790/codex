@@ -60,6 +60,8 @@ struct QuadtreeNode
     static constexpr std::uint16_t NearbyFoliageCpuResidentThisFrameMask = 2048;
     static constexpr std::uint16_t CanopyReadyMask = 4096;
     static constexpr std::uint16_t CanopyShouldDrawMask = 8192;
+    static constexpr std::uint16_t CanRenderWithoutParentFallbackMask = 16384;
+    static constexpr std::uint16_t MaintainCanopyResidencyMask = 32768;
 };
 
 class WorldGridQuadtree
@@ -201,6 +203,8 @@ private:
     bool m_waterVisibilityBoundsEnabled = false;
     float m_waterVisibilityMinHeight = 0.0f;
     float m_waterVisibilityMaxHeight = 0.0f;
+    std::int64_t m_nearbyCameraPageX = 0;
+    std::int64_t m_nearbyCameraPageZ = 0;
     WorldGridFoliageManager* m_activeFoliageManager = nullptr;
     WorldGridFoliageCanopyManager* m_activeCanopyManager = nullptr;
     NearbyFoliageRenderer* m_activeNearbyFoliageRenderer = nullptr;
