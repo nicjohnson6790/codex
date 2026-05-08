@@ -2,363 +2,190 @@
 
 ![rendered screenshot](images/Screenshot%202026-05-07%20201916.png)
 
-This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage markers, nearby decoded foliage mesh rendering, far-distance canopy impostors, and shared-cascade FFT water.
+An editor-style terrain sandbox built on SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage, nearby tree mesh rendering, procedural far-canopy coverage, and shared-cascade FFT water.
 
-It also now includes a standalone offline asset-conversion subproject under [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md) for importing source FBX/TGA/PNG content into simple runtime binary asset packs.
-
-The runtime asset packs now store per-mesh and per-texture payloads as individually LZ4-compressed blobs, with `assetbin` carrying the manifest metadata needed to decompress those items on load.
-
-This branch does not include the required pine source assets or generated runtime asset bins. To use the nearby tree-mesh path, you need to supply the `assets/source/pinetreepack` content yourself and run the asset build step to produce the runtime bins under `assets/runtime`.
-
-## Overview
-
-The app renders into an offscreen viewport that is shown inside an ImGui layout. Terrain is managed as quadtree patches, with heightmaps cached in an LRU and rendered through a reusable indexed patch mesh. Heightmaps are generated on the GPU with a compute shader, and per-slice min/max extents are reduced on the GPU and read back asynchronously for culling, subdivision, and debug bounds.
-
-Foliage now has three distance bands that follow the same broad ownership split as terrain:
-
-- visible `256m`, `512m`, and `1024m` quadtree leaves expand into canonical `256m x 256m` foliage pages, those pages are tracked in a fixed-capacity resident cache, and a GPU compute pass writes compact packed marker instances directly into a fixed resident page pool
-- the local `3 x 3` set of `256m` foliage pages around the camera can also request a decoded CPU-readable copy of those same canonical pages through a small nearby-foliage LRU, then emit a compact per-frame nearby marker list within a configurable near radius
-- visible `2048m` quadtree leaves can draw a separate far-canopy impostor surface built from canonical `256m x 256m` canopy bitsets, with residency managed through its own fixed-capacity LRU and GPU bitset-generation pass
-
-Water follows the same broad ownership split as terrain, but stays globally simulated:
-
-- `WorldGridQuadtree` decides which leaves are visible
-- `WorldGridFoliageManager` decides which canonical foliage pages should be resident
-- `WorldGridFoliageCanopyManager` decides which canonical canopy cells should be resident
-- `NearbyFoliageRenderer` owns decoded nearby-page readback, the small CPU nearby-page LRU, runtime asset loading for nearby tree meshes/materials, and the nearby mesh draw path
-- `FoliageImposterRenderer` owns the resident foliage page pool and foliage marker draw path
-- `FoliageCanopyRenderer` owns the far-canopy cell bitset pool, canopy generation compute path, and canopy draw path
-- `WorldGridQuadtreeWaterManager` decides which of those leaves should draw water
-- `QuadtreeWaterMeshRenderer` owns the reusable water meshes, FFT compute resources, and water draw path
-- `SDLRenderer` orchestrates the terrain, foliage, and water compute/render order each frame
-
-Rendering highlights:
-
-- Terrain is drawn as reusable quadtree patch meshes backed by GPU-generated heightmap slices, async min/max extent readback, and tree-based bridge stitching for equal-LOD and `2:1` seams.
-- Foliage is generated on the GPU directly from resident terrain heightmaps, stored in a fixed `1024`-page pool of canonical `256m x 256m` pages, and drawn as simple vertical markers through indirect draws.
-- Nearby foliage reuses those same canonical pages, expands them into fixed `4096`-slot decoded page buffers on the GPU, reads selected pages back asynchronously, caches a small CPU-side decoded-page LRU, and renders real nearby pine meshes with deterministic per-instance yaw inside the near radius.
-- Far-canopy impostors use a separate `4096`-cell canopy-bitset pool. Each visible `2048m` canopy patch references `64` canonical canopy cells and reconstructs rounded canopy crowns procedurally in the fragment shader instead of drawing individual trees.
-- Canopy patches use a dedicated `16 x 16` quad surface over each `2048m` terrain leaf, support dithered fade-in, and dither their outer edge only on true `2048m -> 4096m` canopy termination borders.
-- Foliage currently only appears where terrain is more than `5m` above the water level. Mid-distance foliage still renders as green markers, while the nearby decoded path renders real tree geometry from the full `pinetreepack` asset set inside the default `100m` near radius.
-- Water uses four shared `512 x 512` FFT cascades, sampled globally in world space and instanced across visible quadtree leaves with matching interior, equal-LOD, and `2:1` bridge meshes.
-- The water draw reuses resident terrain heightmaps to estimate local depth for shallow-wave damping, per-cascade shallow-depth thresholds, transparency, shoreline transmission, and shoreline foam placement.
-- Water shading uses the same cubemap and atmosphere LUT as the skybox, with distance-based filtering that sheds unresolved cascades, simplifies far normals/reflections, and makes distant water cheaper and less noisy.
-- Crest foam comes from wave compression and persists in a dedicated history texture; both crest foam and shoreline foam are shaped at draw time from the same procedural cellular SDF and smooth-noise textures.
-- Submerged terrain samples the shared water displacement and slope fields for underwater caustics, while shoreline terrain blends into dry and wetted sand bands around the waterline.
-- Skybox and water reflection probes both treat the atmosphere as a deep participating medium instead of cutting off at `y = 0`.
-
-Core pieces:
-
-- `SDLRenderer`: SDL GPU device, swapchain, viewport targets, and frame submission
-- `TriangleRenderer`: simple instanced triangle rendering
-- `LineRenderer`: immediate-style debug line rendering
-- `QuadtreeMeshRenderer`: terrain draw path, compute heightmap generation, and async extents readback
-- `FoliageCanopyRenderer`: far-canopy draw path, canopy-bitset compute generation, and canopy patch rendering
-- `FoliageImposterRenderer`: foliage page-pool draw path and indirect marker rendering
-- `NearbyFoliageRenderer`: decoded nearby-page expansion/readback, CPU-side nearby-page cache, runtime asset upload, and nearby tree-mesh rendering
-- `WorldGridQuadtreeWaterManager`: CPU-side water leaf selection and staging
-- `QuadtreeWaterMeshRenderer`: water draw path, FFT compute passes, and shared displacement/slope/foam maps
-- `SkyboxRenderer`: fullscreen skybox pass using a cubemap and inverse view-projection ray reconstruction
-- `WorldGridQuadtree`: quadtree update, draw selection, subdivision/collapse, tree-based neighbor lookup for stitching, and debug draw emission
-- `WorldGridQuadtreeHeightmapManager`: heightmap residency, LRU replacement, and compute dispatch queueing
-- `WorldGridFoliageCanopyManager`: far-canopy residency, canonical canopy-cell expansion, ready-cell tracking, and GPU bitset generation queueing
-- `WorldGridFoliageManager`: foliage residency, canonical page expansion, ready-page tracking, and GPU generation queueing
-- `CameraManager` + `FreeFlightCameraController`: camera storage and free-flight controls
-- `LightingSystem`: global sun direction, color, intensity, and time-of-day cycle controls
-- `PerformanceCapture` + `PerfPanel`: frame timing and flame graph UI
-
-## Current Terrain Pipeline
-
-Each frame, terrain, foliage, and water work are split into a few clear phases:
-
-1. `beginHeightmapUpdate`
-   Completed GPU extents readbacks are collected and folded back into the heightmap manager and any live quadtree nodes.
-2. `updateTree`
-   The quadtree updates from cached residency/extents state, decides subdivision/collapse, and performs node-owned residency work during traversal. Heightmap, foliage, canopy, nearby-foliage, and warmup `makeResident(...)` calls now happen from the normal tree walk instead of separate whole-node post passes.
-3. `endHeightmapUpdate`
-   Queued heightmap leaf requests are scheduled from the heightmap manager into the terrain compute generation path. Foliage and canopy managers likewise schedule queued GPU generation work after traversal-owned residency requests have populated their queues.
-4. `emitSceneDraws`
-   A single quadtree walk consumes the traversal-produced node flags and emits terrain, canopy, mid-distance foliage, nearby foliage, and water work. Terrain still emits base patches and stitch bridges, canopy still gathers its `64` canonical cells and derives fade inputs from residency age, nearby foliage still filters decoded CPU pages by near radius and maps them into tree-class and distance-LOD groups, and water still stages visible wet leaves plus bridge requests.
-
-The renderer then:
-
-1. sorts terrain and water draw instances front-to-back, then uploads draw-instance data
-2. dispatches compute jobs for queued terrain slices
-3. dispatches compute jobs for queued canopy cells, writing compact `4096`-bit canopy coverage masks into the resident canopy-cell pool
-4. dispatches compute jobs for queued foliage pages, writing compact packed instances directly into the resident foliage page pool and queueing an async per-page `liveCount` download
-5. dispatches compute jobs for queued nearby decoded-page expansions, then queues async downloads for the decoded fixed-`4096`-slot nearby-page buffers that requested CPU-readable copies
-6. dispatches water simulation:
-   - optional one-time spectrum initialization when water settings change
-   - per-frame spectrum evolution from cached `h0`
-   - shared-memory FFT passes over SSBO working buffers
-   - displacement/slope map assembly plus crest-foam generation and persistence into texture arrays
-7. queues an async terrain extents download
-8. renders terrain, canopy, foliage, nearby foliage, water, triangles, and debug lines into the offscreen viewport
-   - terrain uses an interior patch mesh plus equal-LOD and `2:1` bridge meshes to close cracks between quadtree nodes
-   - terrain submits both bridge variants through one shared bridge indirect draw
-   - canopy renders a terrain-following `16 x 16` quad patch over visible `2048m` leaves, sampling resident canopy-cell bitsets and reconstructing clustered canopy crowns from only the nearest four candidate slots per fragment
-   - canopy supports dithered patch fade-in plus dithered edge fade on true `2048m -> 4096m` canopy termination borders
-   - foliage currently renders simple vertical markers selected by packed `meshId` height classes instead of full mid-distance tree meshes or impostor atlases
-  - nearby foliage reuses decoded CPU-readable `256m x 256m` canonical pages, groups candidate slots into `25m / 50m / 100m` distance bands, and renders real pine tree mesh LODs from all imported tree variants through indexed indirect draws
-   - submerged terrain can add texture-driven caustics, with the caustic evolution warped and modulated from the shared water displacement/slope maps
-   - shoreline terrain shading blends from dry sand into darker wetted sand around the waterline and extends the submerged sand tint into shallow water
-   - water uses the same broad stitch strategy with a trimmed interior base patch plus equal-LOD and `2:1` bridge meshes
-   - water also submits both bridge variants through one shared bridge indirect draw
-   - the water vertex shader samples the matching resident terrain slice when available
-   - local depth is used to damp wave motion in shallow water, with per-cascade damping strengths and per-cascade shallow-depth thresholds
-   - the water fragment shader blends sky/atmosphere reflection, depth-based absorption/scattering, depth-driven transparency over terrain, persistent crest foam history, shoreline foam, and procedural foam detail/breakup
-   - far-water filtering removes unresolved displacement and slope detail, fades foam, and simplifies the shading response with distance
-7. renders the skybox as a fullscreen quad using the cubemap and the current time-of-day rotation
-8. renders ImGui
+This branch does not include the authored pine tree source assets needed to rebuild or fully run the nearby tree mesh path. See `Assets` below.
 
 ## Features
 
-- Docked `Info` and `Viewport` panes with ImGui docking
-- Offscreen SDL GPU viewport displayed inside the UI
-- Default startup layout sized around a `1280 x 800` viewport, with quadtree debug bounds hidden by default
-- Free-flight camera controls with gamepad support
-- Multiple cameras with active-camera switching
-- Triangle instance editing in grid/local coordinates
-- Quadtree terrain rendering with runtime residency and subdivision
-- `259 x 259` heightmap slices with halo samples and a reusable terrain patch mesh
-- Terrain crack stitching with reusable equal-LOD and `2:1` bridge meshes
-- Terrain equal-LOD and `2:1` bridge draws batched through one indirect bridge submission
-- GPU compute terrain generation with async GPU extents readback
-- Canonical `256m x 256m` foliage pages stored in a fixed `1024`-page GPU pool
-- Separate far-canopy residency for canonical `256m x 256m` canopy cells stored in a fixed `4096`-cell GPU bitset pool
-- GPU foliage generation directly from resident terrain heightmaps, with only per-page `liveCount` read back to the CPU for the mid-distance path
-- Nearby foliage decoded-page expansion/readback into a small CPU LRU keyed by canonical `256m x 256m` foliage page ids
-- GPU far-canopy generation into compact per-cell `4096`-bit coverage masks instead of full tree instances
-- Indirect foliage marker draws that validate placement and residency before real tree meshes/impostors are added
-- Nearby decoded foliage markers collected from CPU-readable `4096`-slot page caches inside a default `100m` near radius
-- Far-distance canopy impostor draws for `2048m` leaves, with procedural rounded canopy reconstruction in the fragment shader
-- Foliage placement gated to terrain more than `5m` above the water level
-- Local-topology nearby foliage warmup for the current `256m` page and its immediate `3 x 3` neighbors
-- Off-screen foliage residency hints for leaf nodes so foliage and canopy can warm in the background before a camera turn, now issued during the normal quadtree traversal instead of a separate whole-node pass
-- Shared-cascade FFT water with an interior base mesh plus reusable equal-LOD and `2:1` bridge meshes
-- Water equal-LOD and `2:1` bridge draws batched through one indirect bridge submission
-- Four `512 x 512` water cascades sampled in world space across visible water leaves, with cascade usage reduced on larger quadtree patches
-- SSBO-backed FFT working set with shared-memory butterfly passes
-- Precomputed static water spectrum initialization, rebuilt only when water settings change
-- Crest foam generated from local wave compression, with temporal persistence and decay in a dedicated ping-pong history texture
-- Foam detail from startup-generated tileable procedural textures instead of authored foam PNG assets
-- Smooth-noise-driven foam wobble and breakup layered over the persistent foam history signal
-- Shoreline foam band driven by local depth and shaped from the same procedural foam detail and breakup textures as the history foam
-- Terrain-aware shallow-water damping by sampling the resident terrain heightmap slice under each water patch
-- Per-cascade shallow-water damping strengths and shallow-depth thresholds so small and large wave bands can fade differently near shore
-- Depth-driven water surface transparency over already rendered terrain instead of a local shallow-refraction raymarch
-- Distance-based water cascade filtering and far-field BRDF flattening to keep distant water from turning into unresolved FFT/specular noise
-- Foam-aware water reflectivity, with visible foam raising roughness and damping specular/reflection response
-- Underwater terrain caustics from a startup-generated cell SDF sampled twice on the terrain `XZ` plane and warped by the shared FFT water displacement/slope field
-- Shoreline terrain sand band with separate dry and wetted tones above and below the waterline
-- Tiered water cascade selection by patch size:
-  - `256` and `512` meter patches use all 4 cascades
-  - `1024` and `2048` meter patches use the top 3 cascades
-  - `4096` and `8192` meter patches use the top 2 cascades
-  - larger patches use only the top cascade
-- Sky/atmosphere-aware PBR-style water shading using the same cubemap and atmosphere LUT as the skybox pass
-- Depth-driven water color, absorption, transmission, and transparency beyond the shoreline band
-- Skybox cubemap rendering from runtime asset bins generated from `assets/source/skybox/tex`
-- Deep-atmosphere sky and water reflection probes that do not clamp atmospheric traversal to a ground plane at `y = 0`
-- Time-of-day controls that rotate both the sun and skybox around a shared orbit axis
-- Runtime terrain tuning:
-  - base height
-  - base wavelength
-  - initial frequency
-  - initial amplitude
-  - octave count
-  - octave frequency scale
-  - octave amplitude scale
-  - gradient dampening `k`
-  - compute dispatches per frame
-- Quadtree debug bounds using real extents when known, falling back to a flat square when not
-- Tree-based quadtree neighbor traversal for terrain and water stitching, including world-grid border handoff across the active `3 x 3` base-node set
-- Terrain shading with a tunable global sun light plus underwater caustic lighting on submerged terrain
-- Automatic day/night progression with configurable day length and time factor
-- Built-in frame graph and CPU flame graph
-- Water tuning UI for level, amplitude, cutoffs, per-cascade parameters including wind direction, shallow-water damping strength and depth, water color ramps, far-water filtering, shoreline foam, foam reflectivity shaping, terrain-height water culling, crest-foam controls, procedural foam-detail shaping, and terrain-caustics shaping
+- SDL3 GPU renderer presented inside an ImGui docking UI
+- Quadtree terrain with GPU-generated heightmaps and async min/max extent readback
+- Reusable terrain patch meshes with equal-LOD and `2:1` crack stitching
+- GPU foliage generation into canonical `256m x 256m` resident pages
+- Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw
+- Far-canopy path that renders procedural canopy mass from compact bitset coverage
+- Shared-cascade FFT water with bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
+- Skybox and water shading driven by the same cubemap and atmosphere model
+- Offline asset converter that builds compressed runtime `meshbin`, `texbin`, and `assetbin` packs
+- Self-contained build outputs with shaders and runtime assets staged under `build/<Config>`
 
-## Project Layout
+## Frame Flow
 
-- `src/App.*`: app lifetime, frame loop, and scene/update orchestration
-- `src/AppPanels.*`: UI layout and editor panels
-- `src/SDLRenderer.*`: SDL GPU setup and frame submission
-- `src/QuadtreeMeshRenderer.*`: terrain draw path, bridge meshes, and compute integration
-- `src/FoliageCanopyRenderer.*`: far-canopy draw path and canopy-bitset compute integration
-- `src/FoliageImposterRenderer.*`: foliage marker draw path and resident page-pool handling
-- `src/NearbyFoliageRenderer.*`: decoded nearby-page expansion, CPU readback/LRU management, runtime asset upload, and nearby mesh rendering
-- `src/QuadtreeWaterMeshRenderer.*`: water draw path, bridge meshes, and FFT compute integration
-- `src/SkyboxRenderer.*`: cubemap loading from runtime bins and fullscreen skybox rendering
-- `src/WorldGridQuadtree.*`: quadtree state and traversal
-- `src/WorldGridQuadtreeHeightmapManager.*`: heightmap LRU and compute queue management
-- `src/WorldGridFoliageCanopyManager.*`: far-canopy LRU and canopy-cell generation queue management
-- `src/WorldGridFoliageManager.*`: foliage residency, canonical page expansion, and GPU generation staging
-- `src/WorldGridQuadtreeWaterManager.*`: water draw filtering and leaf staging
-- `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug box rendering
-- `src/HeightmapNoiseGenerator.*`: shared terrain noise settings and CPU-side sampling helpers
-- `src/TriangleRenderer.*`: triangle rendering
+Each frame is split into a few predictable phases:
+
+- Collect completed terrain extent readbacks and fold them back into the heightmap manager and live quadtree nodes.
+- Traverse the quadtree to decide visibility, subdivision, collapse, and per-node residency requests for terrain, foliage, canopy, nearby foliage, and water.
+- Flush queued residency work to the managers so terrain slices, foliage pages, canopy cells, and nearby decoded pages can be scheduled.
+- Walk the quadtree again to emit terrain draws, foliage draws, nearby foliage draws, canopy draws, water draws, and debug draws.
+- Upload per-frame draw data, dispatch terrain generation, dispatch foliage generation, dispatch canopy generation, dispatch nearby decode work, and run the water simulation passes.
+- Queue the next async terrain extent readback.
+- Render terrain, foliage, nearby foliage, canopy, water, skybox, debug overlays, and ImGui into the offscreen viewport.
+
+## Architecture
+
+The runtime is split into four main layers:
+
+- `SDLRenderer` owns the SDL GPU device, swapchain, render targets, and top-level frame submission order.
+- Renderer classes own concrete draw and compute paths such as terrain, foliage, nearby foliage, canopy, water, skybox, triangles, and debug lines.
+- Manager classes own residency, LRU replacement, and queued generation work for terrain slices, foliage pages, canopy cells, and water leaf selection.
+- `WorldGridQuadtree` is the high-level scene structure that decides what should exist, what should be resident, and what should be drawn each frame.
+
+That split keeps the quadtree responsible for scene decisions, managers responsible for lifetime and queues, and renderers responsible for GPU work.
+
+## File Index
+
+### App and frame orchestration
+
+- `src/main.cpp`: process entry point and app startup
+- `src/App.*`: application lifetime, per-frame update flow, and system wiring
+- `src/AppPanels.*`: ImGui layout and editor panels
+- `src/AppConfig.hpp`: shared runtime constants and defaults
+
+### Core rendering
+
+- `src/SDLRenderer.*`: SDL GPU setup, render targets, compute dispatch order, and frame submission
+- `src/EngineRendererBase.*`: small shared base helpers for renderer classes
+- `src/RenderEngines.hpp`: renderer ownership bundle types
+- `src/RenderTypes.hpp`: shared render-facing data types
+- `src/SceneTypes.hpp`: shared scene-side data passed into rendering
+
+### Terrain
+
+- `src/WorldGridQuadtree.*`: quadtree traversal, visibility, subdivision, neighbor lookup, and draw emission
+- `src/WorldGridQuadtreeTypes.hpp`: quadtree ids, bounds, and helper types
+- `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug bounds rendering
+- `src/WorldGridQuadtreeHeightmapManager.*`: terrain slice residency, LRU replacement, and generation queueing
+- `src/QuadtreeMeshRenderer.*`: terrain mesh draw path, bridge meshes, compute generation, and extents readback
+- `src/HeightmapNoiseGenerator.*`: procedural terrain noise settings and sampling helpers
+
+### Foliage
+
+- `src/WorldGridFoliageManager.*`: canonical foliage page residency and GPU generation scheduling
+- `src/WorldGridFoliageCanopyManager.*`: canonical canopy cell residency and GPU generation scheduling
+- `src/FoliageImposterRenderer.*`: mid-distance foliage marker page pool and draw path
+- `src/NearbyFoliageRenderer.*`: nearby decoded-page readback, CPU cache, runtime asset loading, and nearby tree mesh rendering
+- `src/FoliageCanopyRenderer.*`: far-canopy bitset generation and canopy rendering
+- `src/FoliageTypes.hpp`: shared foliage packing and runtime layout types
+
+### Water and sky
+
+- `src/WorldGridQuadtreeWaterManager.*`: water leaf filtering and staging
+- `src/QuadtreeWaterMeshRenderer.*`: FFT water simulation resources, bridge meshes, and water rendering
+- `src/WaterSettings.hpp`: editable water tuning values
+- `src/WaterTypes.hpp`: shared water data layouts
+- `src/SkyboxRenderer.*`: skybox runtime asset loading and fullscreen sky rendering
+
+### Camera, lighting, and tools
+
+- `src/CameraManager.*`: camera storage and projection setup
+- `src/FreeFlightCameraController.*`: free-flight camera movement
+- `src/GamepadInput.*`: gamepad state and input helpers
+- `src/LightingSystem.*`: sun direction, intensity, and time-of-day control
+- `src/TriangleRenderer.*`: simple triangle instance rendering
 - `src/LineRenderer.*`: debug line rendering
-- `src/CameraManager.*`: camera storage and projection building
-- `src/FreeFlightCameraController.*`: free-flight controls
-- `src/LightingSystem.*`: sun-light state
-- `assets/source/skybox/tex/*.png`: source cubemap faces for the skybox converter pack
-- `src/PerformanceCapture.*`: timing capture
-- `src/PerfPanel.*`: performance UI
-- `src/Position.hpp`: large-world grid/local position type
-- `src/WorldGridQuadtreeTypes.hpp`: quadtree leaf ids and bounds helpers
-- `src/AppConfig.hpp`: shared constants and tuning defaults
-- `src/assets/RuntimeAssetFormat.hpp` + `src/assets/RuntimeAssetReader.*`: shared runtime asset binary format definitions and validated SDL file readers
-- `shaders/triangle.*`: triangle shaders
-- `shaders/line.*`: line shaders
-- `shaders/quadtree_mesh.*`: terrain graphics shaders
+- `src/PerformanceCapture.*`: frame timing capture
+- `src/PerfPanel.*`: timing and flame graph UI
+- `src/Position.hpp`: large-world grid/local position representation
+- `src/SubmittedGpuFence.hpp`: fence tracking helper
+
+### Runtime assets
+
+- `src/assets/RuntimeAssetFormat.hpp`: binary layout definitions for `meshbin`, `texbin`, and `assetbin`
+- `src/assets/RuntimeAssetCompression.*`: shared LZ4 compression and decompression helpers
+- `src/assets/RuntimeAssetReader.*`: validated SDL file readers for runtime asset packs
+- `assets/source/skybox/tex/*.png`: included skybox source textures for the converter
+- `assets/runtime/*`: generated runtime asset packs staged into build outputs
+- `tools/converter/*`: standalone offline converter for source asset import and runtime pack generation
+
+### Shaders
+
+- `shaders/quadtree_mesh.*`: terrain shaders
 - `shaders/quadtree_mesh_bridge.vert`: terrain bridge vertex shader
-- `shaders/foliage_canopy.vert`: far-canopy vertex shader
-- `shaders/foliage_canopy.frag`: far-canopy fragment shader
-- `shaders/foliage_imposter.*`: foliage marker shaders
-- `shaders/skybox.*`: skybox fullscreen shaders
-- `shaders/heightmap_generate.comp`: terrain compute shader
-- `shaders/foliage_canopy_generate.comp`: far-canopy bitset generation compute shader
-- `shaders/foliage_generate.comp`: foliage instance generation compute shader
-- `shaders/nearby_foliage_decode.comp`: nearby decoded-page expansion compute shader
-- `shaders/nearby_foliage.*`: nearby foliage mesh shaders
-- `shaders/water_mesh.*`: water graphics shaders
+- `shaders/heightmap_generate.comp`: terrain generation compute shader
+- `shaders/foliage_generate.comp`: foliage page generation compute shader
+- `shaders/foliage_imposter.*`: mid-distance foliage marker shaders
+- `shaders/nearby_foliage_decode.comp`: nearby foliage decode compute shader
+- `shaders/nearby_foliage.*`: nearby tree mesh shaders
+- `shaders/foliage_canopy_generate.comp`: canopy coverage compute shader
+- `shaders/foliage_canopy.*`: far-canopy shaders
+- `shaders/water_initialize_spectrum.comp`: one-time water spectrum initialization
+- `shaders/water_spectrum_update.comp`: per-frame spectrum evolution
+- `shaders/water_fft_stage.comp`: FFT stage compute shader
+- `shaders/water_build_maps.comp`: displacement, slope, and foam map build pass
+- `shaders/water_mesh.*`: water shaders
 - `shaders/water_mesh_bridge.vert`: water bridge vertex shader
-- `shaders/water_initialize_spectrum.comp`: one-time static water spectrum initialization
-- `shaders/water_spectrum_update.comp`: per-frame spectrum evolution from cached initial spectrum
-- `shaders/water_fft_stage.comp`: shared-memory 1D FFT pass over water working buffers
-- `shaders/water_build_maps.comp`: displacement/slope texture assembly plus crest-foam generation and persistence
-- `tools/converter/*`: standalone offline converter project for building runtime asset packs from source FBX/TGA content
+- `shaders/skybox.*`: fullscreen skybox shaders
+- `shaders/triangle.*`: triangle shaders
+- `shaders/line.*`: debug line shaders
 
-## Asset Setup
+## Build
 
-The repository code builds without the authored tree pack, but the nearby tree-mesh runtime path depends on external assets that are not checked into this branch.
-
-- missing source content: `assets/source/pinetreepack`
-- included source content: `assets/source/skybox/tex`
-- generated runtime outputs expected by the app: `assets/runtime/pinetreepack.meshbin`, `assets/runtime/pinetreepack.texbin`, `assets/runtime/pinetreepack.assetbin`, `assets/runtime/skybox.texbin`, `assets/runtime/skybox.assetbin`
-- generation path: build and run the standalone converter described in [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md)
-
-Without those files, the terrain, water, and marker-foliage systems can still build, but the nearby foliage mesh renderer will not have the required pine art data.
-
-## Dependencies
+Requirements:
 
 - CMake 3.25+
 - A C++20 compiler
 - Vulkan SDK with `glslc`
 - Internet access during configure time for `FetchContent`
 
-Fetched dependencies:
-
-- SDL `release-3.4.0`
-- Dear ImGui `v1.92.5-docking`
-- GLM `1.0.1`
-- LZ4 `v1.10.0`
-
-Converter-only fetched dependencies:
-
-- SDL_image `release-3.2.4`
-- Assimp `v5.4.3`
-
-## Configure And Build
-
-From the repo root:
+Common commands from the repo root:
 
 ```powershell
 tools\configure.cmd
 tools\build.cmd
 ```
 
-For a debug build:
-
 ```powershell
 tools\configure.cmd Debug
 tools\build.cmd Debug
 ```
 
-If the build directory already exists and only source changed, you can usually skip configure:
-
 ```powershell
-tools\build.cmd
+tools\build.cmd Release
 ```
 
-Build-speed notes:
-
-- MSVC compilation uses `/MP` for parallel translation-unit compilation
-- SDL examples/tests, the `SDL3_test` helper library, and GLM's optional compiled library target are disabled during dependency configure
-- the current scripts still use `NMake Makefiles`; moving the project over to Ninja is a likely next step if you want more build throughput
-
-Standalone converter:
+Asset pack build:
 
 ```powershell
 tools\build.cmd Assets
 ```
 
-`tools\build.cmd Assets` configures and builds the standalone converter into `build\Assets`, then regenerates both runtime packs:
-
-- `skybox`
-- `pinetreepack`
-
-The converter project is intentionally separate from the main runtime target so Assimp and source-format parsing stay out of the application build and load path.
-
-If you do not have the external pine pack content, this branch will still compile, but you will not be able to regenerate or run the nearby tree-mesh asset path end to end.
-
-## Run
-
-Release:
-
-```powershell
-.\build\Release\terrain_sandbox.exe
-```
-
-Debug:
+Run:
 
 ```powershell
 .\build\Debug\terrain_sandbox.exe
 ```
 
-Startup flags:
-
 ```powershell
 .\build\Debug\terrain_sandbox.exe --verbose-startup --quit-after-first-frame
 ```
 
-- `--verbose-startup`: print startup progress
-- `--quit-after-first-frame`: submit one frame and exit
+`tools\build.cmd Assets` builds the standalone converter in `build\Assets` and regenerates:
 
-Startup logging:
+- `skybox.assetbin`
+- `skybox.texbin`
+- `pinetreepack.assetbin`
+- `pinetreepack.meshbin`
+- `pinetreepack.texbin`
 
-- startup progress is also written to `launch.log`
-- the app truncates `launch.log` at process start, so each normal launch begins with a fresh log
-- `launch.log` is ignored by Git
+## Assets
 
-Windows GPU preference:
+This repository does not include the authored pine tree pack source content.
 
-- the executable exports `NvOptimusEnablement=1` and `AmdPowerXpressRequestHighPerformance=1` so compatible driver stacks can prefer the high-performance GPU
+- Missing source content: `assets/source/pinetreepack`
+- Included source content: `assets/source/skybox/tex`
+- Generated runtime outputs are expected under `assets/runtime`
+- The main app stages those runtime bins into `build/<Config>/assets/runtime`
 
-## Notes
+Without the external pine content, the project still builds, but the nearby foliage mesh path cannot be regenerated end to end.
 
-- The rendering API is SDL GPU, with shaders compiled by `glslc`.
-- Skybox faces are loaded from `skybox.assetbin` + `skybox.texbin` and uploaded into an SDL GPU cubemap texture.
-- World positions use large horizontal grid cells plus local coordinates for stable camera-relative rendering.
-- The maintained terrain path is the runtime GPU compute path; the older standalone quadtree sanity executable has been removed.
-- Terrain extents are produced on the GPU and read back asynchronously, so newly generated slices may briefly fall back to conservative bounds until their readback completes.
-- Foliage uses canonical `256m x 256m` pages only. Visible `512m` leaves expand into `4` canonical foliage pages and visible `1024m` leaves expand into `16`.
-- Nearby foliage reuses those same canonical `256m x 256m` page ids, but only requests decoded CPU-readable copies for the local `3 x 3` set of `256m` pages around the camera.
-- Far-canopy uses the same canonical `256m x 256m` identity rules as near foliage, but only for visible `2048m` leaf nodes. Each canopy patch references `64` canonical canopy cells and reconstructs distant canopy mass procedurally from compact bitsets instead of storing full tree instances.
-- The current foliage system is split deliberately: the mid-distance foliage pass is still a minimal vertical-marker baseline, while the nearby foliage pass now loads real pine tree meshes/materials from the offline runtime asset pack, including the broader `pinetreepack` tree set. A fuller unified foliage/impostor path is still future work.
-- Off-screen foliage warming now also follows leaf ownership: off-screen `2048m` leaf nodes hint canopy residency, while off-screen `256m`, `512m`, and `1024m` leaf nodes hint marker-foliage residency. The hint paths only warm caches; they do not emit draws by themselves, and they are now issued during the normal quadtree traversal.
-- The quadtree still processes all allocated nodes during update, but most node-owned residency work now happens during that traversal and a later combined emit pass just consumes the resulting node flags/state.
-- Stitching lookups now follow the quadtree structure directly through parent/child links and only hop across the active base-node ring when a lookup reaches a world-grid border.
-- Terrain and water bridge selection is exhaustive for drawn nodes: each drawn edge resolves to either an equal-LOD bridge or a `2:1` coarse bridge, including border fallback when a neighboring root tile is not resident.
-- Terrain and water patch instances are sorted front-to-back before upload so nearer patches submit first and can improve depth rejection of farther terrain.
-- Water is sampled globally by world position; visible quadtree leaves become draw instances and do not own unique simulation state.
-- Terrain and water both render trimmed interior base patches and add edge-specific bridge meshes where neighboring quadtree nodes would otherwise leave a crack.
-- Water visibility currently uses both expanded quadtree bounds and a terrain-height gate, so leaves that are clearly dry can skip water entirely while still allowing low terrain under the water plane to remain visible.
-- Water patch LOD also controls which shared wave cascades are sampled, so larger/farther quadtree patches shed the finest wave bands instead of always using all four maps.
-- When a matching resident terrain slice exists, the water draw samples that heightmap directly to estimate local depth beneath the patch. That depth signal affects draw-time damping, per-cascade shallow-depth fade, water color/transmission, shoreline foam, and surface transparency, but it still does not feed back into the shared FFT simulation itself.
-- Submerged terrain shading samples the shared water displacement and slope maps to drive a startup-generated caustics SDF sampled twice on the terrain `XZ` plane, so the caustic motion evolves with the same FFT water field instead of using an unrelated scrolling overlay.
-- Crest foam is generated during the map-build pass from horizontal-displacement compression, then accumulated with decay in a separate foam history texture rather than being packed into displacement alpha.
-- Visible foam is a second-stage shading pass over that history: a startup-generated cellular SDF provides the bubble structure, while a startup-generated smooth-noise texture adds world-space wobble to the history/detail lookups and a separate breakup overlay to reduce visible repetition. The same detail textures are also reused to shape resident shoreline foam, and visible foam reduces water reflectivity by raising roughness and damping specular/reflection response.
-- Far-water shading intentionally gets cheaper as distance increases: unresolved displacement, slope, and foam-history cascades are skipped, foam fades out, and the shading normal/roughness response is filtered toward a broad far-field water surface.
-- The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction. Both the skybox path and the water reflection probe treat the atmosphere as a deep medium rather than intersecting a hard `y = 0` ground plane.
-- The build outputs are intended to be self-contained: shader binaries are emitted into the active build directory, for example `build/Debug/shaders`, and runtime asset bins are staged into `build/<Config>/assets/runtime`.
+For converter details, see [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md).

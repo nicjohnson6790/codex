@@ -1,55 +1,88 @@
 # Runtime Asset Converter
 
-This folder contains a standalone offline asset-conversion project for turning source asset groups into runtime-friendly binary files.
+This folder contains the standalone offline converter that turns source art into the runtime `meshbin`, `texbin`, and `assetbin` files used by the main app.
 
-The required pine source art is not included in this branch. You need to provide the `assets/source/pinetreepack` FBX and TGA content yourself before the converter can produce that pack's runtime output. The skybox source PNGs live in `assets/source/skybox/tex`.
+The converter is separate on purpose:
 
-The converter is intentionally separate from the main terrain sandbox runtime:
+- the runtime app does not need to link Assimp
+- the runtime app does not parse FBX, TGA, or PNG directly
+- import-time cleanup, resizing, packing, and compression happen once offline
+- the app can later load validated binary blobs quickly through the shared runtime reader
 
-- the runtime should not need to link Assimp
-- the runtime should not parse FBX or TGA directly
-- expensive and format-specific import work should happen once offline
-- the main app should later be able to load simple validated binary blobs quickly through SDL file IO
+## Supported Packs
 
-## Outputs
+The converter currently builds two asset groups:
 
-Running the converter currently produces two pack types:
-
+- `pinetreepack`
+  - source root: `assets/source/pinetreepack`
+  - outputs: `pinetreepack.meshbin`, `pinetreepack.texbin`, `pinetreepack.assetbin`
 - `skybox`
-  - `assets/runtime/skybox.texbin`
-  - `assets/runtime/skybox.assetbin`
-- `assets/runtime/pinetreepack.meshbin`
-- `assets/runtime/pinetreepack.texbin`
-- `assets/runtime/pinetreepack.assetbin`
+  - source root: `assets/source/skybox`
+  - outputs: `skybox.texbin`, `skybox.assetbin`
 
-Those generated runtime files are also not checked into this branch.
+All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/assets/runtime` by the main build.
 
-Those files are versioned binary containers described by [src/assets/RuntimeAssetFormat.hpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetFormat.hpp) and read by the shared SDL-based reader in [src/assets/RuntimeAssetReader.hpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetReader.hpp).
+## Source Assets
 
-## Usage
+### Pine tree pack
 
-From the repo root, configure and build the standalone converter project:
+The authored pine assets are not included in this repo.
+
+The expected source pack is [Realistic Pine Trees Pack for games](https://www.cgtrader.com/3d-models/plant/conifer/realistic-pine-tree-pack-for-games) from CGTrader. At the time I checked, that listing describes:
+
+- `16` custom pine trees
+- `4` LODs per tree, with the last LOD as a billboard
+- FBX source files
+- PBR textures including base color, normal, roughness, specular, translucency/SSS, opacity, AO, and bark displacement
+
+The converter expects that pack to be arranged like this:
+
+- `assets/source/pinetreepack/fbx`
+- `assets/source/pinetreepack/tex`
+
+Without that external source content, the repo still builds, but you cannot regenerate the nearby tree runtime assets.
+
+### Skybox pack
+
+The repo does include the skybox source textures under:
+
+- `assets/source/skybox/tex`
+
+The converter expects six cubemap face images there:
+
+- `px.png`
+- `nx.png`
+- `py.png`
+- `ny.png`
+- `pz.png`
+- `nz.png`
+
+These are intended to be the base nighttime cubemap that the runtime atmosphere shader runs on top of, not a fully baked final sky with atmospheric scattering already solved into it. All six faces should share the same dimensions because the runtime uploads them into one cubemap texture.
+
+## Build And Usage
+
+From the repo root:
 
 ```powershell
 tools\build.cmd Assets
 ```
 
-That command configures the standalone converter into `build\Assets`, builds it, and regenerates both runtime packs.
+That command configures the standalone converter into `build\Assets`, builds it, and regenerates both supported packs.
 
-If you want to run the converter manually after that, use:
+Manual runs after that:
 
 ```powershell
 .\build\Assets\converter.exe skybox
 .\build\Assets\converter.exe pinetreepack
 ```
 
-or:
+Or with explicit paths:
 
 ```powershell
 .\build\Assets\converter.exe --source assets/source/pinetreepack --out assets/runtime --name pinetreepack
 ```
 
-Default paths:
+Default roots:
 
 - `pinetreepack`
   - source root: `assets/source/pinetreepack`
@@ -60,112 +93,66 @@ Default paths:
   - texture root: `assets/source/skybox/tex`
 - output root: `assets/runtime`
 
-## Architecture
+## Conversion Pipeline
 
-The converter follows a two-layer split:
+The converter follows a simple two-stage flow:
 
-1. Import layer
-   Reads source authoring formats and normalizes them into an in-memory `ImportedPack`.
-2. Runtime-format layer
-   Serializes that normalized pack into three binary files and immediately reloads them through the shared runtime reader for validation.
+- import source files into a normalized in-memory pack
+- serialize that pack into runtime bins, then reload those bins through the shared runtime reader to validate them
 
-That separation keeps the import code format-aware while keeping the runtime format code simple and stable.
+That keeps source-format logic in the converter while keeping the runtime format flat and stable.
 
-### Import Layer
+## File Roles
 
-- [FbxImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FbxImport.cpp)
-  Uses Assimp to load FBX meshes, convert FBX units to meters, traverse FBX node hierarchy, preserve per-node LOD grouping, bake node transforms into vertices, preserve tangent handedness, infer pack-specific material assignments, and compute per-mesh bounds.
-- [TextureImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TextureImport.cpp)
-  Decodes TGA and PNG textures into RGBA8, applies pack-specific resize rules, infers sRGB versus linear usage from filenames, and deduplicates textures by normalized basename.
-- [PineTreePackConverter.hpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.hpp)
-  Defines the normalized in-memory data model and pack-type configuration used between import and serialization.
+### Entry and orchestration
 
-### Runtime-Format Layer
+- [ConverterMain.cpp](C:/Users/siarr/source/repos/codex/tools/converter/ConverterMain.cpp): CLI parsing and default pack routing
+- [PineTreePackConverter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.cpp): top-level import, write, reload validation, and summary reporting
+- [PineTreePackConverter.hpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.hpp): normalized in-memory data model and pack configuration
+- [CMakeLists.txt](C:/Users/siarr/source/repos/codex/tools/converter/CMakeLists.txt): standalone converter build and dependencies
 
-- [MeshBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/MeshBinWriter.cpp)
-  Writes mesh headers, mesh records, submesh records, per-mesh LZ4-compressed geometry blobs, and a string table.
-- [TexBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TexBinWriter.cpp)
-  Writes texture metadata, per-texture LZ4-compressed RGBA8 blobs, and a string table.
-- [AssetBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/AssetBinWriter.cpp)
-  Writes the manifest that links assets, materials, meshes, textures, and the per-item blob compression metadata needed to reload `meshbin` and `texbin`.
+### Import
 
-### Shared Reader
+- [FbxImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FbxImport.cpp): FBX mesh import through Assimp, unit conversion, transforms, bounds, and LOD grouping
+- [TextureImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TextureImport.cpp): TGA and PNG decoding, texture normalization, resize rules, color-space inference, and deduplication
 
-The converter does not trust its own writes blindly. After emitting the three bins, it reloads them through the shared runtime reader:
+### Runtime format writers
 
-- [RuntimeAssetReader.cpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetReader.cpp)
+- [MeshBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/MeshBinWriter.cpp): mesh metadata and per-mesh compressed geometry blobs
+- [TexBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TexBinWriter.cpp): texture metadata and per-texture compressed RGBA8 blobs
+- [AssetBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/AssetBinWriter.cpp): manifest linking meshes, materials, textures, and per-item compression metadata
 
-That reader:
+### Shared runtime reader
 
-- uses `SDL_IOFromFile`
-- reads the whole file into memory
-- validates magic, version, flags, offsets, counts, and file-size bounds
-- only exposes typed spans after validation succeeds
+- [RuntimeAssetReader.cpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetReader.cpp): validation and reload of emitted runtime bins
+- [RuntimeAssetFormat.hpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetFormat.hpp): binary format definitions
+- [RuntimeAssetCompression.*](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetCompression.cpp): shared LZ4 compression and decompression helpers
 
-This is the same reader the main runtime can use later, which helps keep offline output and runtime expectations in lockstep.
+## Format Notes
 
-It also now decompresses each mesh and texture blob individually on load using the compression metadata carried in `assetbin`.
+The runtime pack format is intentionally simple:
 
-## Current Runtime Use
+- `meshbin` stores geometry-heavy payloads
+- `texbin` stores texture pixel payloads
+- `assetbin` stores the lightweight manifest that links everything together
 
-The generated runtime bins are now used directly by the main app:
+Each mesh blob and texture blob is individually LZ4-compressed, and `assetbin` carries the metadata needed to decompress those items on load.
 
-- `NearbyFoliageRenderer` loads `meshbin`, `texbin`, and `assetbin` at startup
-- `SkyboxRenderer` loads `skybox.texbin` + `skybox.assetbin` at startup
-- the nearby tree path uses real mesh LODs at `25m`, `50m`, and `100m` across the imported pine tree variants
-- textures are uploaded once into shared `2D` texture arrays
-- material metadata is uploaded once into a static GPU storage buffer
+## Runtime Use
 
-That makes converter correctness directly visible at runtime for:
+The generated bins are loaded directly by the main app:
 
-- FBX unit conversion to meters
-- LOD grouping
-- material-to-texture assignment
-- alpha-mask flags and cutoff values
-- tangent-space correctness for normal maps
+- `NearbyFoliageRenderer` loads the pine `meshbin`, `texbin`, and `assetbin`
+- `SkyboxRenderer` loads `skybox.texbin` and `skybox.assetbin`
 
-## Pine Pack Notes
+That makes converter correctness immediately visible in the runtime for mesh layout, material wiring, texture assignment, normal mapping, alpha-mask handling, and skybox cubemap assembly.
 
-For the current pine pack, the converter applies a few pack-specific rules to keep the runtime data sane:
+## Dependencies
 
-- explicit `LOD0` / `LOD1` / `LOD2` / billboard grouping is inferred from FBX node names
-- pine foliage materials are mapped onto the needles atlas textures instead of trusting ambiguous FBX references blindly
-- billboard materials stay separate from nearby geometry materials
-- `Bark_Bottom_Mat` is emitted as alpha-masked because its source color texture uses cutout alpha
+The converter fetches and uses:
 
-These rules are intentionally local to the offline converter so the runtime stays source-format agnostic.
+- SDL3
+- SDL3_image
+- Assimp
 
-## Why Three Files
-
-The split into `meshbin`, `texbin`, and `assetbin` is deliberate:
-
-- `meshbin` contains geometry-heavy data that can be streamed or staged independently
-- `texbin` contains large pixel blobs and is likely to evolve separately from geometry
-- `assetbin` is the lightweight manifest that links meshes, materials, and textures together
-
-This keeps the runtime loading story flexible without requiring source-format parsing in the app.
-
-## Data Theory
-
-The runtime formats aim for a few practical rules:
-
-- fixed-width fields only
-- explicit headers with magic, version, flags, offsets, counts, and file size
-- string tables instead of JSON or nested text parsing
-- simple flat records instead of deeply nested containers
-- enough validation metadata to reject corrupt or mismatched files early
-
-The current version still keeps the format flat and explicit, but now applies per-item LZ4 compression to mesh and texture payloads while leaving the manifest easy to validate.
-
-## File Responsibilities
-
-- [ConverterMain.cpp](C:/Users/siarr/source/repos/codex/tools/converter/ConverterMain.cpp)
-  Parses CLI arguments and prints the summary.
-- [PineTreePackConverter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.cpp)
-  Orchestrates import, serialization, reload validation, and summary reporting.
-- [CMakeLists.txt](C:/Users/siarr/source/repos/codex/tools/converter/CMakeLists.txt)
-  Defines the standalone build with its own `FetchContent` dependencies for SDL3, SDL_image, and Assimp.
-
-## Important Constraint
-
-Assimp and SDL_image are only used in this converter project. The main terrain sandbox runtime should only need the generated binary files plus the shared runtime reader.
+These are converter-only dependencies. The main runtime app only consumes the generated binary packs and the shared runtime reader.
