@@ -93,14 +93,28 @@ bool WriteTexBin(
     textureBlobs.reserve(pack.textures.size());
     for (const ImportedTexture& texture : pack.textures)
     {
+        const std::uint64_t expectedPayloadSize = RuntimeAssets::CalculateTextureDataSize(
+            texture.format,
+            texture.width,
+            texture.height,
+            texture.layerCount,
+            texture.mipCount);
+        if (expectedPayloadSize != texture.payload.size())
+        {
+            *error = "texture payload size does not match its format, layers, and mip count: " + texture.name;
+            return false;
+        }
+
         RuntimeAssets::TextureRecord record{};
         record.nameOffset = AppendString(texture.name, &stringTable);
         record.sourcePathOffset = AppendString(texture.sourcePath, &stringTable);
         record.width = texture.width;
         record.height = texture.height;
-        record.mipCount = 1;
+        record.layerCount = texture.layerCount;
+        record.mipCount = texture.mipCount;
         record.format = static_cast<std::uint32_t>(texture.format);
-        record.dataSize = texture.pixels.size();
+        record.dimension = static_cast<std::uint32_t>(texture.dimension);
+        record.dataUncompressedSize = texture.payload.size();
         record.flags = texture.flags;
         textureRecords.push_back(record);
     }
@@ -124,7 +138,7 @@ bool WriteTexBin(
         std::vector<std::byte> compressedPixels;
         if (!RuntimeAssets::CompressBytes(
                 RuntimeAssets::CompressionType::Lz4,
-                std::span<const std::byte>(pack.textures[index].pixels),
+                std::span<const std::byte>(pack.textures[index].payload),
                 &compressedPixels,
                 error))
         {
@@ -132,10 +146,13 @@ bool WriteTexBin(
         }
 
         writer.align(16);
+        textureRecords[index].dataOffset = writer.bytes.size();
+        textureRecords[index].dataCompressedSize = compressedPixels.size();
+        textureRecords[index].dataUncompressedSize = pack.textures[index].payload.size();
         RuntimeAssets::TextureBlobRecord blob{};
         blob.dataOffset = writer.bytes.size();
         blob.dataCompressedSize = compressedPixels.size();
-        blob.dataUncompressedSize = pack.textures[index].pixels.size();
+        blob.dataUncompressedSize = pack.textures[index].payload.size();
         blob.compressionType = static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4);
         writer.appendBytes(compressedPixels);
         textureBlobs.push_back(blob);

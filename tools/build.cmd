@@ -30,7 +30,12 @@ exit /b %errorlevel%
 :build_assets
 set "BUILD_DIR=build\Assets"
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
-if not exist "%BUILD_DIR%\Makefile" call "%~dp0configure.cmd" Assets
+set "RECONFIGURE_ASSETS="
+if not exist "%BUILD_DIR%\Makefile" set "RECONFIGURE_ASSETS=1"
+if defined COMPRESSONATOR_SDK_ROOT if exist "%BUILD_DIR%\CMakeCache.txt" (
+    findstr /B /C:"COMPRESSONATOR_SDK_ROOT:PATH=%COMPRESSONATOR_SDK_ROOT%" "%BUILD_DIR%\CMakeCache.txt" >nul || set "RECONFIGURE_ASSETS=1"
+)
+if defined RECONFIGURE_ASSETS call "%~dp0configure.cmd" Assets
 if errorlevel 1 exit /b %errorlevel%
 
 set "VS_ROOT="

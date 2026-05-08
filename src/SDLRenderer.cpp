@@ -374,6 +374,7 @@ void SDLRenderer::renderFrame(
                     renderPass,
                     commandBuffer,
                     viewProjection,
+                    lightingSystem,
                     quadtreeMeshRenderer.heightmapBuffer());
             }
         }

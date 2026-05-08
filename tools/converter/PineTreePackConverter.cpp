@@ -3,6 +3,7 @@
 #include "AssetBinWriter.hpp"
 #include "FbxImport.hpp"
 #include "MeshBinWriter.hpp"
+#include "PineImposterGenerator.hpp"
 #include "TexBinWriter.hpp"
 #include "TextureImport.hpp"
 #include "../../src/assets/RuntimeAssetReader.hpp"
@@ -59,6 +60,7 @@ bool ValidateCrossReferences(
     const RuntimeAssets::LoadedMeshBinView* meshBin,
     const RuntimeAssets::LoadedTexBinView& texBin,
     const RuntimeAssets::LoadedAssetBinView& assetBin,
+    bool requireImposterMetadata,
     std::string* error)
 {
     const std::size_t meshCount = meshBin != nullptr ? meshBin->meshes.size() : 0u;
@@ -117,6 +119,76 @@ bool ValidateCrossReferences(
         }
     }
 
+    if (requireImposterMetadata)
+    {
+        for (const RuntimeAssets::AssetRecord& asset : assetBin.assets)
+        {
+            if (asset.imposterColorTextureIndex == kMissing ||
+                asset.imposterNormalTextureIndex == kMissing)
+            {
+                if (error != nullptr)
+                {
+                    *error = "assetbin imposter metadata is missing";
+                }
+                return false;
+            }
+
+            if (asset.imposterColorTextureIndex >= texBin.textures.size() ||
+                asset.imposterNormalTextureIndex >= texBin.textures.size())
+            {
+                if (error != nullptr)
+                {
+                    *error = "assetbin imposter metadata references missing texture records";
+                }
+                return false;
+            }
+
+            const RuntimeAssets::TextureRecord& colorTexture = texBin.textures[asset.imposterColorTextureIndex];
+            const RuntimeAssets::TextureRecord& normalTexture = texBin.textures[asset.imposterNormalTextureIndex];
+            const std::uint32_t expectedMipCount = [&]() {
+                std::uint32_t mipCount = 1u;
+                std::uint32_t extent = 256u;
+                while (extent > 1u)
+                {
+                    extent = std::max(extent / 2u, 1u);
+                    ++mipCount;
+                }
+                return mipCount;
+            }();
+
+            auto validateImposterTexture = [&](const RuntimeAssets::TextureRecord& texture,
+                                                RuntimeAssets::TextureFormat expectedFormat,
+                                                const char* label) -> bool {
+                if (texture.dimension != static_cast<std::uint32_t>(RuntimeAssets::TextureDimension::Texture2DArray) ||
+                    texture.width != 256u ||
+                    texture.height != 256u ||
+                    texture.layerCount != 32u ||
+                    texture.mipCount != expectedMipCount ||
+                    texture.format != static_cast<std::uint32_t>(expectedFormat))
+                {
+                    if (error != nullptr)
+                    {
+                        *error = std::string("imposter texture metadata mismatch for ") + label;
+                    }
+                    return false;
+                }
+                return true;
+            };
+
+            if (!validateImposterTexture(
+                    colorTexture,
+                    RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
+                    "color/alpha") ||
+                !validateImposterTexture(
+                    normalTexture,
+                    RuntimeAssets::TextureFormat::BC5_RG_UNORM,
+                    "normal"))
+            {
+                return false;
+            }
+        }
+    }
+
     if (meshBin != nullptr)
     {
         for (const RuntimeAssets::SubmeshRecord& submesh : meshBin->submeshes)
@@ -157,6 +229,10 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     if (config.packKind == ConverterConfig::PackKind::PineTree)
     {
         RebuildMaterialLayout(&pack);
+        if (!GeneratePineImposters(&pack, error))
+        {
+            return false;
+        }
     }
 
     std::filesystem::create_directories(config.outputRoot);
@@ -209,6 +285,7 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
             config.packKind == ConverterConfig::PackKind::PineTree ? &loadedMesh : nullptr,
             loadedTex,
             loadedAsset,
+            config.packKind == ConverterConfig::PackKind::PineTree,
             error))
     {
         return false;

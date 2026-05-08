@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +8,7 @@
 namespace RuntimeAssets
 {
 
-constexpr std::uint32_t kFormatVersion = 2;
+constexpr std::uint32_t kFormatVersion = 3;
 constexpr std::uint32_t kLittleEndianFlag = 1u << 0;
 
 constexpr std::uint32_t MakeMagic(char a, char b, char c, char d)
@@ -26,6 +27,14 @@ enum class TextureFormat : std::uint32_t
 {
     RGBA8_UNORM = 1,
     RGBA8_SRGB = 2,
+    BC3_RGBA_UNORM = 3,
+    BC5_RG_UNORM = 4,
+};
+
+enum class TextureDimension : std::uint32_t
+{
+    Texture2D = 1,
+    Texture2DArray = 2,
 };
 
 enum TextureFlags : std::uint32_t
@@ -118,20 +127,108 @@ struct TexBinHeader
 };
 static_assert(sizeof(TexBinHeader) == 56);
 
+constexpr std::uint32_t TextureBytesPerPixel(TextureFormat format)
+{
+    switch (format)
+    {
+    case TextureFormat::RGBA8_UNORM:
+    case TextureFormat::RGBA8_SRGB:
+        return 4u;
+    case TextureFormat::BC3_RGBA_UNORM:
+    case TextureFormat::BC5_RG_UNORM:
+        return 0u;
+    }
+    return 0u;
+}
+
+constexpr bool TextureFormatIsBlockCompressed(TextureFormat format)
+{
+    return format == TextureFormat::BC3_RGBA_UNORM || format == TextureFormat::BC5_RG_UNORM;
+}
+
+constexpr std::uint32_t TextureBlockSizeBytes(TextureFormat format)
+{
+    switch (format)
+    {
+    case TextureFormat::BC3_RGBA_UNORM:
+    case TextureFormat::BC5_RG_UNORM:
+        return 16u;
+    case TextureFormat::RGBA8_UNORM:
+    case TextureFormat::RGBA8_SRGB:
+        return 0u;
+    }
+    return 0u;
+}
+
+constexpr std::uint32_t TextureMipExtent(std::uint32_t baseExtent, std::uint32_t mipIndex)
+{
+    return mipIndex >= 31u ? 1u : std::max(baseExtent >> mipIndex, 1u);
+}
+
+constexpr std::uint64_t CalculateTextureMipByteSize(
+    TextureFormat format,
+    std::uint32_t width,
+    std::uint32_t height)
+{
+    if (width == 0u || height == 0u)
+    {
+        return 0u;
+    }
+
+    if (TextureFormatIsBlockCompressed(format))
+    {
+        const std::uint64_t blockWidth = std::max<std::uint64_t>((static_cast<std::uint64_t>(width) + 3u) / 4u, 1u);
+        const std::uint64_t blockHeight = std::max<std::uint64_t>((static_cast<std::uint64_t>(height) + 3u) / 4u, 1u);
+        return blockWidth * blockHeight * TextureBlockSizeBytes(format);
+    }
+
+    return static_cast<std::uint64_t>(width) * height * TextureBytesPerPixel(format);
+}
+
+constexpr std::uint64_t CalculateTextureDataSize(
+    TextureFormat format,
+    std::uint32_t width,
+    std::uint32_t height,
+    std::uint32_t layerCount,
+    std::uint32_t mipCount)
+{
+    if (width == 0u || height == 0u || layerCount == 0u || mipCount == 0u)
+    {
+        return 0u;
+    }
+
+    std::uint64_t totalSize = 0u;
+    for (std::uint32_t layerIndex = 0; layerIndex < layerCount; ++layerIndex)
+    {
+        (void)layerIndex;
+        for (std::uint32_t mipIndex = 0; mipIndex < mipCount; ++mipIndex)
+        {
+            totalSize += CalculateTextureMipByteSize(
+                format,
+                TextureMipExtent(width, mipIndex),
+                TextureMipExtent(height, mipIndex));
+        }
+    }
+    return totalSize;
+}
+
 struct TextureRecord
 {
     std::uint32_t nameOffset = 0;
     std::uint32_t sourcePathOffset = 0;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
+    std::uint32_t layerCount = 1;
     std::uint32_t mipCount = 0;
     std::uint32_t format = 0;
-    std::uint64_t dataOffset = 0;
-    std::uint64_t dataSize = 0;
+    std::uint32_t dimension = 0;
     std::uint32_t flags = 0;
     std::uint32_t reserved = 0;
+    std::uint64_t dataOffset = 0;
+    std::uint64_t dataCompressedSize = 0;
+    std::uint64_t dataUncompressedSize = 0;
 };
-static_assert(sizeof(TextureRecord) == 48);
+static_assert(sizeof(TextureRecord) == 64);
 
 struct MeshBlobRecord
 {
@@ -188,8 +285,10 @@ struct AssetRecord
     std::uint32_t firstMaterial = 0;
     std::uint32_t materialCount = 0;
     std::uint32_t flags = 0;
+    std::uint32_t imposterColorTextureIndex = 0;
+    std::uint32_t imposterNormalTextureIndex = 0;
 };
-static_assert(sizeof(AssetRecord) == 24);
+static_assert(sizeof(AssetRecord) == 32);
 
 struct MeshRefRecord
 {

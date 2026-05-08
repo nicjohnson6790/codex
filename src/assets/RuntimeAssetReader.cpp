@@ -461,13 +461,58 @@ bool ValidateTexBin(const void* data, std::size_t size, std::string* error)
             return false;
         }
 
-        const std::uint64_t minimumDataSize = static_cast<std::uint64_t>(texture.width) * texture.height * 4u;
-        if (minimumDataSize == 0)
+        if (texture.layerCount == 0)
+        {
+            if (error != nullptr)
+            {
+                *error = "texture layerCount must be at least 1";
+            }
+            return false;
+        }
+
+        if (texture.dimension != static_cast<std::uint32_t>(TextureDimension::Texture2D) &&
+            texture.dimension != static_cast<std::uint32_t>(TextureDimension::Texture2DArray))
+        {
+            if (error != nullptr)
+            {
+                *error = "texture dimension is unsupported";
+            }
+            return false;
+        }
+
+        const TextureFormat format = static_cast<TextureFormat>(texture.format);
+        const std::uint64_t expectedDataSize = CalculateTextureDataSize(
+            format,
+            texture.width,
+            texture.height,
+            texture.layerCount,
+            texture.mipCount);
+        if (expectedDataSize == 0)
         {
             if (error != nullptr)
             {
                 *error = "texture dimensions must be non-zero";
             }
+            return false;
+        }
+
+        if (texture.dataUncompressedSize != expectedDataSize)
+        {
+            if (error != nullptr)
+            {
+                *error = "texture uncompressed size does not match its format and dimensions";
+            }
+            return false;
+        }
+
+        if (!CheckBlobRegion(
+                texture.dataOffset,
+                texture.dataCompressedSize,
+                header.pixelDataOffset,
+                header.stringTableOffset,
+                "texture payload",
+                error))
+        {
             return false;
         }
     }
@@ -566,6 +611,23 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
                 *error = "asset material range is invalid";
             }
             return false;
+        }
+
+        const std::uint32_t imposterTextureIndices[] = {
+            asset.imposterColorTextureIndex,
+            asset.imposterNormalTextureIndex,
+        };
+        for (std::uint32_t textureIndex : imposterTextureIndices)
+        {
+            if (textureIndex != std::numeric_limits<std::uint32_t>::max() &&
+                textureIndex >= header.textureBlobCount)
+            {
+                if (error != nullptr)
+                {
+                    *error = "asset imposter texture index points past assetbin.textureBlobCount";
+                }
+                return false;
+            }
         }
     }
 
@@ -794,7 +856,12 @@ bool LoadTexBinFromSDL(
     {
         TextureRecord& texture = out->resolvedTextures[textureIndex];
         const TextureBlobRecord& blob = assetBin.textureBlobs[textureIndex];
-        const std::uint64_t expectedSize = static_cast<std::uint64_t>(texture.width) * texture.height * 4u;
+        const std::uint64_t expectedSize = CalculateTextureDataSize(
+            static_cast<TextureFormat>(texture.format),
+            texture.width,
+            texture.height,
+            texture.layerCount,
+            texture.mipCount);
 
         if (!CheckBlobRegion(
                 blob.dataOffset,
@@ -810,11 +877,25 @@ bool LoadTexBinFromSDL(
             return false;
         }
 
-        if (blob.dataUncompressedSize != expectedSize)
+        if (blob.dataUncompressedSize != expectedSize ||
+            texture.dataUncompressedSize != expectedSize)
         {
             if (error != nullptr)
             {
                 *error = "texture blob uncompressed size does not match texture dimensions";
+            }
+            out->bytes.clear();
+            out->resolvedTextures.clear();
+            out->decompressedPixelData.clear();
+            return false;
+        }
+
+        if (texture.dataCompressedSize != blob.dataCompressedSize ||
+            texture.dataOffset != blob.dataOffset)
+        {
+            if (error != nullptr)
+            {
+                *error = "texbin texture payload metadata does not match assetbin texture blob metadata";
             }
             out->bytes.clear();
             out->resolvedTextures.clear();
@@ -837,7 +918,8 @@ bool LoadTexBinFromSDL(
         }
 
         texture.dataOffset = out->decompressedPixelData.size();
-        texture.dataSize = decompressedTextureBytes.size();
+        texture.dataCompressedSize = blob.dataCompressedSize;
+        texture.dataUncompressedSize = decompressedTextureBytes.size();
         out->decompressedPixelData.insert(
             out->decompressedPixelData.end(),
             decompressedTextureBytes.begin(),

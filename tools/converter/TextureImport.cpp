@@ -186,7 +186,7 @@ bool DecodeTga(const std::filesystem::path& path, ImportedTexture* outTexture, s
     const std::size_t pixelBytes = header.pixelDepth / 8u;
     const std::size_t imagePixelCount = static_cast<std::size_t>(header.width) * header.height;
     const std::size_t rgbaSize = imagePixelCount * 4u;
-    outTexture->pixels.assign(rgbaSize, std::byte{});
+    outTexture->payload.assign(rgbaSize, std::byte{});
 
     const std::size_t dataOffset = 18u + header.idLength;
     if (dataOffset > bytes.size())
@@ -198,10 +198,10 @@ bool DecodeTga(const std::filesystem::path& path, ImportedTexture* outTexture, s
     std::size_t sourceOffset = dataOffset;
     std::size_t pixelIndex = 0;
     const auto writePixel = [&](std::size_t outIndex, const std::byte* srcPixel) {
-        outTexture->pixels[outIndex + 0] = srcPixel[2];
-        outTexture->pixels[outIndex + 1] = srcPixel[1];
-        outTexture->pixels[outIndex + 2] = srcPixel[0];
-        outTexture->pixels[outIndex + 3] = pixelBytes == 4 ? srcPixel[3] : std::byte{ 0xFF };
+        outTexture->payload[outIndex + 0] = srcPixel[2];
+        outTexture->payload[outIndex + 1] = srcPixel[1];
+        outTexture->payload[outIndex + 2] = srcPixel[0];
+        outTexture->payload[outIndex + 3] = pixelBytes == 4 ? srcPixel[3] : std::byte{ 0xFF };
     };
 
     const auto emitPixel = [&](const std::byte* srcPixel) -> bool {
@@ -312,8 +312,8 @@ bool DecodeSdlImage(const std::filesystem::path& path, ImportedTexture* outTextu
 
     outTexture->width = static_cast<std::uint32_t>(rgbaSurface->w);
     outTexture->height = static_cast<std::uint32_t>(rgbaSurface->h);
-    outTexture->pixels.resize(static_cast<std::size_t>(rgbaSurface->w) * static_cast<std::size_t>(rgbaSurface->h) * 4u);
-    std::memcpy(outTexture->pixels.data(), rgbaSurface->pixels, outTexture->pixels.size());
+    outTexture->payload.resize(static_cast<std::size_t>(rgbaSurface->w) * static_cast<std::size_t>(rgbaSurface->h) * 4u);
+    std::memcpy(outTexture->payload.data(), rgbaSurface->pixels, outTexture->payload.size());
     SDL_DestroySurface(rgbaSurface);
     return true;
 }
@@ -375,8 +375,8 @@ bool ImportTextureFolder(
         if (options.resizeSquare != 0 &&
             (texture.width != resizeSquare || texture.height != resizeSquare))
         {
-            texture.pixels = ResizeRgbaImage(
-                texture.pixels,
+            texture.payload = ResizeRgbaImage(
+                texture.payload,
                 texture.width,
                 texture.height,
                 resizeSquare,

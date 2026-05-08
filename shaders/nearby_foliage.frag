@@ -42,6 +42,8 @@ layout(location = 0) out vec4 outColor;
 
 const float kPi = 3.14159265359;
 const float kInvLog256 = 0.18033688011112042;
+const float kFoliageAmbientBoost = 1.85;
+const float kFoliageSkyFillStrength = 0.24;
 
 float saturate(float value)
 {
@@ -163,6 +165,7 @@ void main()
     float roughness = clamp(texture(roughnessTextureArray, vec3(fragUv0, roughnessLayer)).r, 0.08, 1.0);
     vec3 specularColor = texture(specularTextureArray, vec3(fragUv0, specularLayer)).rgb;
     float ao = texture(aoTextureArray, vec3(fragUv0, aoLayer)).r;
+    float effectiveAo = mix(1.0, ao, 0.35);
     vec3 subsurfaceColor = texture(subsurfaceTextureArray, vec3(fragUv0, subsurfaceLayer)).rgb;
 
     float nDotL = saturate(dot(normal, sunDirection));
@@ -172,8 +175,8 @@ void main()
 
     vec3 dielectricF0 = vec3(foliageMaterial.shadingParams0.x);
     float specularStrength = saturate(luminance(specularColor));
-    vec3 f0 = dielectricF0 * mix(0.35, 1.25, specularStrength);
-    f0 = clamp(f0, vec3(0.012), vec3(0.08));
+    vec3 f0 = dielectricF0 * mix(0.22, 0.72, specularStrength);
+    f0 = clamp(f0, vec3(0.008), vec3(0.045));
     vec3 fresnel = fresnelSchlick(vDotH, f0);
     float distribution = distributionGgx(nDotH, roughness);
     float geometry = geometrySmith(max(nDotV, 0.05), max(nDotL, 0.05), roughness);
@@ -187,20 +190,21 @@ void main()
     vec3 transmission = subsurfaceColor * albedoSample.rgb * backScatter * transmissionStrength;
 
     vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunDirectionIntensity.w;
-    vec3 directLighting = diffuse * sunRadiance + (specular * sunRadiance * 0.35) + transmission * sunRadiance;
+    vec3 directLighting = diffuse * sunRadiance + (specular * sunRadiance * 0.16) + transmission * sunRadiance;
 
     vec3 reflectionDirection = reflect(-viewDirection, normal);
     vec3 reflectedSky = sampleSkyRadiance(reflectionDirection);
     vec3 environmentSpecular =
         reflectedSky *
         fresnelSchlick(nDotV, f0) *
-        mix(0.35, 0.12, roughness) *
-        mix(0.55, 1.0, pow(1.0 - nDotV, 0.35));
-    environmentSpecular *= mix(0.65, 1.0, ao);
+        mix(0.16, 0.05, roughness) *
+        mix(0.35, 0.7, pow(1.0 - nDotV, 0.35));
+    environmentSpecular *= mix(0.8, 1.0, effectiveAo);
 
     float ambientScale = foliageMaterial.sunColorAmbient.a;
-    vec3 ambient = albedoSample.rgb * ambientScale * ao;
-    vec3 litColor = ambient + directLighting + environmentSpecular;
+    vec3 skyFill = sampleSkyRadiance(normal) * albedoSample.rgb * kFoliageSkyFillStrength;
+    vec3 ambient = albedoSample.rgb * ambientScale * mix(0.75, 1.0, effectiveAo) * kFoliageAmbientBoost;
+    vec3 litColor = ambient + skyFill + directLighting + environmentSpecular;
 
     outColor = vec4(litColor, albedoSample.a);
 }

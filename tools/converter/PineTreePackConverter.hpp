@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -63,9 +64,12 @@ struct ImportedTexture
     std::string sourcePath;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
+    std::uint32_t layerCount = 1;
+    std::uint32_t mipCount = 1;
     RuntimeAssets::TextureFormat format = RuntimeAssets::TextureFormat::RGBA8_UNORM;
+    RuntimeAssets::TextureDimension dimension = RuntimeAssets::TextureDimension::Texture2D;
     std::uint32_t flags = 0;
-    std::vector<std::byte> pixels;
+    std::vector<std::byte> payload;
 };
 
 struct ImportedAsset
@@ -73,6 +77,8 @@ struct ImportedAsset
     std::string name;
     std::vector<std::uint32_t> meshIndices;
     std::vector<std::uint32_t> materialIndices;
+    std::uint32_t imposterColorTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t imposterNormalTextureIndex = std::numeric_limits<std::uint32_t>::max();
 };
 
 struct ImportedPack

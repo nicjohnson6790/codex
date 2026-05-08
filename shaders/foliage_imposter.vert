@@ -6,6 +6,7 @@
 layout(set=1, binding=0) uniform FoliageUniforms
 {
     mat4 viewProjection;
+    vec4 cameraPositionAndTreeClassCount;
 } foliage;
 
 struct FoliagePageData
@@ -13,6 +14,12 @@ struct FoliagePageData
     vec4 pageOriginAndTerrainSize;
     vec4 terrainOriginAndSlice;
     uvec4 seedData;
+};
+
+struct TreeClassData
+{
+    vec4 centerAndHalfWidth;
+    vec4 verticalExtentsAndLayerBase;
 };
 
 layout(set=0, binding=0, std430) readonly buffer FoliageDrawMetadataBuffer
@@ -30,41 +37,32 @@ layout(set=0, binding=2, std430) readonly buffer HeightmapBuffer
     float heights[];
 } heightmapBuffer;
 
-layout(location = 0) in float inEndpoint;
+layout(set=0, binding=3, std430) readonly buffer FoliageTreeClassBuffer
+{
+    TreeClassData treeClasses[];
+} treeClassBuffer;
 
-layout(location = 0) out vec3 fragColor;
+layout(location = 0) in vec2 inCorner;
+layout(location = 1) in vec2 inUv0;
+
+layout(location = 0) out vec2 fragUv0;
+layout(location = 1) flat out uint fragLayerIndex0;
+layout(location = 2) flat out uint fragLayerIndex1;
+layout(location = 3) out float fragYawBlend;
+layout(location = 4) out vec3 fragCaptureRight;
+layout(location = 5) out vec3 fragCaptureUp;
+layout(location = 6) out vec3 fragCaptureForward;
+layout(location = 7) out vec3 fragViewDirection;
 
 const uint kCandidateGridResolution = 64u;
 const float kCandidateCellSizeMeters = 4.0;
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
-
-float markerHeightForMesh(uint meshId)
-{
-    if (meshId < 3u)
-    {
-        return 14.0 + (float(meshId) * 2.5);
-    }
-    if (meshId < 8u)
-    {
-        return 22.0 + (float(meshId - 3u) * 2.0);
-    }
-    return 20.0 + (float(meshId - 8u) * 1.25);
-}
-
-vec3 markerColorForMesh(uint meshId)
-{
-    vec3 baseColor =
-        meshId < 3u ? vec3(0.36, 0.82, 0.44) :
-        (meshId < 8u ? vec3(0.58, 0.92, 0.46) : vec3(0.84, 0.94, 0.55));
-    float tint = float(meshId & 3u) / 3.0;
-    return mix(baseColor * 0.78, baseColor * 1.08, tint);
-}
-
-vec2 jitterOffset(uint seed)
-{
-    return foliageJitterOffset(seed);
-}
+const uint kImposterYawViewCount = 8u;
+const uint kImposterLayersPerClass = 32u;
+const float kTau = 6.28318530718;
+const float kNearbyRadiusMeters = 100.0;
+const float kPitchAngles[kImposterLayersPerClass / kImposterYawViewCount] = float[](radians(-5.0), radians(10.0), radians(25.0), radians(40.0));
 
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {
@@ -93,6 +91,25 @@ float sampleHeightBilinear(uint sliceIndex, vec2 normalizedCoord)
     return mix(row0, row1, fracCoord.y);
 }
 
+mat2 rotationMatrix(float radiansValue)
+{
+    float cosineValue = cos(radiansValue);
+    float sineValue = sin(radiansValue);
+    return mat2(
+        cosineValue, -sineValue,
+        sineValue, cosineValue);
+}
+
+vec3 captureForwardForLayer(uint yawIndex, uint pitchIndex)
+{
+    float yawRadians = (float(yawIndex) / float(kImposterYawViewCount)) * kTau;
+    float pitchRadians = kPitchAngles[pitchIndex];
+    return normalize(vec3(
+        cos(pitchRadians) * sin(yawRadians),
+        sin(pitchRadians),
+        cos(pitchRadians) * cos(yawRadians)));
+}
+
 void main()
 {
     FoliagePageData page = drawMetadataBuffer.draws[gl_DrawIDARB];
@@ -103,13 +120,30 @@ void main()
             uint(gl_InstanceIndex)];
     uint candidateSlot = packedInstance & 0x0FFFu;
     uint meshId = (packedInstance >> 12u) & 0x000Fu;
+    uint rotationBits = (packedInstance >> 16u) & 0x0FFFu;
+
+    if (float(meshId) >= foliage.cameraPositionAndTreeClassCount.w)
+    {
+        gl_Position = vec4(0.0);
+        fragUv0 = inUv0;
+        fragLayerIndex0 = 0u;
+        fragLayerIndex1 = 0u;
+        fragYawBlend = 0.0;
+        fragCaptureRight = vec3(1.0, 0.0, 0.0);
+        fragCaptureUp = vec3(0.0, 1.0, 0.0);
+        fragCaptureForward = vec3(0.0, 0.0, 1.0);
+        fragViewDirection = vec3(0.0, 0.0, 1.0);
+        return;
+    }
+
+    TreeClassData treeClass = treeClassBuffer.treeClasses[meshId];
     uint candidateX = candidateSlot & 63u;
     uint candidateZ = candidateSlot >> 6u;
-
-    vec2 jitter = jitterOffset(page.seedData.x ^ candidateSlot);
+    vec2 jitter = foliageJitterOffset(page.seedData.x ^ candidateSlot);
     vec2 localOffset = vec2(
         (float(candidateX) + 0.5) * kCandidateCellSizeMeters,
         (float(candidateZ) + 0.5) * kCandidateCellSizeMeters) + jitter;
+
     vec3 terrainOrigin = page.terrainOriginAndSlice.xyz;
     vec3 pageOrigin = page.pageOriginAndTerrainSize.xyz;
     float terrainLeafSizeMeters = page.pageOriginAndTerrainSize.w;
@@ -120,18 +154,90 @@ void main()
     uint terrainSliceIndex = uint(page.terrainOriginAndSlice.w + 0.5);
     float terrainHeight = sampleHeightBilinear(terrainSliceIndex, normalizedTerrainCoord);
 
-    float markerHeight = markerHeightForMesh(meshId);
-    if (length(vec3(
-            pageOrigin.x + localOffset.x,
-            pageOrigin.y + terrainHeight,
-            pageOrigin.z + localOffset.y)) < 100.0)
+    float instanceRotation = (float(rotationBits) / 4096.0) * kTau;
+    mat2 instanceRotationMatrix = rotationMatrix(instanceRotation);
+    vec2 rotatedCenterXz = instanceRotationMatrix * treeClass.centerAndHalfWidth.xz;
+    vec3 instanceCenter = vec3(
+        pageOrigin.x + localOffset.x + rotatedCenterXz.x,
+        pageOrigin.y + terrainHeight + treeClass.centerAndHalfWidth.y,
+        pageOrigin.z + localOffset.y + rotatedCenterXz.y);
+
+    vec3 cameraPosition = foliage.cameraPositionAndTreeClassCount.xyz;
+    vec3 toCamera = normalize(cameraPosition - instanceCenter);
+    vec3 billboardForward = normalize(vec3(toCamera.x, 0.0, toCamera.z));
+    if (length(billboardForward.xz) < 0.0001)
     {
-        markerHeight = 0.0;
+        billboardForward = vec3(0.0, 0.0, -1.0);
     }
-    vec3 worldPosition = vec3(
-        pageOrigin.x + localOffset.x,
-        pageOrigin.y + terrainHeight + (inEndpoint * markerHeight),
-        pageOrigin.z + localOffset.y);
+    vec3 billboardRight = normalize(vec3(billboardForward.z, 0.0, -billboardForward.x));
+    vec3 billboardUp = vec3(0.0, 1.0, 0.0);
+
+    vec3 localToCamera = normalize(vec3(
+        (rotationMatrix(-instanceRotation) * toCamera.xz).x,
+        toCamera.y,
+        (rotationMatrix(-instanceRotation) * toCamera.xz).y));
+    vec3 captureForward = -localToCamera;
+
+    float yawRadians = atan(captureForward.x, captureForward.z);
+    if (yawRadians < 0.0)
+    {
+        yawRadians += kTau;
+    }
+    float yawPosition = (yawRadians / kTau) * float(kImposterYawViewCount);
+    uint yawIndex0 = uint(floor(yawPosition)) % kImposterYawViewCount;
+    uint yawIndex1 = (yawIndex0 + 1u) % kImposterYawViewCount;
+    fragYawBlend = fract(yawPosition);
+
+    float bestPitchDistance = 1.0e9;
+    uint pitchIndex = 0u;
+    for (uint candidatePitch = 0u; candidatePitch < 4u; ++candidatePitch)
+    {
+        vec3 candidateForward = captureForwardForLayer(yawIndex0, candidatePitch);
+        float candidateDistance = distance(candidateForward, captureForward);
+        if (candidateDistance < bestPitchDistance)
+        {
+            bestPitchDistance = candidateDistance;
+            pitchIndex = candidatePitch;
+        }
+    }
+
+    vec3 localCaptureForward = captureForwardForLayer(yawIndex0, pitchIndex);
+    vec3 localCaptureUpHint = vec3(0.0, 1.0, 0.0);
+    if (abs(dot(localCaptureForward, localCaptureUpHint)) > 0.98)
+    {
+        localCaptureUpHint = vec3(1.0, 0.0, 0.0);
+    }
+    vec3 localCaptureRight = normalize(cross(localCaptureForward, localCaptureUpHint));
+    vec3 localCaptureUp = normalize(cross(localCaptureRight, localCaptureForward));
+    vec2 worldCaptureRightXz = instanceRotationMatrix * localCaptureRight.xz;
+    vec2 worldCaptureForwardXz = instanceRotationMatrix * localCaptureForward.xz;
+    fragCaptureRight = normalize(vec3(worldCaptureRightXz.x, localCaptureRight.y, worldCaptureRightXz.y));
+    fragCaptureUp = normalize(vec3(
+        (instanceRotationMatrix * localCaptureUp.xz).x,
+        localCaptureUp.y,
+        (instanceRotationMatrix * localCaptureUp.xz).y));
+    fragCaptureForward = normalize(vec3(worldCaptureForwardXz.x, localCaptureForward.y, worldCaptureForwardXz.y));
+    fragViewDirection = toCamera;
+
+    float imposterScale = 1.0;
+    if (dot(instanceCenter.xz, instanceCenter.xz) < (kNearbyRadiusMeters * kNearbyRadiusMeters))
+    {
+        imposterScale = 0.0;
+    }
+
+    float halfWidth = treeClass.centerAndHalfWidth.w;
+    float verticalOffset = mix(
+        treeClass.verticalExtentsAndLayerBase.x,
+        treeClass.verticalExtentsAndLayerBase.y,
+        inCorner.y);
+    vec3 worldPosition =
+        instanceCenter +
+        (billboardRight * (inCorner.x * halfWidth * imposterScale)) +
+        (billboardUp * verticalOffset * imposterScale);
+
     gl_Position = foliage.viewProjection * vec4(worldPosition, 1.0);
-    fragColor = markerColorForMesh(meshId);
+    fragUv0 = inUv0;
+    uint layerBase = uint(treeClass.verticalExtentsAndLayerBase.z) + (pitchIndex * kImposterYawViewCount);
+    fragLayerIndex0 = layerBase + yawIndex0;
+    fragLayerIndex1 = layerBase + yawIndex1;
 }

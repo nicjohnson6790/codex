@@ -119,6 +119,8 @@ bool WriteAssetBin(
         record.firstMaterial = asset.materialIndices.empty() ? 0u : asset.materialIndices.front();
         record.materialCount = static_cast<std::uint32_t>(asset.materialIndices.size());
         record.flags = 0;
+        record.imposterColorTextureIndex = asset.imposterColorTextureIndex;
+        record.imposterNormalTextureIndex = asset.imposterNormalTextureIndex;
 
         for (std::uint32_t meshIndex : asset.meshIndices)
         {
