@@ -1,10 +1,14 @@
 # SDL3 GPU + ImGui Terrain Sandbox
 
-![rendered screenshot](images/Screenshot%202026-05-06%20182448.png)
+![rendered screenshot](images/Screenshot%202026-05-07%20201916.png)
 
 This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage markers, nearby decoded foliage mesh rendering, far-distance canopy impostors, and shared-cascade FFT water.
 
 It also now includes a standalone offline asset-conversion subproject under [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md) for importing source FBX/TGA content into simple runtime binary asset packs.
+
+The runtime asset packs now store per-mesh and per-texture payloads as individually LZ4-compressed blobs, with `assetbin` carrying the manifest metadata needed to decompress those items on load.
+
+This branch does not include the required pine source assets or generated runtime asset bins. To use the nearby tree-mesh path, you need to supply the `assets/source/pinetreepack` content yourself and run the standalone converter to produce `assets/runtime/pinetreepack.meshbin`, `assets/runtime/pinetreepack.texbin`, and `assets/runtime/pinetreepack.assetbin`.
 
 ## Overview
 
@@ -32,10 +36,10 @@ Rendering highlights:
 
 - Terrain is drawn as reusable quadtree patch meshes backed by GPU-generated heightmap slices, async min/max extent readback, and tree-based bridge stitching for equal-LOD and `2:1` seams.
 - Foliage is generated on the GPU directly from resident terrain heightmaps, stored in a fixed `1024`-page pool of canonical `256m x 256m` pages, and drawn as simple vertical markers through indirect draws.
-- Nearby foliage reuses those same canonical pages, expands them into fixed `4096`-slot decoded page buffers on the GPU, reads selected pages back asynchronously, caches a small CPU-side decoded-page LRU, and emits bright nearby debug markers inside the near radius.
+- Nearby foliage reuses those same canonical pages, expands them into fixed `4096`-slot decoded page buffers on the GPU, reads selected pages back asynchronously, caches a small CPU-side decoded-page LRU, and renders real nearby pine meshes with deterministic per-instance yaw inside the near radius.
 - Far-canopy impostors use a separate `4096`-cell canopy-bitset pool. Each visible `2048m` canopy patch references `64` canonical canopy cells and reconstructs rounded canopy crowns procedurally in the fragment shader instead of drawing individual trees.
 - Canopy patches use a dedicated `16 x 16` quad surface over each `2048m` terrain leaf, support dithered fade-in, and dither their outer edge only on true `2048m -> 4096m` canopy termination borders.
-- Foliage currently only appears where terrain is more than `5m` above the water level. Mid-distance foliage still renders as green markers, while the nearby decoded path renders real tree geometry inside the default `100m` near radius.
+- Foliage currently only appears where terrain is more than `5m` above the water level. Mid-distance foliage still renders as green markers, while the nearby decoded path renders real tree geometry from the full `pinetreepack` asset set inside the default `100m` near radius.
 - Water uses four shared `512 x 512` FFT cascades, sampled globally in world space and instanced across visible quadtree leaves with matching interior, equal-LOD, and `2:1` bridge meshes.
 - The water draw reuses resident terrain heightmaps to estimate local depth for shallow-wave damping, per-cascade shallow-depth thresholds, transparency, shoreline transmission, and shoreline foam placement.
 - Water shading uses the same cubemap and atmosphere LUT as the skybox, with distance-based filtering that sheds unresolved cascades, simplifies far normals/reflections, and makes distant water cheaper and less noisy.
@@ -95,7 +99,7 @@ The renderer then:
    - canopy renders a terrain-following `16 x 16` quad patch over visible `2048m` leaves, sampling resident canopy-cell bitsets and reconstructing clustered canopy crowns from only the nearest four candidate slots per fragment
    - canopy supports dithered patch fade-in plus dithered edge fade on true `2048m -> 4096m` canopy termination borders
    - foliage currently renders simple vertical markers selected by packed `meshId` height classes instead of full mid-distance tree meshes or impostor atlases
-   - nearby foliage reuses decoded CPU-readable `256m x 256m` canonical pages, groups candidate slots into `25m / 50m / 100m` distance bands, and renders real pine tree mesh LODs through indexed indirect draws
+  - nearby foliage reuses decoded CPU-readable `256m x 256m` canonical pages, groups candidate slots into `25m / 50m / 100m` distance bands, and renders real pine tree mesh LODs from all imported tree variants through indexed indirect draws
    - submerged terrain can add texture-driven caustics, with the caustic evolution warped and modulated from the shared water displacement/slope maps
    - shoreline terrain shading blends from dry sand into darker wetted sand around the waterline and extends the submerged sand tint into shallow water
    - water uses the same broad stitch strategy with a trimmed interior base patch plus equal-LOD and `2:1` bridge meshes
@@ -225,6 +229,16 @@ The renderer then:
 - `shaders/water_build_maps.comp`: displacement/slope texture assembly plus crest-foam generation and persistence
 - `tools/converter/*`: standalone offline converter project for building runtime asset packs from source FBX/TGA content
 
+## Asset Setup
+
+The repository code builds without the authored tree pack, but the nearby tree-mesh runtime path depends on external assets that are not checked into this branch.
+
+- missing source content: `assets/source/pinetreepack`
+- generated runtime outputs expected by the app: `assets/runtime/pinetreepack.meshbin`, `assets/runtime/pinetreepack.texbin`, `assets/runtime/pinetreepack.assetbin`
+- generation path: build and run the standalone converter described in [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md)
+
+Without those files, the terrain, water, and marker-foliage systems can still build, but the nearby foliage mesh renderer will not have the required art data.
+
 ## Dependencies
 
 - CMake 3.25+
@@ -238,6 +252,7 @@ Fetched dependencies:
 - SDL_image `release-3.2.4`
 - Dear ImGui `v1.92.5-docking`
 - GLM `1.0.1`
+- LZ4 `v1.10.0`
 
 Converter-only fetched dependencies:
 
@@ -280,6 +295,8 @@ cmake --build build/converter
 ```
 
 The converter project is intentionally separate from the main runtime target so Assimp and source-format parsing stay out of the application build and load path.
+
+If you do not have the external pine pack content, this branch will still compile, but you will not be able to regenerate or run the nearby tree-mesh asset path end to end.
 
 ## Run
 
@@ -324,7 +341,7 @@ Windows GPU preference:
 - Foliage uses canonical `256m x 256m` pages only. Visible `512m` leaves expand into `4` canonical foliage pages and visible `1024m` leaves expand into `16`.
 - Nearby foliage reuses those same canonical `256m x 256m` page ids, but only requests decoded CPU-readable copies for the local `3 x 3` set of `256m` pages around the camera.
 - Far-canopy uses the same canonical `256m x 256m` identity rules as near foliage, but only for visible `2048m` leaf nodes. Each canopy patch references `64` canonical canopy cells and reconstructs distant canopy mass procedurally from compact bitsets instead of storing full tree instances.
-- The current foliage system is split deliberately: the mid-distance foliage pass is still a minimal vertical-marker baseline, while the nearby foliage pass now loads real pine tree meshes/materials from the offline runtime asset pack. A fuller unified foliage/impostor path is still future work.
+- The current foliage system is split deliberately: the mid-distance foliage pass is still a minimal vertical-marker baseline, while the nearby foliage pass now loads real pine tree meshes/materials from the offline runtime asset pack, including the broader `pinetreepack` tree set. A fuller unified foliage/impostor path is still future work.
 - Off-screen foliage warming now also follows leaf ownership: off-screen `2048m` leaf nodes hint canopy residency, while off-screen `256m`, `512m`, and `1024m` leaf nodes hint marker-foliage residency. The hint paths only warm caches; they do not emit draws by themselves, and they are now issued during the normal quadtree traversal.
 - The quadtree still processes all allocated nodes during update, but most node-owned residency work now happens during that traversal and a later combined emit pass just consumes the resulting node flags/state.
 - Stitching lookups now follow the quadtree structure directly through parent/child links and only hop across the active base-node ring when a lookup reaches a world-grid border.

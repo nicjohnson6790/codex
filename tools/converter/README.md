@@ -2,6 +2,8 @@
 
 This folder contains a standalone offline asset-conversion project for turning the source pine tree pack into runtime-friendly binary files.
 
+The required source art is not included in this branch. You need to provide the `assets/source/pinetreepack` FBX and TGA content yourself before the converter can produce runtime output.
+
 The converter is intentionally separate from the main terrain sandbox runtime:
 
 - the runtime should not need to link Assimp
@@ -16,6 +18,8 @@ Running the converter for `pinetreepack` produces:
 - `assets/runtime/pinetreepack.meshbin`
 - `assets/runtime/pinetreepack.texbin`
 - `assets/runtime/pinetreepack.assetbin`
+
+Those generated runtime files are also not checked into this branch.
 
 Those files are versioned binary containers described by [src/assets/RuntimeAssetFormat.hpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetFormat.hpp) and read by the shared SDL-based reader in [src/assets/RuntimeAssetReader.hpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetReader.hpp).
 
@@ -70,11 +74,11 @@ That separation keeps the import code format-aware while keeping the runtime for
 ### Runtime-Format Layer
 
 - [MeshBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/MeshBinWriter.cpp)
-  Writes mesh headers, mesh records, submesh records, vertex data, index data, and a string table.
+  Writes mesh headers, mesh records, submesh records, per-mesh LZ4-compressed geometry blobs, and a string table.
 - [TexBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TexBinWriter.cpp)
-  Writes texture metadata, packed RGBA8 blobs, and a string table.
+  Writes texture metadata, per-texture LZ4-compressed RGBA8 blobs, and a string table.
 - [AssetBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/AssetBinWriter.cpp)
-  Writes the manifest that links assets, materials, meshes, and textures.
+  Writes the manifest that links assets, materials, meshes, textures, and the per-item blob compression metadata needed to reload `meshbin` and `texbin`.
 
 ### Shared Reader
 
@@ -91,12 +95,14 @@ That reader:
 
 This is the same reader the main runtime can use later, which helps keep offline output and runtime expectations in lockstep.
 
+It also now decompresses each mesh and texture blob individually on load using the compression metadata carried in `assetbin`.
+
 ## Current Runtime Use
 
 The generated `pinetreepack` runtime bins are now used directly by the main app's nearby foliage path:
 
 - `NearbyFoliageRenderer` loads `meshbin`, `texbin`, and `assetbin` at startup
-- the selected nearby tree classes use real mesh LODs at `25m`, `50m`, and `100m`
+- the nearby tree path uses real mesh LODs at `25m`, `50m`, and `100m` across the imported pine tree variants
 - textures are uploaded once into shared `2D` texture arrays
 - material metadata is uploaded once into a static GPU storage buffer
 
@@ -139,7 +145,7 @@ The runtime formats aim for a few practical rules:
 - simple flat records instead of deeply nested containers
 - enough validation metadata to reject corrupt or mismatched files early
 
-This first version prefers robustness and debuggability over aggressive packing or compression.
+The current version still keeps the format flat and explicit, but now applies per-item LZ4 compression to mesh and texture payloads while leaving the manifest easy to validate.
 
 ## File Responsibilities
 

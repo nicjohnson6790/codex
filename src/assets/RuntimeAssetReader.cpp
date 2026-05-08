@@ -1,4 +1,5 @@
 #include "RuntimeAssetReader.hpp"
+#include "RuntimeAssetCompression.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -87,6 +88,25 @@ bool CheckByteRegion(
         if (error != nullptr)
         {
             *error = std::string(label) + " range exceeds the file";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool CheckBlobRegion(
+    std::uint64_t offset,
+    std::uint64_t sizeBytes,
+    std::uint64_t regionBegin,
+    std::uint64_t regionEnd,
+    const char* label,
+    std::string* error)
+{
+    if (offset < regionBegin || offset > regionEnd || sizeBytes > (regionEnd - offset))
+    {
+        if (error != nullptr)
+        {
+            *error = std::string(label) + " range exceeds the blob region";
         }
         return false;
     }
@@ -265,10 +285,18 @@ bool ValidateMeshBin(const void* data, std::size_t size, std::string* error)
         return false;
     }
 
+    if (header.stringTableOffset < header.blobDataOffset)
+    {
+        if (error != nullptr)
+        {
+            *error = "meshbin string table overlaps the blob data region";
+        }
+        return false;
+    }
+
     if (!CheckRegion<MeshRecord>(header.meshRecordOffset, header.meshCount, size, "mesh records", error) ||
         !CheckRegion<SubmeshRecord>(header.submeshRecordOffset, header.submeshCount, size, "submesh records", error) ||
-        !CheckRegion<MeshVertex>(header.vertexDataOffset, header.vertexCount, size, "vertex data", error) ||
-        !CheckRegion<std::uint32_t>(header.indexDataOffset, header.indexCount, size, "index data", error) ||
+        !CheckByteRegion(header.blobDataOffset, header.stringTableOffset - header.blobDataOffset, size, "blob data", error) ||
         !CheckByteRegion(header.stringTableOffset, header.stringTableSize, size, "string table", error))
     {
         return false;
@@ -433,25 +461,12 @@ bool ValidateTexBin(const void* data, std::size_t size, std::string* error)
             return false;
         }
 
-        if (!CheckByteRegion(texture.dataOffset, texture.dataSize, size, "texture blob", error))
-        {
-            return false;
-        }
-
-        if (texture.dataOffset < header.pixelDataOffset || texture.dataOffset >= header.stringTableOffset)
+        const std::uint64_t minimumDataSize = static_cast<std::uint64_t>(texture.width) * texture.height * 4u;
+        if (minimumDataSize == 0)
         {
             if (error != nullptr)
             {
-                *error = "texture data offset is outside the pixel data region";
-            }
-            return false;
-        }
-
-        if (texture.dataSize < static_cast<std::uint64_t>(texture.width) * texture.height * 4u)
-        {
-            if (error != nullptr)
-            {
-                *error = "texture data size is smaller than RGBA8 pixels";
+                *error = "texture dimensions must be non-zero";
             }
             return false;
         }
@@ -489,7 +504,8 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
     if (!CheckRegion<AssetRecord>(header.assetRecordOffset, header.assetCount, size, "asset records", error) ||
         !CheckRegion<MaterialRecord>(header.materialRecordOffset, header.materialCount, size, "material records", error) ||
         !CheckRegion<MeshRefRecord>(header.meshRefRecordOffset, header.meshRefCount, size, "mesh ref records", error) ||
-        !CheckRegion<std::uint32_t>(header.textureRefRecordOffset, header.textureRefCount, size, "texture ref records", error) ||
+        !CheckRegion<MeshBlobRecord>(header.meshBlobRecordOffset, header.meshBlobCount, size, "mesh blob records", error) ||
+        !CheckRegion<TextureBlobRecord>(header.textureBlobRecordOffset, header.textureBlobCount, size, "texture blob records", error) ||
         !CheckByteRegion(header.stringTableOffset, header.stringTableSize, size, "string table", error))
     {
         return false;
@@ -504,6 +520,12 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
     const auto materials = std::span<const MaterialRecord>(
         reinterpret_cast<const MaterialRecord*>(reinterpret_cast<const std::byte*>(data) + header.materialRecordOffset),
         static_cast<std::size_t>(header.materialCount));
+    const auto meshBlobs = std::span<const MeshBlobRecord>(
+        reinterpret_cast<const MeshBlobRecord*>(reinterpret_cast<const std::byte*>(data) + header.meshBlobRecordOffset),
+        static_cast<std::size_t>(header.meshBlobCount));
+    const auto textureBlobs = std::span<const TextureBlobRecord>(
+        reinterpret_cast<const TextureBlobRecord*>(reinterpret_cast<const std::byte*>(data) + header.textureBlobRecordOffset),
+        static_cast<std::size_t>(header.textureBlobCount));
 
     if (!StringOffsetInTable(header.meshBinPathOffset, stringTable) ||
         !StringOffsetInTable(header.texBinPathOffset, stringTable))
@@ -559,51 +581,32 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
         }
     }
 
-    return true;
-}
-
-bool LoadMeshBinFromSDL(const char* path, LoadedMeshBinView* out, std::string* error)
-{
-    out->bytes.clear();
-    if (!ReadFileBytes(path, &out->bytes, error))
+    for (const MeshBlobRecord& blob : meshBlobs)
     {
-        return false;
-    }
-    if (!ValidateMeshBin(out->bytes.data(), out->bytes.size(), error))
-    {
-        out->bytes.clear();
-        return false;
+        if (blob.compressionType != static_cast<std::uint32_t>(CompressionType::None) &&
+            blob.compressionType != static_cast<std::uint32_t>(CompressionType::Lz4))
+        {
+            if (error != nullptr)
+            {
+                *error = "mesh blob compression type is unsupported";
+            }
+            return false;
+        }
     }
 
-    out->header = ReadStruct<MeshBinHeader>(out->bytes.data());
-    out->meshes = MakeSpan<MeshRecord>(out->bytes, out->header.meshRecordOffset, out->header.meshCount);
-    out->submeshes = MakeSpan<SubmeshRecord>(out->bytes, out->header.submeshRecordOffset, out->header.submeshCount);
-    out->vertices = MakeSpan<MeshVertex>(out->bytes, out->header.vertexDataOffset, out->header.vertexCount);
-    out->indices = MakeSpan<std::uint32_t>(out->bytes, out->header.indexDataOffset, out->header.indexCount);
-    out->stringTable = MakeByteSpan(out->bytes, out->header.stringTableOffset, out->header.stringTableSize);
-    return true;
-}
-
-bool LoadTexBinFromSDL(const char* path, LoadedTexBinView* out, std::string* error)
-{
-    out->bytes.clear();
-    if (!ReadFileBytes(path, &out->bytes, error))
+    for (const TextureBlobRecord& blob : textureBlobs)
     {
-        return false;
-    }
-    if (!ValidateTexBin(out->bytes.data(), out->bytes.size(), error))
-    {
-        out->bytes.clear();
-        return false;
+        if (blob.compressionType != static_cast<std::uint32_t>(CompressionType::None) &&
+            blob.compressionType != static_cast<std::uint32_t>(CompressionType::Lz4))
+        {
+            if (error != nullptr)
+            {
+                *error = "texture blob compression type is unsupported";
+            }
+            return false;
+        }
     }
 
-    out->header = ReadStruct<TexBinHeader>(out->bytes.data());
-    out->textures = MakeSpan<TextureRecord>(out->bytes, out->header.textureRecordOffset, out->header.textureCount);
-    out->pixelData = MakeByteSpan(
-        out->bytes,
-        out->header.pixelDataOffset,
-        out->header.stringTableOffset - out->header.pixelDataOffset);
-    out->stringTable = MakeByteSpan(out->bytes, out->header.stringTableOffset, out->header.stringTableSize);
     return true;
 }
 
@@ -624,8 +627,225 @@ bool LoadAssetBinFromSDL(const char* path, LoadedAssetBinView* out, std::string*
     out->assets = MakeSpan<AssetRecord>(out->bytes, out->header.assetRecordOffset, out->header.assetCount);
     out->materials = MakeSpan<MaterialRecord>(out->bytes, out->header.materialRecordOffset, out->header.materialCount);
     out->meshRefs = MakeSpan<MeshRefRecord>(out->bytes, out->header.meshRefRecordOffset, out->header.meshRefCount);
-    out->textureRefs = MakeSpan<std::uint32_t>(out->bytes, out->header.textureRefRecordOffset, out->header.textureRefCount);
+    out->meshBlobs = MakeSpan<MeshBlobRecord>(out->bytes, out->header.meshBlobRecordOffset, out->header.meshBlobCount);
+    out->textureBlobs = MakeSpan<TextureBlobRecord>(out->bytes, out->header.textureBlobRecordOffset, out->header.textureBlobCount);
     out->stringTable = MakeByteSpan(out->bytes, out->header.stringTableOffset, out->header.stringTableSize);
+    return true;
+}
+
+bool LoadMeshBinFromSDL(
+    const char* path,
+    const LoadedAssetBinView& assetBin,
+    LoadedMeshBinView* out,
+    std::string* error)
+{
+    out->bytes.clear();
+    out->decompressedVertices.clear();
+    out->decompressedIndices.clear();
+    if (!ReadFileBytes(path, &out->bytes, error))
+    {
+        return false;
+    }
+    if (!ValidateMeshBin(out->bytes.data(), out->bytes.size(), error))
+    {
+        out->bytes.clear();
+        return false;
+    }
+
+    out->header = ReadStruct<MeshBinHeader>(out->bytes.data());
+    out->meshes = MakeSpan<MeshRecord>(out->bytes, out->header.meshRecordOffset, out->header.meshCount);
+    out->submeshes = MakeSpan<SubmeshRecord>(out->bytes, out->header.submeshRecordOffset, out->header.submeshCount);
+    out->stringTable = MakeByteSpan(out->bytes, out->header.stringTableOffset, out->header.stringTableSize);
+
+    if (assetBin.meshBlobs.size() != out->meshes.size())
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin mesh blob count does not match meshbin mesh count";
+        }
+        out->bytes.clear();
+        return false;
+    }
+
+    out->decompressedVertices.resize(out->header.vertexCount);
+    out->decompressedIndices.resize(out->header.indexCount);
+    const std::uint64_t blobRegionEnd = out->header.stringTableOffset;
+
+    for (std::size_t meshIndex = 0; meshIndex < out->meshes.size(); ++meshIndex)
+    {
+        const MeshRecord& mesh = out->meshes[meshIndex];
+        const MeshBlobRecord& blob = assetBin.meshBlobs[meshIndex];
+
+        if (!CheckBlobRegion(
+                blob.vertexDataOffset,
+                blob.vertexDataCompressedSize,
+                out->header.blobDataOffset,
+                blobRegionEnd,
+                "mesh vertex blob",
+                error) ||
+            !CheckBlobRegion(
+                blob.indexDataOffset,
+                blob.indexDataCompressedSize,
+                out->header.blobDataOffset,
+                blobRegionEnd,
+                "mesh index blob",
+                error))
+        {
+            out->bytes.clear();
+            out->decompressedVertices.clear();
+            out->decompressedIndices.clear();
+            return false;
+        }
+
+        if (blob.vertexDataUncompressedSize != static_cast<std::uint64_t>(mesh.vertexCount) * sizeof(MeshVertex) ||
+            blob.indexDataUncompressedSize != static_cast<std::uint64_t>(mesh.indexCount) * sizeof(std::uint32_t))
+        {
+            if (error != nullptr)
+            {
+                *error = "mesh blob uncompressed sizes do not match mesh record counts";
+            }
+            out->bytes.clear();
+            out->decompressedVertices.clear();
+            out->decompressedIndices.clear();
+            return false;
+        }
+
+        std::vector<std::byte> decompressedVertexBytes;
+        if (!DecompressBytes(
+                static_cast<CompressionType>(blob.compressionType),
+                MakeByteSpan(out->bytes, blob.vertexDataOffset, blob.vertexDataCompressedSize),
+                static_cast<std::size_t>(blob.vertexDataUncompressedSize),
+                &decompressedVertexBytes,
+                error))
+        {
+            out->bytes.clear();
+            out->decompressedVertices.clear();
+            out->decompressedIndices.clear();
+            return false;
+        }
+
+        std::vector<std::byte> decompressedIndexBytes;
+        if (!DecompressBytes(
+                static_cast<CompressionType>(blob.compressionType),
+                MakeByteSpan(out->bytes, blob.indexDataOffset, blob.indexDataCompressedSize),
+                static_cast<std::size_t>(blob.indexDataUncompressedSize),
+                &decompressedIndexBytes,
+                error))
+        {
+            out->bytes.clear();
+            out->decompressedVertices.clear();
+            out->decompressedIndices.clear();
+            return false;
+        }
+
+        std::memcpy(
+            out->decompressedVertices.data() + mesh.firstVertex,
+            decompressedVertexBytes.data(),
+            decompressedVertexBytes.size());
+        std::memcpy(
+            out->decompressedIndices.data() + mesh.firstIndex,
+            decompressedIndexBytes.data(),
+            decompressedIndexBytes.size());
+    }
+
+    out->vertices = std::span<const MeshVertex>(out->decompressedVertices.data(), out->decompressedVertices.size());
+    out->indices = std::span<const std::uint32_t>(out->decompressedIndices.data(), out->decompressedIndices.size());
+    return true;
+}
+
+bool LoadTexBinFromSDL(
+    const char* path,
+    const LoadedAssetBinView& assetBin,
+    LoadedTexBinView* out,
+    std::string* error)
+{
+    out->bytes.clear();
+    out->resolvedTextures.clear();
+    out->decompressedPixelData.clear();
+    if (!ReadFileBytes(path, &out->bytes, error))
+    {
+        return false;
+    }
+    if (!ValidateTexBin(out->bytes.data(), out->bytes.size(), error))
+    {
+        out->bytes.clear();
+        return false;
+    }
+
+    out->header = ReadStruct<TexBinHeader>(out->bytes.data());
+    const std::span<const TextureRecord> sourceTextures =
+        MakeSpan<TextureRecord>(out->bytes, out->header.textureRecordOffset, out->header.textureCount);
+    out->stringTable = MakeByteSpan(out->bytes, out->header.stringTableOffset, out->header.stringTableSize);
+
+    if (assetBin.textureBlobs.size() != sourceTextures.size())
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin texture blob count does not match texbin texture count";
+        }
+        out->bytes.clear();
+        return false;
+    }
+
+    out->resolvedTextures.assign(sourceTextures.begin(), sourceTextures.end());
+    const std::uint64_t blobRegionEnd = out->header.stringTableOffset;
+
+    for (std::size_t textureIndex = 0; textureIndex < out->resolvedTextures.size(); ++textureIndex)
+    {
+        TextureRecord& texture = out->resolvedTextures[textureIndex];
+        const TextureBlobRecord& blob = assetBin.textureBlobs[textureIndex];
+        const std::uint64_t expectedSize = static_cast<std::uint64_t>(texture.width) * texture.height * 4u;
+
+        if (!CheckBlobRegion(
+                blob.dataOffset,
+                blob.dataCompressedSize,
+                out->header.pixelDataOffset,
+                blobRegionEnd,
+                "texture blob",
+                error))
+        {
+            out->bytes.clear();
+            out->resolvedTextures.clear();
+            out->decompressedPixelData.clear();
+            return false;
+        }
+
+        if (blob.dataUncompressedSize != expectedSize)
+        {
+            if (error != nullptr)
+            {
+                *error = "texture blob uncompressed size does not match texture dimensions";
+            }
+            out->bytes.clear();
+            out->resolvedTextures.clear();
+            out->decompressedPixelData.clear();
+            return false;
+        }
+
+        std::vector<std::byte> decompressedTextureBytes;
+        if (!DecompressBytes(
+                static_cast<CompressionType>(blob.compressionType),
+                MakeByteSpan(out->bytes, blob.dataOffset, blob.dataCompressedSize),
+                static_cast<std::size_t>(blob.dataUncompressedSize),
+                &decompressedTextureBytes,
+                error))
+        {
+            out->bytes.clear();
+            out->resolvedTextures.clear();
+            out->decompressedPixelData.clear();
+            return false;
+        }
+
+        texture.dataOffset = out->decompressedPixelData.size();
+        texture.dataSize = decompressedTextureBytes.size();
+        out->decompressedPixelData.insert(
+            out->decompressedPixelData.end(),
+            decompressedTextureBytes.begin(),
+            decompressedTextureBytes.end());
+    }
+
+    out->textures = std::span<const TextureRecord>(out->resolvedTextures.data(), out->resolvedTextures.size());
+    out->pixelData = std::span<const std::byte>(out->decompressedPixelData.data(), out->decompressedPixelData.size());
     return true;
 }
 

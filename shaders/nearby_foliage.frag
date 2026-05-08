@@ -4,18 +4,29 @@ layout(set=3, binding=0) uniform NearbyFoliageMaterialUniforms
 {
     vec4 sunDirectionIntensity;
     vec4 sunColorAmbient;
+    vec4 shadingParams0;
+    mat4 skyRotation;
+    vec4 atmosphereParams;
+    vec4 sunDirectionTimeOfDay;
 } foliageMaterial;
 
 layout(set=2, binding=0) uniform sampler2DArray baseColorTextureArray;
 layout(set=2, binding=1) uniform sampler2DArray normalTextureArray;
+layout(set=2, binding=2) uniform sampler2DArray roughnessTextureArray;
+layout(set=2, binding=3) uniform sampler2DArray specularTextureArray;
+layout(set=2, binding=4) uniform sampler2DArray aoTextureArray;
+layout(set=2, binding=5) uniform sampler2DArray subsurfaceTextureArray;
+layout(set=2, binding=6) uniform samplerCube skyboxTexture;
+layout(set=2, binding=7) uniform sampler2DArray atmosphereLutTexture;
 
 struct NearbyMaterialGpu
 {
-    uvec4 layersAndFlags;
+    uvec4 layers0;
+    uvec4 layers1;
     vec4 params;
 };
 
-layout(set=2, binding=2, std430) readonly buffer NearbyMaterialBuffer
+layout(set=2, binding=8, std430) readonly buffer NearbyMaterialBuffer
 {
     NearbyMaterialGpu materials[];
 } materialBuffer;
@@ -24,16 +35,105 @@ layout(location = 0) in vec2 fragUv0;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec3 fragTangent;
 layout(location = 3) in vec3 fragBitangent;
-layout(location = 4) flat in uint fragMaterialIndex;
+layout(location = 4) in vec3 fragViewPosition;
+layout(location = 5) flat in uint fragMaterialIndex;
 
 layout(location = 0) out vec4 outColor;
+
+const float kPi = 3.14159265359;
+const float kInvLog256 = 0.18033688011112042;
+
+float saturate(float value)
+{
+    return clamp(value, 0.0, 1.0);
+}
+
+float encodeLogDistance(float distanceThroughAtmosphere)
+{
+    float normalizedDistance = saturate(distanceThroughAtmosphere / max(foliageMaterial.atmosphereParams.y, 0.00001));
+    return log(normalizedDistance * 255.0 + 1.0) * kInvLog256;
+}
+
+vec4 sampleAtmosphere(vec3 worldDirection, float distanceThroughAtmosphere)
+{
+    float timeOfDay = fract(foliageMaterial.sunDirectionTimeOfDay.w);
+    vec3 cameraToSunLight = normalize(foliageMaterial.sunDirectionTimeOfDay.xyz);
+    float viewSunDot = dot(worldDirection, cameraToSunLight);
+    float distanceT = encodeLogDistance(distanceThroughAtmosphere);
+    float maxLayer = float(textureSize(atmosphereLutTexture, 0).z - 1);
+    float layerCoord = distanceT * maxLayer;
+    float layer0 = floor(layerCoord);
+    float layer1 = min(layer0 + 1.0, maxLayer);
+    float layerBlend = layerCoord - layer0;
+    vec2 lutUv = vec2(timeOfDay, (viewSunDot * 0.5) + 0.5);
+    vec4 sample0 = texture(atmosphereLutTexture, vec3(lutUv, layer0));
+    vec4 sample1 = texture(atmosphereLutTexture, vec3(lutUv, layer1));
+    return mix(sample0, sample1, layerBlend);
+}
+
+float backgroundAtmosphereDistance(vec3 worldDirection)
+{
+    const vec3 worldUp = vec3(0.0, 1.0, 0.0);
+    float cameraAltitude = foliageMaterial.atmosphereParams.w;
+    float topPlaneHeight = foliageMaterial.atmosphereParams.x - cameraAltitude;
+    float maxDistance = max(foliageMaterial.atmosphereParams.y, 0.00001);
+    float upDenominator = dot(worldDirection, worldUp);
+    if (topPlaneHeight > 0.0 && upDenominator > 0.00001)
+    {
+        return min(topPlaneHeight / upDenominator, maxDistance);
+    }
+
+    return maxDistance;
+}
+
+vec3 sampleSkyRadiance(vec3 worldDirection)
+{
+    vec3 sampleDirection = transpose(mat3(foliageMaterial.skyRotation)) * worldDirection;
+    vec3 skyboxColor = texture(skyboxTexture, sampleDirection).rgb;
+    float distanceThroughAtmosphere = backgroundAtmosphereDistance(worldDirection);
+    vec4 atmosphere = sampleAtmosphere(worldDirection, distanceThroughAtmosphere);
+    return mix(skyboxColor, atmosphere.rgb, atmosphere.a);
+}
+
+vec3 fresnelSchlick(float cosTheta, vec3 f0)
+{
+    return f0 + (1.0 - f0) * pow(1.0 - saturate(cosTheta), 5.0);
+}
+
+float luminance(vec3 color)
+{
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+float distributionGgx(float nDotH, float roughness)
+{
+    float alpha = roughness * roughness;
+    float alphaSquared = alpha * alpha;
+    float denominator = (nDotH * nDotH) * (alphaSquared - 1.0) + 1.0;
+    return alphaSquared / max(kPi * denominator * denominator, 0.0001);
+}
+
+float geometrySchlickGgx(float nDotV, float roughness)
+{
+    float k = pow(roughness + 1.0, 2.0) / 8.0;
+    return nDotV / max(nDotV * (1.0 - k) + k, 0.0001);
+}
+
+float geometrySmith(float nDotV, float nDotL, float roughness)
+{
+    return geometrySchlickGgx(nDotV, roughness) * geometrySchlickGgx(nDotL, roughness);
+}
 
 void main()
 {
     NearbyMaterialGpu material = materialBuffer.materials[fragMaterialIndex];
     float alphaCutoff = material.params.x;
-    float baseColorLayer = float(material.layersAndFlags.x);
-    float normalLayer = float(material.layersAndFlags.y);
+    float baseColorLayer = float(material.layers0.x);
+    float normalLayer = float(material.layers0.y);
+    float roughnessLayer = float(material.layers0.z);
+    float specularLayer = float(material.layers0.w);
+    float aoLayer = float(material.layers1.x);
+    float subsurfaceLayer = float(material.layers1.y);
 
     vec4 albedoSample = texture(baseColorTextureArray, vec3(fragUv0, baseColorLayer));
     if (albedoSample.a < alphaCutoff)
@@ -55,11 +155,52 @@ void main()
     {
         normal = -normal;
     }
+
     vec3 sunDirection = normalize(foliageMaterial.sunDirectionIntensity.xyz);
-    float diffuse = max(dot(normal, sunDirection), 0.0) * foliageMaterial.sunDirectionIntensity.w;
-    float backLight = max(dot(-normal, sunDirection), 0.0) * 0.35;
-    vec3 ambient = foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunColorAmbient.a;
-    vec3 litColor = albedoSample.rgb * (ambient + (foliageMaterial.sunColorAmbient.rgb * (diffuse + backLight)));
+    vec3 viewDirection = normalize(-fragViewPosition);
+    vec3 halfVector = normalize(viewDirection + sunDirection);
+
+    float roughness = clamp(texture(roughnessTextureArray, vec3(fragUv0, roughnessLayer)).r, 0.08, 1.0);
+    vec3 specularColor = texture(specularTextureArray, vec3(fragUv0, specularLayer)).rgb;
+    float ao = texture(aoTextureArray, vec3(fragUv0, aoLayer)).r;
+    vec3 subsurfaceColor = texture(subsurfaceTextureArray, vec3(fragUv0, subsurfaceLayer)).rgb;
+
+    float nDotL = saturate(dot(normal, sunDirection));
+    float nDotV = saturate(dot(normal, viewDirection));
+    float nDotH = saturate(dot(normal, halfVector));
+    float vDotH = saturate(dot(viewDirection, halfVector));
+
+    vec3 dielectricF0 = vec3(foliageMaterial.shadingParams0.x);
+    float specularStrength = saturate(luminance(specularColor));
+    vec3 f0 = dielectricF0 * mix(0.35, 1.25, specularStrength);
+    f0 = clamp(f0, vec3(0.012), vec3(0.08));
+    vec3 fresnel = fresnelSchlick(vDotH, f0);
+    float distribution = distributionGgx(nDotH, roughness);
+    float geometry = geometrySmith(max(nDotV, 0.05), max(nDotL, 0.05), roughness);
+    vec3 specular = (distribution * geometry * fresnel) / max(4.0 * max(nDotV, 0.05) * max(nDotL, 0.05), 0.0001);
+
+    vec3 diffuseColor = albedoSample.rgb * (1.0 - fresnel);
+    vec3 diffuse = (diffuseColor / kPi) * nDotL;
+
+    float transmissionStrength = foliageMaterial.shadingParams0.z;
+    float backScatter = pow(saturate(dot(-viewDirection, sunDirection)), 2.0) * saturate(dot(-normal, sunDirection));
+    vec3 transmission = subsurfaceColor * albedoSample.rgb * backScatter * transmissionStrength;
+
+    vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunDirectionIntensity.w;
+    vec3 directLighting = diffuse * sunRadiance + (specular * sunRadiance * 0.35) + transmission * sunRadiance;
+
+    vec3 reflectionDirection = reflect(-viewDirection, normal);
+    vec3 reflectedSky = sampleSkyRadiance(reflectionDirection);
+    vec3 environmentSpecular =
+        reflectedSky *
+        fresnelSchlick(nDotV, f0) *
+        mix(0.35, 0.12, roughness) *
+        mix(0.55, 1.0, pow(1.0 - nDotV, 0.35));
+    environmentSpecular *= mix(0.65, 1.0, ao);
+
+    float ambientScale = foliageMaterial.sunColorAmbient.a;
+    vec3 ambient = albedoSample.rgb * ambientScale * ao;
+    vec3 litColor = ambient + directLighting + environmentSpecular;
 
     outColor = vec4(litColor, albedoSample.a);
 }

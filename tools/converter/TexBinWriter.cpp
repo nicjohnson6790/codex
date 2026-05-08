@@ -1,5 +1,6 @@
 #include "TexBinWriter.hpp"
 
+#include "../../src/assets/RuntimeAssetCompression.hpp"
 #include "../../src/assets/RuntimeAssetFormat.hpp"
 
 #include <cstring>
@@ -80,13 +81,16 @@ bool WriteAllBytes(const std::filesystem::path& outputPath, const std::vector<st
 bool WriteTexBin(
     const ImportedPack& pack,
     const std::filesystem::path& outputPath,
+    std::vector<RuntimeAssets::TextureBlobRecord>* outTextureBlobs,
     std::uint64_t* outFileSize,
     std::string* error)
 {
     std::vector<RuntimeAssets::TextureRecord> textureRecords;
+    std::vector<RuntimeAssets::TextureBlobRecord> textureBlobs;
     std::string stringTable;
 
     textureRecords.reserve(pack.textures.size());
+    textureBlobs.reserve(pack.textures.size());
     for (const ImportedTexture& texture : pack.textures)
     {
         RuntimeAssets::TextureRecord record{};
@@ -117,9 +121,24 @@ bool WriteTexBin(
 
     for (std::size_t index = 0; index < pack.textures.size(); ++index)
     {
+        std::vector<std::byte> compressedPixels;
+        if (!RuntimeAssets::CompressBytes(
+                RuntimeAssets::CompressionType::Lz4,
+                std::span<const std::byte>(pack.textures[index].pixels),
+                &compressedPixels,
+                error))
+        {
+            return false;
+        }
+
         writer.align(16);
-        textureRecords[index].dataOffset = writer.bytes.size();
-        writer.appendBytes(std::span<const std::byte>(pack.textures[index].pixels));
+        RuntimeAssets::TextureBlobRecord blob{};
+        blob.dataOffset = writer.bytes.size();
+        blob.dataCompressedSize = compressedPixels.size();
+        blob.dataUncompressedSize = pack.textures[index].pixels.size();
+        blob.compressionType = static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4);
+        writer.appendBytes(compressedPixels);
+        textureBlobs.push_back(blob);
     }
 
     writer.align(8);
@@ -142,6 +161,10 @@ bool WriteTexBin(
         return false;
     }
 
+    if (outTextureBlobs != nullptr)
+    {
+        *outTextureBlobs = std::move(textureBlobs);
+    }
     *outFileSize = header.fileSize;
     return true;
 }

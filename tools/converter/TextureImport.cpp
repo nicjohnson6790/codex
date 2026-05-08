@@ -13,6 +13,8 @@
 namespace
 {
 
+constexpr std::uint32_t kRuntimeTextureSize = 512u;
+
 std::string ToLower(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -70,6 +72,62 @@ bool IsSrgbTexture(const std::string& lowerName)
         lowerName.find("_bc") != std::string::npos ||
         lowerName.find("basecolor") != std::string::npos ||
         lowerName.find("diffuse") != std::string::npos;
+}
+
+std::vector<std::byte> ResizeRgbaImage(
+    std::span<const std::byte> sourcePixels,
+    std::uint32_t sourceWidth,
+    std::uint32_t sourceHeight,
+    std::uint32_t destinationWidth,
+    std::uint32_t destinationHeight)
+{
+    std::vector<std::byte> resized(
+        static_cast<std::size_t>(destinationWidth) * destinationHeight * 4u,
+        std::byte{});
+    if (sourceWidth == 0 || sourceHeight == 0 || destinationWidth == 0 || destinationHeight == 0)
+    {
+        return resized;
+    }
+
+    const float xScale = static_cast<float>(sourceWidth) / static_cast<float>(destinationWidth);
+    const float yScale = static_cast<float>(sourceHeight) / static_cast<float>(destinationHeight);
+
+    for (std::uint32_t y = 0; y < destinationHeight; ++y)
+    {
+        const float sourceY = (static_cast<float>(y) + 0.5f) * yScale - 0.5f;
+        const std::uint32_t y0 = static_cast<std::uint32_t>(std::clamp(sourceY, 0.0f, static_cast<float>(sourceHeight - 1u)));
+        const std::uint32_t y1 = std::min(y0 + 1u, sourceHeight - 1u);
+        const float yLerp = std::clamp(sourceY - static_cast<float>(y0), 0.0f, 1.0f);
+
+        for (std::uint32_t x = 0; x < destinationWidth; ++x)
+        {
+            const float sourceX = (static_cast<float>(x) + 0.5f) * xScale - 0.5f;
+            const std::uint32_t x0 = static_cast<std::uint32_t>(std::clamp(sourceX, 0.0f, static_cast<float>(sourceWidth - 1u)));
+            const std::uint32_t x1 = std::min(x0 + 1u, sourceWidth - 1u);
+            const float xLerp = std::clamp(sourceX - static_cast<float>(x0), 0.0f, 1.0f);
+
+            const std::size_t topLeftIndex = (static_cast<std::size_t>(y0) * sourceWidth + x0) * 4u;
+            const std::size_t topRightIndex = (static_cast<std::size_t>(y0) * sourceWidth + x1) * 4u;
+            const std::size_t bottomLeftIndex = (static_cast<std::size_t>(y1) * sourceWidth + x0) * 4u;
+            const std::size_t bottomRightIndex = (static_cast<std::size_t>(y1) * sourceWidth + x1) * 4u;
+            const std::size_t destinationIndex = (static_cast<std::size_t>(y) * destinationWidth + x) * 4u;
+
+            for (std::size_t channel = 0; channel < 4u; ++channel)
+            {
+                const float topLeft = static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[topLeftIndex + channel]));
+                const float topRight = static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[topRightIndex + channel]));
+                const float bottomLeft = static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[bottomLeftIndex + channel]));
+                const float bottomRight = static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[bottomRightIndex + channel]));
+
+                const float top = topLeft + ((topRight - topLeft) * xLerp);
+                const float bottom = bottomLeft + ((bottomRight - bottomLeft) * xLerp);
+                const float value = top + ((bottom - top) * yLerp);
+                resized[destinationIndex + channel] = std::byte{ static_cast<std::uint8_t>(std::clamp(value, 0.0f, 255.0f)) };
+            }
+        }
+    }
+
+    return resized;
 }
 
 bool DecodeTga(const std::filesystem::path& path, ImportedTexture* outTexture, std::string* error)
@@ -265,6 +323,18 @@ bool ImportTextureFolder(
         if (!DecodeTga(texturePath, &texture, error))
         {
             return false;
+        }
+
+        if (texture.width != kRuntimeTextureSize || texture.height != kRuntimeTextureSize)
+        {
+            texture.pixels = ResizeRgbaImage(
+                texture.pixels,
+                texture.width,
+                texture.height,
+                kRuntimeTextureSize,
+                kRuntimeTextureSize);
+            texture.width = kRuntimeTextureSize;
+            texture.height = kRuntimeTextureSize;
         }
 
         if (IsSrgbTexture(texture.name))

@@ -39,6 +39,28 @@ const float kCandidateCellSizeMeters = 4.0;
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
 
+float markerHeightForMesh(uint meshId)
+{
+    if (meshId < 3u)
+    {
+        return 14.0 + (float(meshId) * 2.5);
+    }
+    if (meshId < 8u)
+    {
+        return 22.0 + (float(meshId - 3u) * 2.0);
+    }
+    return 20.0 + (float(meshId - 8u) * 1.25);
+}
+
+vec3 markerColorForMesh(uint meshId)
+{
+    vec3 baseColor =
+        meshId < 3u ? vec3(0.36, 0.82, 0.44) :
+        (meshId < 8u ? vec3(0.58, 0.92, 0.46) : vec3(0.84, 0.94, 0.55));
+    float tint = float(meshId & 3u) / 3.0;
+    return mix(baseColor * 0.78, baseColor * 1.08, tint);
+}
+
 vec2 jitterOffset(uint seed)
 {
     return foliageJitterOffset(seed);
@@ -80,7 +102,7 @@ void main()
             (pageIndex * kCandidateGridResolution * kCandidateGridResolution) +
             uint(gl_InstanceIndex)];
     uint candidateSlot = packedInstance & 0x0FFFu;
-    uint meshId = (packedInstance >> 12u) & 0xFFFFu;
+    uint meshId = (packedInstance >> 12u) & 0x000Fu;
     uint candidateX = candidateSlot & 63u;
     uint candidateZ = candidateSlot >> 6u;
 
@@ -98,9 +120,7 @@ void main()
     uint terrainSliceIndex = uint(page.terrainOriginAndSlice.w + 0.5);
     float terrainHeight = sampleHeightBilinear(terrainSliceIndex, normalizedTerrainCoord);
 
-    float markerHeight =
-        meshId == 0u ? 14.56 :
-        (meshId == 1u ? 23.22 : 29.04);
+    float markerHeight = markerHeightForMesh(meshId);
     if (length(vec3(
             pageOrigin.x + localOffset.x,
             pageOrigin.y + terrainHeight,
@@ -113,7 +133,5 @@ void main()
         pageOrigin.y + terrainHeight + (inEndpoint * markerHeight),
         pageOrigin.z + localOffset.y);
     gl_Position = foliage.viewProjection * vec4(worldPosition, 1.0);
-    fragColor =
-        meshId == 0u ? vec3(0.36, 0.82, 0.44) :
-        (meshId == 1u ? vec3(0.58, 0.92, 0.46) : vec3(0.84, 0.94, 0.55));
+    fragColor = markerColorForMesh(meshId);
 }

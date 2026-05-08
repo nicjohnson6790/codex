@@ -7,7 +7,7 @@
 namespace RuntimeAssets
 {
 
-constexpr std::uint32_t kFormatVersion = 1;
+constexpr std::uint32_t kFormatVersion = 2;
 constexpr std::uint32_t kLittleEndianFlag = 1u << 0;
 
 constexpr std::uint32_t MakeMagic(char a, char b, char c, char d)
@@ -43,6 +43,12 @@ enum MaterialFlags : std::uint32_t
     MaterialFlagSrgbBaseColor = 1u << 3,
 };
 
+enum class CompressionType : std::uint32_t
+{
+    None = 0,
+    Lz4 = 1,
+};
+
 struct MeshBinHeader
 {
     std::uint32_t magic = 0;
@@ -55,13 +61,12 @@ struct MeshBinHeader
     std::uint32_t reserved = 0;
     std::uint64_t meshRecordOffset = 0;
     std::uint64_t submeshRecordOffset = 0;
-    std::uint64_t vertexDataOffset = 0;
-    std::uint64_t indexDataOffset = 0;
+    std::uint64_t blobDataOffset = 0;
     std::uint64_t stringTableOffset = 0;
     std::uint64_t stringTableSize = 0;
     std::uint64_t fileSize = 0;
 };
-static_assert(sizeof(MeshBinHeader) == 88);
+static_assert(sizeof(MeshBinHeader) == 80);
 
 struct MeshRecord
 {
@@ -128,6 +133,29 @@ struct TextureRecord
 };
 static_assert(sizeof(TextureRecord) == 48);
 
+struct MeshBlobRecord
+{
+    std::uint64_t vertexDataOffset = 0;
+    std::uint64_t vertexDataCompressedSize = 0;
+    std::uint64_t vertexDataUncompressedSize = 0;
+    std::uint64_t indexDataOffset = 0;
+    std::uint64_t indexDataCompressedSize = 0;
+    std::uint64_t indexDataUncompressedSize = 0;
+    std::uint32_t compressionType = 0;
+    std::uint32_t reserved = 0;
+};
+static_assert(sizeof(MeshBlobRecord) == 56);
+
+struct TextureBlobRecord
+{
+    std::uint64_t dataOffset = 0;
+    std::uint64_t dataCompressedSize = 0;
+    std::uint64_t dataUncompressedSize = 0;
+    std::uint32_t compressionType = 0;
+    std::uint32_t reserved = 0;
+};
+static_assert(sizeof(TextureBlobRecord) == 32);
+
 struct AssetBinHeader
 {
     std::uint32_t magic = 0;
@@ -138,17 +166,19 @@ struct AssetBinHeader
     std::uint32_t assetCount = 0;
     std::uint32_t materialCount = 0;
     std::uint32_t meshRefCount = 0;
-    std::uint32_t textureRefCount = 0;
+    std::uint32_t meshBlobCount = 0;
+    std::uint32_t textureBlobCount = 0;
     std::uint32_t reserved = 0;
     std::uint64_t assetRecordOffset = 0;
     std::uint64_t materialRecordOffset = 0;
     std::uint64_t meshRefRecordOffset = 0;
-    std::uint64_t textureRefRecordOffset = 0;
+    std::uint64_t meshBlobRecordOffset = 0;
+    std::uint64_t textureBlobRecordOffset = 0;
     std::uint64_t stringTableOffset = 0;
     std::uint64_t stringTableSize = 0;
     std::uint64_t fileSize = 0;
 };
-static_assert(sizeof(AssetBinHeader) == 96);
+static_assert(sizeof(AssetBinHeader) == 112);
 
 struct AssetRecord
 {

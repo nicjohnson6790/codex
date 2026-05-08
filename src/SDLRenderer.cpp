@@ -386,6 +386,7 @@ void SDLRenderer::renderFrame(
                     commandBuffer,
                     viewProjection,
                     lightingSystem,
+                    skyboxRenderer,
                     quadtreeMeshRenderer.heightmapBuffer());
             }
         }

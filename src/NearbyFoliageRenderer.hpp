@@ -21,6 +21,7 @@
 #include <vector>
 
 class LightingSystem;
+class SkyboxRenderer;
 
 class NearbyFoliageRenderer : private EngineRendererBase
 {
@@ -42,12 +43,17 @@ public:
     {
         glm::vec4 sunDirectionIntensity{ 0.0f, 1.0f, 0.0f, 1.0f };
         glm::vec4 sunColorAmbient{ 1.0f };
+        glm::vec4 shadingParams0{ 0.04f, 1.0f, 0.35f, 0.0f };
+        glm::mat4 skyRotation{ 1.0f };
+        glm::vec4 atmosphereParams{ 0.0f };
+        glm::vec4 sunDirectionTimeOfDay{ 0.0f };
     };
 
     struct alignas(16) DrawInstanceGpu
     {
         glm::vec4 pageOriginAndSlice{ 0.0f };
         glm::vec4 localOffsetAndMesh{ 0.0f };
+        glm::vec4 rotationAndReserved{ 0.0f };
     };
 
     NearbyFoliageRenderer() = default;
@@ -86,6 +92,7 @@ public:
         SDL_GPUCommandBuffer* commandBuffer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
+        const SkyboxRenderer& skyboxRenderer,
         SDL_GPUBuffer* terrainHeightmapBuffer) const;
 
     [[nodiscard]] std::uint32_t drawCount() const { return m_drawCount; }
@@ -136,7 +143,8 @@ private:
 
     struct alignas(16) MaterialGpu
     {
-        glm::uvec4 layersAndFlags{ 0u };
+        glm::uvec4 layers0{ 0u };
+        glm::uvec4 layers1{ 0u };
         glm::vec4 params{ 0.0f };
     };
 
@@ -179,7 +187,11 @@ private:
         const RuntimeAssets::LoadedTexBinView& texBin,
         const RuntimeAssets::LoadedAssetBinView& assetBin,
         const std::unordered_map<std::uint32_t, std::uint32_t>& usedBaseColorTextures,
-        const std::unordered_map<std::uint32_t, std::uint32_t>& usedNormalTextures);
+        const std::unordered_map<std::uint32_t, std::uint32_t>& usedNormalTextures,
+        const std::unordered_map<std::uint32_t, std::uint32_t>& usedRoughnessTextures,
+        const std::unordered_map<std::uint32_t, std::uint32_t>& usedSpecularTextures,
+        const std::unordered_map<std::uint32_t, std::uint32_t>& usedAoTextures,
+        const std::unordered_map<std::uint32_t, std::uint32_t>& usedSubsurfaceTextures);
     [[nodiscard]] std::vector<std::byte> resampleTextureRgba(
         const std::byte* sourcePixels,
         std::uint32_t sourceWidth,
@@ -191,6 +203,10 @@ private:
     {
         std::uint32_t baseColorLayer = 0u;
         std::uint32_t normalLayer = 0u;
+        std::uint32_t roughnessLayer = 0u;
+        std::uint32_t specularLayer = 0u;
+        std::uint32_t aoLayer = 0u;
+        std::uint32_t subsurfaceLayer = 0u;
         float alphaCutoff = 0.0f;
         std::uint32_t flags = 0u;
     };
@@ -209,7 +225,7 @@ private:
         std::vector<LoadedDrawPart> drawParts;
     };
 
-    static constexpr std::uint32_t kNearbyTreeClassCount = 3u;
+    static constexpr std::uint32_t kNearbyTreeClassCount = 16u;
     static constexpr std::uint32_t kNearbyLodCount = 3u;
     static constexpr std::uint32_t kNearbyDrawGroupCount = kNearbyTreeClassCount * kNearbyLodCount;
 
@@ -234,6 +250,10 @@ private:
     SDL_GPUSampler* m_materialSampler = nullptr;
     SDL_GPUTexture* m_baseColorTextureArray = nullptr;
     SDL_GPUTexture* m_normalTextureArray = nullptr;
+    SDL_GPUTexture* m_roughnessTextureArray = nullptr;
+    SDL_GPUTexture* m_specularTextureArray = nullptr;
+    SDL_GPUTexture* m_aoTextureArray = nullptr;
+    SDL_GPUTexture* m_subsurfaceTextureArray = nullptr;
 
     std::array<DecodedPageEntry, FoliageConfig::kNearbyDecodedPageLruCapacity> m_decodedPages{};
     std::array<PendingDecodeRequest, FoliageConfig::kNearbyDecodeDispatchBudgetPerFrame> m_pendingDecodeRequests{};
@@ -252,6 +272,7 @@ private:
     std::vector<SDL_GPUIndexedIndirectDrawCommand> m_drawCommands;
     std::array<std::array<LoadedLodAsset, kNearbyLodCount>, kNearbyTreeClassCount> m_loadedClassLods{};
     std::uint32_t m_activeDrawCommandCount = 0u;
+    std::uint32_t m_activeTreeClassCount = 0u;
     std::uint16_t m_pendingDecodeCount = 0u;
     std::uint16_t m_lastDispatchedDecodeCount = 0u;
     std::uint16_t m_pendingFenceReadbackCount = 0u;

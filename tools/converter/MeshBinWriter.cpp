@@ -1,5 +1,6 @@
 #include "MeshBinWriter.hpp"
 
+#include "../../src/assets/RuntimeAssetCompression.hpp"
 #include "../../src/assets/RuntimeAssetFormat.hpp"
 
 #include <algorithm>
@@ -38,6 +39,11 @@ struct ByteWriter
         const std::size_t byteCount = values.size_bytes();
         bytes.resize(offset + byteCount);
         std::memcpy(bytes.data() + offset, values.data(), byteCount);
+    }
+
+    void appendBytes(std::span<const std::byte> value)
+    {
+        bytes.insert(bytes.end(), value.begin(), value.end());
     }
 
     void align(std::size_t alignment)
@@ -80,6 +86,7 @@ bool WriteAllBytes(const std::filesystem::path& outputPath, const std::vector<st
 bool WriteMeshBin(
     const ImportedPack& pack,
     const std::filesystem::path& outputPath,
+    std::vector<RuntimeAssets::MeshBlobRecord>* outMeshBlobs,
     std::uint64_t* outFileSize,
     std::string* error)
 {
@@ -87,10 +94,12 @@ bool WriteMeshBin(
     std::vector<RuntimeAssets::SubmeshRecord> submeshRecords;
     std::vector<RuntimeAssets::MeshVertex> vertices;
     std::vector<std::uint32_t> indices;
+    std::vector<RuntimeAssets::MeshBlobRecord> meshBlobs;
     std::string stringTable;
 
     meshRecords.reserve(pack.meshes.size());
     submeshRecords.reserve(pack.meshes.size());
+    meshBlobs.reserve(pack.meshes.size());
 
     for (std::uint32_t meshIndex = 0; meshIndex < pack.meshes.size(); ++meshIndex)
     {
@@ -140,11 +149,46 @@ bool WriteMeshBin(
     header.submeshRecordOffset = writer.bytes.size();
     writer.appendSpan(std::span<const RuntimeAssets::SubmeshRecord>(submeshRecords));
     writer.align(16);
-    header.vertexDataOffset = writer.bytes.size();
-    writer.appendSpan(std::span<const RuntimeAssets::MeshVertex>(vertices));
-    writer.align(8);
-    header.indexDataOffset = writer.bytes.size();
-    writer.appendSpan(std::span<const std::uint32_t>(indices));
+    header.blobDataOffset = writer.bytes.size();
+    for (const ImportedMesh& mesh : pack.meshes)
+    {
+        std::vector<std::byte> compressedVertexBytes;
+        if (!RuntimeAssets::CompressBytes(
+                RuntimeAssets::CompressionType::Lz4,
+                std::as_bytes(std::span<const RuntimeAssets::MeshVertex>(mesh.vertices)),
+                &compressedVertexBytes,
+                error))
+        {
+            return false;
+        }
+
+        std::vector<std::byte> compressedIndexBytes;
+        if (!RuntimeAssets::CompressBytes(
+                RuntimeAssets::CompressionType::Lz4,
+                std::as_bytes(std::span<const std::uint32_t>(mesh.indices)),
+                &compressedIndexBytes,
+                error))
+        {
+            return false;
+        }
+
+        RuntimeAssets::MeshBlobRecord blob{};
+        blob.compressionType = static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4);
+
+        writer.align(16);
+        blob.vertexDataOffset = writer.bytes.size();
+        blob.vertexDataCompressedSize = compressedVertexBytes.size();
+        blob.vertexDataUncompressedSize = mesh.vertices.size() * sizeof(RuntimeAssets::MeshVertex);
+        writer.appendBytes(compressedVertexBytes);
+
+        writer.align(16);
+        blob.indexDataOffset = writer.bytes.size();
+        blob.indexDataCompressedSize = compressedIndexBytes.size();
+        blob.indexDataUncompressedSize = mesh.indices.size() * sizeof(std::uint32_t);
+        writer.appendBytes(compressedIndexBytes);
+
+        meshBlobs.push_back(blob);
+    }
     writer.align(8);
     header.stringTableOffset = writer.bytes.size();
     header.stringTableSize = stringTable.size();
@@ -160,6 +204,10 @@ bool WriteMeshBin(
         return false;
     }
 
+    if (outMeshBlobs != nullptr)
+    {
+        *outMeshBlobs = std::move(meshBlobs);
+    }
     *outFileSize = header.fileSize;
     return true;
 }

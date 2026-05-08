@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(TerrainSandbox LANGUAGES CXX)
+project(TerrainSandbox LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,6 +41,11 @@ FetchContent_Declare(
     URL https://github.com/g-truc/glm/archive/refs/tags/1.0.1.zip
 )
 
+FetchContent_Declare(
+    lz4
+    URL https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip
+)
+
 set(SDL_SHARED ON CACHE BOOL "" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
@@ -72,7 +77,16 @@ set(SDLIMAGE_PNG_SAVE OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(SDL3 SDL3_image imgui glm)
+FetchContent_MakeAvailable(SDL3 SDL3_image imgui glm lz4)
+
+add_library(lz4_local STATIC
+    ${lz4_SOURCE_DIR}/lib/lz4.c
+)
+
+target_include_directories(lz4_local
+    PUBLIC
+        ${lz4_SOURCE_DIR}/lib
+)
 
 add_library(imgui_backend STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -211,6 +225,7 @@ add_executable(terrain_sandbox
     src/main.cpp
     src/App.cpp
     src/AppPanels.cpp
+    src/assets/RuntimeAssetCompression.cpp
     src/assets/RuntimeAssetReader.cpp
     src/CameraManager.cpp
     src/EngineRendererBase.cpp
@@ -261,6 +276,7 @@ target_compile_definitions(terrain_sandbox
 target_link_libraries(terrain_sandbox
     PRIVATE
         imgui_backend
+        lz4_local
         SDL3::SDL3
         SDL3_image::SDL3_image
 )

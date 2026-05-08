@@ -10,6 +10,7 @@ struct NearbyDrawInstance
 {
     vec4 pageOriginAndSlice;
     vec4 localOffsetAndMesh;
+    vec4 rotationAndReserved;
 };
 
 layout(set=0, binding=0, std430) readonly buffer NearbyDrawInstanceBuffer
@@ -41,7 +42,8 @@ layout(location = 0) out vec2 fragUv0;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec3 fragTangent;
 layout(location = 3) out vec3 fragBitangent;
-layout(location = 4) flat out uint fragMaterialIndex;
+layout(location = 4) out vec3 fragViewPosition;
+layout(location = 5) flat out uint fragMaterialIndex;
 
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
@@ -81,15 +83,24 @@ void main()
     vec3 pageOrigin = instance.pageOriginAndSlice.xyz;
     uint terrainSliceIndex = uint(instance.pageOriginAndSlice.w + 0.5);
     vec2 localOffset = instance.localOffsetAndMesh.xy;
+    float rotationRadians = instance.rotationAndReserved.x;
     float terrainHeight = sampleHeightBilinear(terrainSliceIndex, localOffset / 256.0);
+    float rotationCosine = cos(rotationRadians);
+    float rotationSine = sin(rotationRadians);
+    mat2 rotationMatrix = mat2(
+        rotationCosine, -rotationSine,
+        rotationSine, rotationCosine);
+    vec2 rotatedPositionXz = rotationMatrix * inPosition.xz;
+    vec2 rotatedNormalXz = rotationMatrix * inNormal.xz;
+    vec2 rotatedTangentXz = rotationMatrix * inTangent.xz;
 
     vec3 worldPosition = vec3(
-        pageOrigin.x + localOffset.x + inPosition.x,
+        pageOrigin.x + localOffset.x + rotatedPositionXz.x,
         pageOrigin.y + terrainHeight + inPosition.y,
-        pageOrigin.z + localOffset.y + inPosition.z);
+        pageOrigin.z + localOffset.y + rotatedPositionXz.y);
 
-    vec3 tangent = normalize(inTangent.xyz);
-    vec3 normal = normalize(inNormal);
+    vec3 tangent = normalize(vec3(rotatedTangentXz.x, inTangent.y, rotatedTangentXz.y));
+    vec3 normal = normalize(vec3(rotatedNormalXz.x, inNormal.y, rotatedNormalXz.y));
     vec3 bitangent = normalize(cross(normal, tangent)) * inTangent.w;
 
     gl_Position = foliage.viewProjection * vec4(worldPosition, 1.0);
@@ -97,5 +108,6 @@ void main()
     fragNormal = normal;
     fragTangent = tangent;
     fragBitangent = bitangent;
+    fragViewPosition = worldPosition;
     fragMaterialIndex = draw.instanceOffsetAndMaterial.y;
 }

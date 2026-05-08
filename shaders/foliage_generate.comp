@@ -33,6 +33,7 @@ layout(set=1, binding=1, std430) buffer FoliageLiveCountBuffer
 
 const uint kCandidateGridResolution = 64u;
 const uint kCandidateSlotCount = kCandidateGridResolution * kCandidateGridResolution;
+const uint kTreeClassCount = 16u;
 const float kCandidateCellSizeMeters = 4.0;
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
@@ -72,11 +73,12 @@ float fractf(float value)
     return value - floor(value);
 }
 
-uint packFoliageInstance(uint candidateSlot, uint meshId, uint flags)
+uint packFoliageInstance(uint candidateSlot, uint meshId, uint rotationBits, uint flags)
 {
     return
         (candidateSlot & 0x0FFFu) |
-        ((meshId & 0xFFFFu) << 12u) |
+        ((meshId & 0x000Fu) << 12u) |
+        ((rotationBits & 0x0FFFu) << 16u) |
         ((flags & 0x0Fu) << 28u);
 }
 
@@ -125,10 +127,8 @@ void main()
         return;
     }
 
-    float heightSelector = foliageHash01(slotSeed ^ 0x68bc21ebu);
-    uint meshId =
-        heightSelector < 0.33 ? 0u :
-        (heightSelector < 0.72 ? 1u : 2u);
+    uint meshId = min(uint(floor(foliageHash01(slotSeed ^ 0x68bc21ebu) * float(kTreeClassCount))), kTreeClassCount - 1u);
+    uint rotationBits = uint(floor(foliageHash01(slotSeed ^ 0xa511e9b3u) * 4096.0)) & 0x0FFFu;
     uint liveIndex = atomicAdd(liveCountBuffer.liveCounts[jobIndex], 1u);
     if (liveIndex >= kCandidateSlotCount)
     {
@@ -136,5 +136,5 @@ void main()
     }
 
     uint outputIndex = (pageIndex * kCandidateSlotCount) + liveIndex;
-    foliagePagePoolBuffer.packedInstances[outputIndex] = packFoliageInstance(candidateSlot, meshId, 0u);
+    foliagePagePoolBuffer.packedInstances[outputIndex] = packFoliageInstance(candidateSlot, meshId, rotationBits, 0u);
 }

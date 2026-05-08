@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(pinetreepack_converter LANGUAGES CXX)
+project(pinetreepack_converter LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +19,11 @@ FetchContent_Declare(
     URL https://github.com/assimp/assimp/archive/refs/tags/v5.4.3.zip
 )
 
+FetchContent_Declare(
+    lz4
+    URL https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip
+)
+
 set(SDL_SHARED ON CACHE BOOL "" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
@@ -30,9 +35,19 @@ set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(SDL3 assimp)
+FetchContent_MakeAvailable(SDL3 assimp lz4)
+
+add_library(lz4_local STATIC
+    ${lz4_SOURCE_DIR}/lib/lz4.c
+)
+
+target_include_directories(lz4_local
+    PUBLIC
+        ${lz4_SOURCE_DIR}/lib
+)
 
 add_library(runtime_asset_reader STATIC
+    ../../src/assets/RuntimeAssetCompression.cpp
     ../../src/assets/RuntimeAssetReader.cpp
 )
 
@@ -43,6 +58,7 @@ target_include_directories(runtime_asset_reader
 
 target_link_libraries(runtime_asset_reader
     PUBLIC
+        lz4_local
         SDL3::SDL3
 )
 

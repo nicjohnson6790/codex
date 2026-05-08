@@ -3,6 +3,7 @@
 #include "AppConfig.hpp"
 #include "LightingSystem.hpp"
 #include "PerformanceCapture.hpp"
+#include "SkyboxRenderer.hpp"
 #include "assets/RuntimeAssetReader.hpp"
 
 #include <algorithm>
@@ -22,11 +23,19 @@ constexpr std::uint32_t kDecodeComputeThreadCountZ = 1u;
 constexpr float kNearbyLod0MaxDistanceMeters = 25.0f;
 constexpr float kNearbyLod1MaxDistanceMeters = 50.0f;
 constexpr float kNearbyLod2MaxDistanceMeters = 100.0f;
-constexpr std::array<const char*, 3> kNearbyRuntimeAssetNames{
-    "Pine_Sylvestris_crooked_1",
-    "Pine_Sylvestris_Hight_5",
-    "Pine_Sylvestris_Hight_2",
-};
+
+constexpr std::uint32_t kDecodedNearbyMeshIdMask = 0x0000FFFFu;
+constexpr std::uint32_t kDecodedNearbyFlagsShift = 16u;
+
+std::uint32_t decodedNearbyMeshId(std::uint32_t packedMeta)
+{
+    return packedMeta & kDecodedNearbyMeshIdMask;
+}
+
+std::uint32_t decodedNearbyFlags(std::uint32_t packedMeta)
+{
+    return packedMeta >> kDecodedNearbyFlagsShift;
+}
 
 bool containsInsensitive(std::string_view haystack, std::string_view needle)
 {
@@ -95,6 +104,26 @@ void NearbyFoliageRenderer::shutdown()
     {
         SDL_ReleaseGPUTexture(m_device, m_normalTextureArray);
         m_normalTextureArray = nullptr;
+    }
+    if (m_roughnessTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_roughnessTextureArray);
+        m_roughnessTextureArray = nullptr;
+    }
+    if (m_specularTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_specularTextureArray);
+        m_specularTextureArray = nullptr;
+    }
+    if (m_aoTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_aoTextureArray);
+        m_aoTextureArray = nullptr;
+    }
+    if (m_subsurfaceTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_subsurfaceTextureArray);
+        m_subsurfaceTextureArray = nullptr;
     }
     m_loadedMaterials.clear();
     m_materialGpuRecords.clear();
@@ -206,6 +235,7 @@ void NearbyFoliageRenderer::shutdown()
 
     resetTransientState();
     m_decodedPages.fill({});
+    m_activeTreeClassCount = 0u;
     m_runtimeAssetsLoaded = false;
 }
 
@@ -340,6 +370,10 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
     {
         return;
     }
+    if (m_activeTreeClassCount == 0u)
+    {
+        return;
+    }
 
     const DecodedPageEntry& entry = m_decodedPages[entryIndex];
     if (!entry.valid || entry.readbackPending)
@@ -382,7 +416,7 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
             const std::uint32_t candidateSlot =
                 static_cast<std::uint32_t>((candidateZ * static_cast<int>(FoliageConfig::kCandidateGridResolution)) + candidateX);
             const DecodedNearbyFoliageInstance& instance = entry.instances[candidateSlot];
-            if ((instance.flags & NearbyFoliageInstance_Resident) == 0u)
+            if ((decodedNearbyFlags(instance.packedMeta) & NearbyFoliageInstance_Resident) == 0u)
             {
                 continue;
             }
@@ -400,7 +434,7 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
                 return;
             }
 
-            const std::uint32_t meshClass = std::min(instance.meshId, 2u);
+            const std::uint32_t meshClass = std::min(decodedNearbyMeshId(instance.packedMeta), m_activeTreeClassCount - 1u);
             const std::uint32_t lodIndex =
                 distanceSquared <= (kNearbyLod0MaxDistanceMeters * kNearbyLod0MaxDistanceMeters) ? 0u :
                 (distanceSquared <= (kNearbyLod1MaxDistanceMeters * kNearbyLod1MaxDistanceMeters) ? 1u : 2u);
@@ -416,6 +450,7 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
                     instance.localZ,
                     static_cast<float>(meshClass),
                     static_cast<float>(lodIndex)),
+                .rotationAndReserved = glm::vec4(instance.rotationRadians, 0.0f, 0.0f, 0.0f),
             };
         }
     }
@@ -432,7 +467,7 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
     }
 
     std::uint32_t writeIndex = 0u;
-    for (std::uint32_t treeClass = 0; treeClass < kNearbyTreeClassCount; ++treeClass)
+    for (std::uint32_t treeClass = 0; treeClass < m_activeTreeClassCount; ++treeClass)
     {
         for (std::uint32_t lodIndex = 0; lodIndex < kNearbyLodCount; ++lodIndex)
         {
@@ -442,7 +477,7 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
             {
                 const std::uint32_t instanceClass = std::min(
                     static_cast<std::uint32_t>(m_drawInstances[drawIndex].localOffsetAndMesh.z + 0.5f),
-                    kNearbyTreeClassCount - 1u);
+                    m_activeTreeClassCount - 1u);
                 const std::uint32_t instanceLod = std::min(
                     static_cast<std::uint32_t>(m_drawInstances[drawIndex].localOffsetAndMesh.w + 0.5f),
                     kNearbyLodCount - 1u);
@@ -469,7 +504,7 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
     SDL_UploadToGPUBuffer(copyPass, &instanceSource, &instanceDestination, true);
 
     m_activeDrawCommandCount = 0u;
-    for (std::uint32_t treeClass = 0; treeClass < kNearbyTreeClassCount; ++treeClass)
+    for (std::uint32_t treeClass = 0; treeClass < m_activeTreeClassCount; ++treeClass)
     {
         for (std::uint32_t lodIndex = 0; lodIndex < kNearbyLodCount; ++lodIndex)
         {
@@ -665,6 +700,7 @@ void NearbyFoliageRenderer::render(
     SDL_GPUCommandBuffer* commandBuffer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
+    const SkyboxRenderer& skyboxRenderer,
     SDL_GPUBuffer* terrainHeightmapBuffer) const
 {
     HELLO_PROFILE_SCOPE("NearbyFoliageRenderer::Render");
@@ -678,6 +714,14 @@ void NearbyFoliageRenderer::render(
         m_activeDrawCommandCount == 0u ||
         m_baseColorTextureArray == nullptr ||
         m_normalTextureArray == nullptr ||
+        m_roughnessTextureArray == nullptr ||
+        m_specularTextureArray == nullptr ||
+        m_aoTextureArray == nullptr ||
+        m_subsurfaceTextureArray == nullptr ||
+        skyboxRenderer.cubemapTexture() == nullptr ||
+        skyboxRenderer.atmosphereLutTexture() == nullptr ||
+        skyboxRenderer.cubemapSampler() == nullptr ||
+        skyboxRenderer.atmosphereSampler() == nullptr ||
         m_drawMetadataBuffer == nullptr ||
         m_materialBuffer == nullptr)
     {
@@ -702,11 +746,17 @@ void NearbyFoliageRenderer::render(
     };
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, vertexStorageBuffers, 3);
 
-    SDL_GPUTextureSamplerBinding samplerBindings[2]{
+    SDL_GPUTextureSamplerBinding samplerBindings[8]{
         { m_baseColorTextureArray, m_materialSampler },
         { m_normalTextureArray, m_materialSampler },
+        { m_roughnessTextureArray, m_materialSampler },
+        { m_specularTextureArray, m_materialSampler },
+        { m_aoTextureArray, m_materialSampler },
+        { m_subsurfaceTextureArray, m_materialSampler },
+        { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
+        { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
     };
-    SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 2);
+    SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 8);
 
     SDL_GPUBuffer* fragmentStorageBuffers[]{
         m_materialBuffer,
@@ -717,6 +767,12 @@ void NearbyFoliageRenderer::render(
     FragmentUniforms fragmentUniforms{};
     fragmentUniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     fragmentUniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
+    fragmentUniforms.shadingParams0 = glm::vec4(0.04f, 1.0f, 0.45f, 0.0f);
+    const SkyboxRenderer::SharedSkyUniforms sharedSkyUniforms =
+        skyboxRenderer.buildSharedSkyUniforms(m_activeCameraPosition.localPosition().y, lightingSystem);
+    fragmentUniforms.skyRotation = sharedSkyUniforms.skyRotation;
+    fragmentUniforms.atmosphereParams = sharedSkyUniforms.atmosphereParams;
+    fragmentUniforms.sunDirectionTimeOfDay = sharedSkyUniforms.sunDirectionTimeOfDay;
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &fragmentUniforms, sizeof(fragmentUniforms));
 
     SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, m_activeDrawCommandCount);
@@ -780,7 +836,7 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
         SDL_GPU_SHADERSTAGE_FRAGMENT,
         1,
         1,
-        2);
+        8);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -1090,43 +1146,35 @@ void NearbyFoliageRenderer::createMaterialResources(
     const RuntimeAssets::LoadedTexBinView& texBin,
     const RuntimeAssets::LoadedAssetBinView& assetBin,
     const std::unordered_map<std::uint32_t, std::uint32_t>& usedBaseColorTextures,
-    const std::unordered_map<std::uint32_t, std::uint32_t>& usedNormalTextures)
+    const std::unordered_map<std::uint32_t, std::uint32_t>& usedNormalTextures,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& usedRoughnessTextures,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& usedSpecularTextures,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& usedAoTextures,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& usedSubsurfaceTextures)
 {
-    std::uint32_t baseColorWidth = 1u;
-    std::uint32_t baseColorHeight = 1u;
-    for (const auto& [textureIndex, layerIndex] : usedBaseColorTextures)
-    {
-        if (textureIndex == std::numeric_limits<std::uint32_t>::max())
+    auto findMaxExtent = [&](const std::unordered_map<std::uint32_t, std::uint32_t>& textureToLayer) {
+        glm::uvec2 extent(1u, 1u);
+        for (const auto& [textureIndex, layerIndex] : textureToLayer)
         {
-            continue;
+            if (textureIndex == std::numeric_limits<std::uint32_t>::max())
+            {
+                continue;
+            }
+            const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
+            extent.x = std::max(extent.x, record.width);
+            extent.y = std::max(extent.y, record.height);
+            (void)layerIndex;
         }
-        const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
-        baseColorWidth = std::max(baseColorWidth, record.width);
-        baseColorHeight = std::max(baseColorHeight, record.height);
-        (void)layerIndex;
-    }
+        return extent;
+    };
 
-    std::uint32_t normalWidth = 1u;
-    std::uint32_t normalHeight = 1u;
-    for (const auto& [textureIndex, layerIndex] : usedNormalTextures)
-    {
-        if (textureIndex == std::numeric_limits<std::uint32_t>::max())
-        {
-            continue;
-        }
-        const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
-        normalWidth = std::max(normalWidth, record.width);
-        normalHeight = std::max(normalHeight, record.height);
-        (void)layerIndex;
-    }
-
-    auto createArray = [&](SDL_GPUTextureFormat format, std::uint32_t width, std::uint32_t height, std::uint32_t layers) -> SDL_GPUTexture* {
+    auto createArray = [&](SDL_GPUTextureFormat format, const glm::uvec2& extent, std::uint32_t layers) -> SDL_GPUTexture* {
         SDL_GPUTextureCreateInfo textureInfo{};
         textureInfo.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
         textureInfo.format = format;
         textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-        textureInfo.width = width;
-        textureInfo.height = height;
+        textureInfo.width = extent.x;
+        textureInfo.height = extent.y;
         textureInfo.layer_count_or_depth = layers;
         textureInfo.num_levels = 1;
         textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -1138,24 +1186,11 @@ void NearbyFoliageRenderer::createMaterialResources(
         return texture;
     };
 
-    m_baseColorTextureArray = createArray(
-        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
-        baseColorWidth,
-        baseColorHeight,
-        static_cast<std::uint32_t>(usedBaseColorTextures.size()));
-    m_normalTextureArray = createArray(
-        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-        normalWidth,
-        normalHeight,
-        static_cast<std::uint32_t>(usedNormalTextures.size()));
-
     auto uploadArray = [&](SDL_GPUTexture* texture,
-        SDL_GPUTextureFormat format,
-        std::uint32_t width,
-        std::uint32_t height,
+        const glm::uvec2& extent,
         const std::unordered_map<std::uint32_t, std::uint32_t>& textureToLayer,
         const std::array<std::byte, 4>& defaultPixel) {
-        const std::size_t layerSize = static_cast<std::size_t>(width) * height * 4u;
+        const std::size_t layerSize = static_cast<std::size_t>(extent.x) * extent.y * 4u;
         SDL_GPUTransferBufferCreateInfo transferInfo{};
         transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
         transferInfo.size = static_cast<Uint32>(layerSize * textureToLayer.size());
@@ -1172,7 +1207,7 @@ void NearbyFoliageRenderer::createMaterialResources(
             if (textureIndex == std::numeric_limits<std::uint32_t>::max())
             {
                 layerPixels.assign(layerSize, std::byte{});
-                for (std::size_t pixel = 0; pixel < width * height; ++pixel)
+                for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(extent.x) * extent.y; ++pixel)
                 {
                     std::memcpy(layerPixels.data() + (pixel * 4u), defaultPixel.data(), 4u);
                 }
@@ -1180,10 +1215,8 @@ void NearbyFoliageRenderer::createMaterialResources(
             else
             {
                 const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
-                const std::byte* sourcePixels =
-                    reinterpret_cast<const std::byte*>(texBin.bytes.data() + record.dataOffset);
-                layerPixels = resampleTextureRgba(sourcePixels, record.width, record.height, width, height);
-                (void)format;
+                const std::byte* sourcePixels = texBin.pixelData.data() + record.dataOffset;
+                layerPixels = resampleTextureRgba(sourcePixels, record.width, record.height, extent.x, extent.y);
             }
 
             std::memcpy(mapped + (static_cast<std::size_t>(layerIndex) * layerSize), layerPixels.data(), layerSize);
@@ -1209,14 +1242,14 @@ void NearbyFoliageRenderer::createMaterialResources(
             SDL_GPUTextureTransferInfo source{};
             source.transfer_buffer = transferBuffer;
             source.offset = static_cast<Uint32>(static_cast<std::size_t>(layerIndex) * layerSize);
-            source.pixels_per_row = width;
-            source.rows_per_layer = height;
+            source.pixels_per_row = extent.x;
+            source.rows_per_layer = extent.y;
 
             SDL_GPUTextureRegion destination{};
             destination.texture = texture;
             destination.layer = layerIndex;
-            destination.w = width;
-            destination.h = height;
+            destination.w = extent.x;
+            destination.h = extent.y;
             destination.d = 1;
             SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
             (void)textureIndex;
@@ -1231,20 +1264,68 @@ void NearbyFoliageRenderer::createMaterialResources(
         SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
     };
 
+    const glm::uvec2 baseColorExtent = findMaxExtent(usedBaseColorTextures);
+    const glm::uvec2 normalExtent = findMaxExtent(usedNormalTextures);
+    const glm::uvec2 roughnessExtent = findMaxExtent(usedRoughnessTextures);
+    const glm::uvec2 specularExtent = findMaxExtent(usedSpecularTextures);
+    const glm::uvec2 aoExtent = findMaxExtent(usedAoTextures);
+    const glm::uvec2 subsurfaceExtent = findMaxExtent(usedSubsurfaceTextures);
+
+    m_baseColorTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
+        baseColorExtent,
+        static_cast<std::uint32_t>(usedBaseColorTextures.size()));
+    m_normalTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        normalExtent,
+        static_cast<std::uint32_t>(usedNormalTextures.size()));
+    m_roughnessTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        roughnessExtent,
+        static_cast<std::uint32_t>(usedRoughnessTextures.size()));
+    m_specularTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        specularExtent,
+        static_cast<std::uint32_t>(usedSpecularTextures.size()));
+    m_aoTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        aoExtent,
+        static_cast<std::uint32_t>(usedAoTextures.size()));
+    m_subsurfaceTextureArray = createArray(
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        subsurfaceExtent,
+        static_cast<std::uint32_t>(usedSubsurfaceTextures.size()));
+
     uploadArray(
         m_baseColorTextureArray,
-        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
-        baseColorWidth,
-        baseColorHeight,
+        baseColorExtent,
         usedBaseColorTextures,
         { std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF } });
     uploadArray(
         m_normalTextureArray,
-        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-        normalWidth,
-        normalHeight,
+        normalExtent,
         usedNormalTextures,
         { std::byte{ 0x80 }, std::byte{ 0x80 }, std::byte{ 0xFF }, std::byte{ 0xFF } });
+    uploadArray(
+        m_roughnessTextureArray,
+        roughnessExtent,
+        usedRoughnessTextures,
+        { std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF } });
+    uploadArray(
+        m_specularTextureArray,
+        specularExtent,
+        usedSpecularTextures,
+        { std::byte{ 0x0A }, std::byte{ 0x0A }, std::byte{ 0x0A }, std::byte{ 0xFF } });
+    uploadArray(
+        m_aoTextureArray,
+        aoExtent,
+        usedAoTextures,
+        { std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF }, std::byte{ 0xFF } });
+    uploadArray(
+        m_subsurfaceTextureArray,
+        subsurfaceExtent,
+        usedSubsurfaceTextures,
+        { std::byte{ 0x00 }, std::byte{ 0x00 }, std::byte{ 0x00 }, std::byte{ 0xFF } });
 
     m_materialGpuRecords.assign(assetBin.materials.size(), {});
     for (std::uint32_t materialIndex = 0; materialIndex < assetBin.materials.size(); ++materialIndex)
@@ -1256,9 +1337,26 @@ void NearbyFoliageRenderer::createMaterialResources(
         const std::uint32_t normalLayer = usedNormalTextures.contains(material.normalTextureIndex)
             ? usedNormalTextures.at(material.normalTextureIndex)
             : 0u;
-        m_materialGpuRecords[materialIndex].layersAndFlags = glm::uvec4(
+        const std::uint32_t roughnessLayer = usedRoughnessTextures.contains(material.roughnessTextureIndex)
+            ? usedRoughnessTextures.at(material.roughnessTextureIndex)
+            : 0u;
+        const std::uint32_t specularLayer = usedSpecularTextures.contains(material.specularTextureIndex)
+            ? usedSpecularTextures.at(material.specularTextureIndex)
+            : 0u;
+        const std::uint32_t aoLayer = usedAoTextures.contains(material.aoTextureIndex)
+            ? usedAoTextures.at(material.aoTextureIndex)
+            : 0u;
+        const std::uint32_t subsurfaceLayer = usedSubsurfaceTextures.contains(material.subsurfaceTextureIndex)
+            ? usedSubsurfaceTextures.at(material.subsurfaceTextureIndex)
+            : 0u;
+        m_materialGpuRecords[materialIndex].layers0 = glm::uvec4(
             baseLayer,
             normalLayer,
+            roughnessLayer,
+            specularLayer);
+        m_materialGpuRecords[materialIndex].layers1 = glm::uvec4(
+            aoLayer,
+            subsurfaceLayer,
             material.flags,
             0u);
         m_materialGpuRecords[materialIndex].params = glm::vec4(material.alphaCutoff, 0.0f, 0.0f, 0.0f);
@@ -1316,9 +1414,9 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
     RuntimeAssets::LoadedAssetBinView assetBin;
     std::string error;
     const std::filesystem::path assetRoot = TERRAIN_SANDBOX_ASSET_DIR;
-    if (!RuntimeAssets::LoadMeshBinFromSDL((assetRoot / "pinetreepack.meshbin").string().c_str(), &meshBin, &error) ||
-        !RuntimeAssets::LoadTexBinFromSDL((assetRoot / "pinetreepack.texbin").string().c_str(), &texBin, &error) ||
-        !RuntimeAssets::LoadAssetBinFromSDL((assetRoot / "pinetreepack.assetbin").string().c_str(), &assetBin, &error))
+    if (!RuntimeAssets::LoadAssetBinFromSDL((assetRoot / "pinetreepack.assetbin").string().c_str(), &assetBin, &error) ||
+        !RuntimeAssets::LoadMeshBinFromSDL((assetRoot / "pinetreepack.meshbin").string().c_str(), assetBin, &meshBin, &error) ||
+        !RuntimeAssets::LoadTexBinFromSDL((assetRoot / "pinetreepack.texbin").string().c_str(), assetBin, &texBin, &error))
     {
         throw std::runtime_error("Failed to load nearby foliage runtime assets: " + error);
     }
@@ -1343,36 +1441,62 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
     m_loadedMaterials.assign(assetBin.materials.size(), {});
     std::unordered_map<std::uint32_t, std::uint32_t> usedBaseColorTextures;
     std::unordered_map<std::uint32_t, std::uint32_t> usedNormalTextures;
+    std::unordered_map<std::uint32_t, std::uint32_t> usedRoughnessTextures;
+    std::unordered_map<std::uint32_t, std::uint32_t> usedSpecularTextures;
+    std::unordered_map<std::uint32_t, std::uint32_t> usedAoTextures;
+    std::unordered_map<std::uint32_t, std::uint32_t> usedSubsurfaceTextures;
     usedBaseColorTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
     usedNormalTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
+    usedRoughnessTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
+    usedSpecularTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
+    usedAoTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
+    usedSubsurfaceTextures.emplace(std::numeric_limits<std::uint32_t>::max(), 0u);
 
-    for (std::uint32_t treeClass = 0; treeClass < kNearbyRuntimeAssetNames.size(); ++treeClass)
+    std::vector<std::uint32_t> selectedAssetIndices;
+    selectedAssetIndices.reserve(assetBin.assets.size());
+    for (std::uint32_t assetIndex = 0; assetIndex < assetBin.assets.size(); ++assetIndex)
     {
-        const char* desiredAssetName = kNearbyRuntimeAssetNames[treeClass];
-        const RuntimeAssets::AssetRecord* assetRecord = nullptr;
-        for (const RuntimeAssets::AssetRecord& candidate : assetBin.assets)
+        const RuntimeAssets::AssetRecord& assetRecord = assetBin.assets[assetIndex];
+        const char* assetName = assetBin.stringAt(assetRecord.nameOffset);
+        if (!containsInsensitive(assetName, "pine"))
         {
-            if (std::strcmp(assetBin.stringAt(candidate.nameOffset), desiredAssetName) == 0)
-            {
-                assetRecord = &candidate;
-                break;
-            }
+            continue;
         }
+        selectedAssetIndices.push_back(assetIndex);
+    }
 
-        if (assetRecord == nullptr)
-        {
-            throw std::runtime_error(std::string("Nearby foliage asset was not found in assetbin: ") + desiredAssetName);
-        }
+    std::sort(
+        selectedAssetIndices.begin(),
+        selectedAssetIndices.end(),
+        [&](std::uint32_t lhs, std::uint32_t rhs) {
+            return std::strcmp(
+                assetBin.stringAt(assetBin.assets[lhs].nameOffset),
+                assetBin.stringAt(assetBin.assets[rhs].nameOffset)) < 0;
+        });
 
+    if (selectedAssetIndices.empty())
+    {
+        throw std::runtime_error("Nearby foliage runtime pack did not contain any pine assets.");
+    }
+    if (selectedAssetIndices.size() > kNearbyTreeClassCount)
+    {
+        throw std::runtime_error("Nearby foliage runtime pack contains more tree assets than the packed meshId budget allows.");
+    }
+    m_activeTreeClassCount = static_cast<std::uint32_t>(selectedAssetIndices.size());
+
+    for (std::uint32_t treeClass = 0; treeClass < m_activeTreeClassCount; ++treeClass)
+    {
+        const RuntimeAssets::AssetRecord& assetRecord = assetBin.assets[selectedAssetIndices[treeClass]];
+        const char* desiredAssetName = assetBin.stringAt(assetRecord.nameOffset);
         for (LoadedLodAsset& lod : m_loadedClassLods[treeClass])
         {
             lod.name = desiredAssetName;
             lod.drawParts.clear();
         }
 
-        for (std::uint32_t meshRefOffset = 0; meshRefOffset < assetRecord->meshRefCount; ++meshRefOffset)
+        for (std::uint32_t meshRefOffset = 0; meshRefOffset < assetRecord.meshRefCount; ++meshRefOffset)
         {
-            const RuntimeAssets::MeshRefRecord& meshRef = assetBin.meshRefs[assetRecord->firstMeshRef + meshRefOffset];
+            const RuntimeAssets::MeshRefRecord& meshRef = assetBin.meshRefs[assetRecord.firstMeshRef + meshRefOffset];
             if (meshRef.lodIndex >= kNearbyLodCount)
             {
                 continue;
@@ -1402,6 +1526,10 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
                 LoadedMaterialGpu& gpuMaterial = m_loadedMaterials[submesh.materialIndex];
                 if (gpuMaterial.baseColorLayer == 0u &&
                     gpuMaterial.normalLayer == 0u &&
+                    gpuMaterial.roughnessLayer == 0u &&
+                    gpuMaterial.specularLayer == 0u &&
+                    gpuMaterial.aoLayer == 0u &&
+                    gpuMaterial.subsurfaceLayer == 0u &&
                     gpuMaterial.alphaCutoff == 0.0f &&
                     gpuMaterial.flags == 0u)
                 {
@@ -1417,8 +1545,36 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
                             material.normalTextureIndex,
                             static_cast<std::uint32_t>(usedNormalTextures.size()));
                     }
+                    if (!usedRoughnessTextures.contains(material.roughnessTextureIndex))
+                    {
+                        usedRoughnessTextures.emplace(
+                            material.roughnessTextureIndex,
+                            static_cast<std::uint32_t>(usedRoughnessTextures.size()));
+                    }
+                    if (!usedSpecularTextures.contains(material.specularTextureIndex))
+                    {
+                        usedSpecularTextures.emplace(
+                            material.specularTextureIndex,
+                            static_cast<std::uint32_t>(usedSpecularTextures.size()));
+                    }
+                    if (!usedAoTextures.contains(material.aoTextureIndex))
+                    {
+                        usedAoTextures.emplace(
+                            material.aoTextureIndex,
+                            static_cast<std::uint32_t>(usedAoTextures.size()));
+                    }
+                    if (!usedSubsurfaceTextures.contains(material.subsurfaceTextureIndex))
+                    {
+                        usedSubsurfaceTextures.emplace(
+                            material.subsurfaceTextureIndex,
+                            static_cast<std::uint32_t>(usedSubsurfaceTextures.size()));
+                    }
                     gpuMaterial.baseColorLayer = usedBaseColorTextures.at(material.baseColorTextureIndex);
                     gpuMaterial.normalLayer = usedNormalTextures.at(material.normalTextureIndex);
+                    gpuMaterial.roughnessLayer = usedRoughnessTextures.at(material.roughnessTextureIndex);
+                    gpuMaterial.specularLayer = usedSpecularTextures.at(material.specularTextureIndex);
+                    gpuMaterial.aoLayer = usedAoTextures.at(material.aoTextureIndex);
+                    gpuMaterial.subsurfaceLayer = usedSubsurfaceTextures.at(material.subsurfaceTextureIndex);
                     gpuMaterial.alphaCutoff = material.alphaCutoff;
                     gpuMaterial.flags = material.flags;
                 }
@@ -1443,7 +1599,15 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
         }
     }
 
-    createMaterialResources(texBin, assetBin, usedBaseColorTextures, usedNormalTextures);
+    createMaterialResources(
+        texBin,
+        assetBin,
+        usedBaseColorTextures,
+        usedNormalTextures,
+        usedRoughnessTextures,
+        usedSpecularTextures,
+        usedAoTextures,
+        usedSubsurfaceTextures);
     m_runtimeAssetsLoaded = true;
 }
 

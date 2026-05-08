@@ -75,6 +75,8 @@ bool WriteAllBytes(const std::filesystem::path& outputPath, const std::vector<st
 
 bool WriteAssetBin(
     const ImportedPack& pack,
+    std::span<const RuntimeAssets::MeshBlobRecord> meshBlobs,
+    std::span<const RuntimeAssets::TextureBlobRecord> textureBlobs,
     const std::string& packName,
     const std::filesystem::path& outputPath,
     std::uint64_t* outFileSize,
@@ -83,18 +85,22 @@ bool WriteAssetBin(
     std::vector<RuntimeAssets::AssetRecord> assetRecords;
     std::vector<RuntimeAssets::MaterialRecord> materialRecords;
     std::vector<RuntimeAssets::MeshRefRecord> meshRefs;
-    std::vector<std::uint32_t> textureRefs;
     std::string stringTable;
+
+    if (meshBlobs.size() != pack.meshes.size())
+    {
+        *error = "mesh blob manifest count does not match mesh count";
+        return false;
+    }
+    if (textureBlobs.size() != pack.textures.size())
+    {
+        *error = "texture blob manifest count does not match texture count";
+        return false;
+    }
 
     assetRecords.reserve(pack.assets.size());
     materialRecords.reserve(pack.materials.size());
     meshRefs.reserve(pack.meshes.size());
-    textureRefs.reserve(pack.textures.size());
-
-    for (std::uint32_t textureIndex = 0; textureIndex < pack.textures.size(); ++textureIndex)
-    {
-        textureRefs.push_back(textureIndex);
-    }
 
     for (const ImportedMaterial& material : pack.materials)
     {
@@ -134,7 +140,8 @@ bool WriteAssetBin(
     header.assetCount = static_cast<std::uint32_t>(assetRecords.size());
     header.materialCount = static_cast<std::uint32_t>(materialRecords.size());
     header.meshRefCount = static_cast<std::uint32_t>(meshRefs.size());
-    header.textureRefCount = static_cast<std::uint32_t>(textureRefs.size());
+    header.meshBlobCount = static_cast<std::uint32_t>(meshBlobs.size());
+    header.textureBlobCount = static_cast<std::uint32_t>(textureBlobs.size());
     header.meshBinPathOffset = AppendString(packName + ".meshbin", &stringTable);
     header.texBinPathOffset = AppendString(packName + ".texbin", &stringTable);
 
@@ -150,8 +157,11 @@ bool WriteAssetBin(
     header.meshRefRecordOffset = writer.bytes.size();
     writer.appendSpan(std::span<const RuntimeAssets::MeshRefRecord>(meshRefs));
     writer.align(8);
-    header.textureRefRecordOffset = writer.bytes.size();
-    writer.appendSpan(std::span<const std::uint32_t>(textureRefs));
+    header.meshBlobRecordOffset = writer.bytes.size();
+    writer.appendSpan(meshBlobs);
+    writer.align(8);
+    header.textureBlobRecordOffset = writer.bytes.size();
+    writer.appendSpan(textureBlobs);
     writer.align(8);
     header.stringTableOffset = writer.bytes.size();
     header.stringTableSize = stringTable.size();

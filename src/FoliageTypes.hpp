@@ -27,7 +27,7 @@ inline constexpr std::uint16_t kNearbyDecodeDispatchBudgetPerFrame = 16u;
 inline constexpr std::uint16_t kNearbyReadbackSlotCount = 16u;
 inline constexpr float kNearbyDefaultRadiusMeters = 100.0f;
 inline constexpr float kNearbyDecodeRangePaddingMeters = 4.0f;
-inline constexpr std::uint32_t kNearbyDecodedInstanceLayoutVersion = 1u;
+inline constexpr std::uint32_t kNearbyDecodedInstanceLayoutVersion = 2u;
 
 inline constexpr std::uint32_t kCanopyNodeSizeMeters = 2048u;
 inline constexpr std::uint32_t kCanopyCellsPerSide = kCanopyNodeSizeMeters / kPageSizeMeters;
@@ -90,8 +90,8 @@ struct DecodedNearbyFoliageInstance
 {
     float localX = 0.0f;
     float localZ = 0.0f;
-    std::uint32_t meshId = 0u;
-    std::uint32_t flags = 0u;
+    float rotationRadians = 0.0f;
+    std::uint32_t packedMeta = 0u;
 };
 
 struct FoliageCanopyResidentCellEntry
@@ -127,10 +127,12 @@ struct FoliageCanopyDrawReference
 [[nodiscard]] inline FoliagePackedInstance packFoliageInstance(
     std::uint16_t candidateSlot,
     std::uint16_t meshId,
+    std::uint16_t rotationBits,
     std::uint8_t flags = 0u)
 {
     return
         static_cast<FoliagePackedInstance>(candidateSlot & 0x0FFFu) |
-        (static_cast<FoliagePackedInstance>(meshId & 0xFFFFu) << 12u) |
+        (static_cast<FoliagePackedInstance>(meshId & 0x000Fu) << 12u) |
+        (static_cast<FoliagePackedInstance>(rotationBits & 0x0FFFu) << 16u) |
         (static_cast<FoliagePackedInstance>(flags & 0x0Fu) << 28u);
 }

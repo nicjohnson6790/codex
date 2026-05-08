@@ -61,6 +61,24 @@ bool ValidateCrossReferences(
     const RuntimeAssets::LoadedAssetBinView& assetBin,
     std::string* error)
 {
+    if (assetBin.meshBlobs.size() != meshBin.meshes.size())
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin mesh blob count does not match meshbin mesh count";
+        }
+        return false;
+    }
+
+    if (assetBin.textureBlobs.size() != texBin.textures.size())
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin texture blob count does not match texbin texture count";
+        }
+        return false;
+    }
+
     for (const RuntimeAssets::MeshRefRecord& meshRef : assetBin.meshRefs)
     {
         if (meshRef.meshIndex >= meshBin.meshes.size())
@@ -137,9 +155,11 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     std::uint64_t meshBinSize = 0;
     std::uint64_t texBinSize = 0;
     std::uint64_t assetBinSize = 0;
-    if (!WriteMeshBin(pack, meshBinPath, &meshBinSize, error) ||
-        !WriteTexBin(pack, texBinPath, &texBinSize, error) ||
-        !WriteAssetBin(pack, config.packName, assetBinPath, &assetBinSize, error))
+    std::vector<RuntimeAssets::MeshBlobRecord> meshBlobs;
+    std::vector<RuntimeAssets::TextureBlobRecord> textureBlobs;
+    if (!WriteMeshBin(pack, meshBinPath, &meshBlobs, &meshBinSize, error) ||
+        !WriteTexBin(pack, texBinPath, &textureBlobs, &texBinSize, error) ||
+        !WriteAssetBin(pack, meshBlobs, textureBlobs, config.packName, assetBinPath, &assetBinSize, error))
     {
         return false;
     }
@@ -147,9 +167,9 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     RuntimeAssets::LoadedMeshBinView loadedMesh;
     RuntimeAssets::LoadedTexBinView loadedTex;
     RuntimeAssets::LoadedAssetBinView loadedAsset;
-    if (!RuntimeAssets::LoadMeshBinFromSDL(meshBinPath.string().c_str(), &loadedMesh, error) ||
-        !RuntimeAssets::LoadTexBinFromSDL(texBinPath.string().c_str(), &loadedTex, error) ||
-        !RuntimeAssets::LoadAssetBinFromSDL(assetBinPath.string().c_str(), &loadedAsset, error))
+    if (!RuntimeAssets::LoadAssetBinFromSDL(assetBinPath.string().c_str(), &loadedAsset, error) ||
+        !RuntimeAssets::LoadMeshBinFromSDL(meshBinPath.string().c_str(), loadedAsset, &loadedMesh, error) ||
+        !RuntimeAssets::LoadTexBinFromSDL(texBinPath.string().c_str(), loadedAsset, &loadedTex, error))
     {
         return false;
     }

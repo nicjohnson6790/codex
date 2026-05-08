@@ -12,8 +12,8 @@ struct DecodeRequest
 struct DecodedNearbyInstance
 {
     vec2 localOffset;
-    uint meshId;
-    uint flags;
+    float rotationRadians;
+    uint packedMeta;
 };
 
 layout(set=0, binding=0, std430) readonly buffer DecodeRequestBuffer
@@ -35,6 +35,7 @@ const uint kCandidateGridResolution = 64u;
 const uint kCandidateSlotCount = kCandidateGridResolution * kCandidateGridResolution;
 const float kCandidateCellSizeMeters = 4.0;
 const uint kResidentFlag = 1u;
+const float kTau = 6.28318530718;
 
 void main()
 {
@@ -58,7 +59,8 @@ void main()
     uint packedInstance =
         foliagePagePoolBuffer.packedInstances[(sourcePageIndex * kCandidateSlotCount) + liveIndex];
     uint candidateSlot = packedInstance & 0x0FFFu;
-    uint meshId = (packedInstance >> 12u) & 0xFFFFu;
+    uint meshId = (packedInstance >> 12u) & 0x000Fu;
+    uint rotationBits = (packedInstance >> 16u) & 0x0FFFu;
     uint candidateX = candidateSlot & 63u;
     uint candidateZ = candidateSlot >> 6u;
     vec2 jitter = foliageJitterOffset(pageSeed ^ candidateSlot);
@@ -67,9 +69,10 @@ void main()
             (float(candidateX) + 0.5) * kCandidateCellSizeMeters,
             (float(candidateZ) + 0.5) * kCandidateCellSizeMeters) +
         jitter;
+    float rotationRadians = (float(rotationBits) / 4096.0) * kTau;
 
     uint outputIndex = (outputPageIndex * kCandidateSlotCount) + candidateSlot;
     decodedPageBuffer.decodedInstances[outputIndex].localOffset = localOffset;
-    decodedPageBuffer.decodedInstances[outputIndex].meshId = meshId;
-    decodedPageBuffer.decodedInstances[outputIndex].flags = kResidentFlag;
+    decodedPageBuffer.decodedInstances[outputIndex].rotationRadians = rotationRadians;
+    decodedPageBuffer.decodedInstances[outputIndex].packedMeta = meshId | (kResidentFlag << 16u);
 }
