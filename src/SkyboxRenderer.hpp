@@ -3,6 +3,7 @@
 #include "AppConfig.hpp"
 #include "EngineRendererBase.hpp"
 #include "LightingSystem.hpp"
+#include "assets/RuntimeAssetReader.hpp"
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
@@ -87,8 +88,7 @@ public:
         SDL_GPUDevice* device,
         SDL_GPUTextureFormat colorFormat,
         SDL_GPUTextureFormat depthFormat,
-        const std::filesystem::path& shaderDirectory,
-        const std::filesystem::path& resourceDirectory
+        const std::filesystem::path& shaderDirectory
     );
     void shutdown();
 
@@ -115,7 +115,7 @@ public:
 private:
     void createPipeline(const std::filesystem::path& shaderDirectory);
     void createStaticVertexResources();
-    void createCubemapTexture(const std::filesystem::path& resourceDirectory);
+    void createCubemapTexture();
     void createAtmosphereLutTexture();
     [[nodiscard]] std::array<std::uint8_t, kAtmosphereLutResolution * kAtmosphereLutResolution * kAtmosphereLutResolution * 4> buildAtmosphereLut() const;
 

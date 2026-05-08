@@ -6,6 +6,8 @@
 #include "SkyboxRenderer.hpp"
 #include "assets/RuntimeAssetReader.hpp"
 
+#include <SDL3/SDL_filesystem.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -63,6 +65,18 @@ SDL_GPUTextureFormat textureFormatFromRuntimeFormat(RuntimeAssets::TextureFormat
     default:
         return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     }
+}
+
+std::filesystem::path executableRelativePath(const std::filesystem::path& relativePath)
+{
+    const char* basePath = SDL_GetBasePath();
+    if (basePath == nullptr)
+    {
+        throw std::runtime_error(std::string("Failed to resolve executable base path: ") + SDL_GetError());
+    }
+
+    const std::filesystem::path resolvedPath = std::filesystem::path(basePath) / relativePath;
+    return resolvedPath;
 }
 }
 
@@ -1413,7 +1427,7 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
     RuntimeAssets::LoadedTexBinView texBin;
     RuntimeAssets::LoadedAssetBinView assetBin;
     std::string error;
-    const std::filesystem::path assetRoot = TERRAIN_SANDBOX_ASSET_DIR;
+    const std::filesystem::path assetRoot = executableRelativePath(TERRAIN_SANDBOX_ASSET_DIR);
     if (!RuntimeAssets::LoadAssetBinFromSDL((assetRoot / "pinetreepack.assetbin").string().c_str(), &assetBin, &error) ||
         !RuntimeAssets::LoadMeshBinFromSDL((assetRoot / "pinetreepack.meshbin").string().c_str(), assetBin, &meshBin, &error) ||
         !RuntimeAssets::LoadTexBinFromSDL((assetRoot / "pinetreepack.texbin").string().c_str(), assetBin, &texBin, &error))

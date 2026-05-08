@@ -15,21 +15,38 @@ std::filesystem::path repoRoot()
     return std::filesystem::path(CONVERTER_REPO_ROOT);
 }
 
+void ApplyPackDefaults(std::string_view packName, ConverterConfig* outConfig)
+{
+    outConfig->packName = std::string(packName);
+    outConfig->outputRoot = repoRoot() / "assets" / "runtime";
+
+    if (packName == "skybox")
+    {
+        outConfig->packKind = ConverterConfig::PackKind::Skybox;
+        outConfig->sourceRoot = repoRoot() / "assets" / "source" / "skybox";
+        outConfig->fbxRoot.clear();
+        outConfig->textureRoot = outConfig->sourceRoot / "tex";
+        return;
+    }
+
+    outConfig->packKind = ConverterConfig::PackKind::PineTree;
+    outConfig->sourceRoot = repoRoot() / "assets" / "source" / outConfig->packName;
+    outConfig->fbxRoot = outConfig->sourceRoot / "fbx";
+    outConfig->textureRoot = outConfig->sourceRoot / "tex";
+}
+
 void PrintUsage()
 {
     std::cout
         << "Usage:\n"
         << "  converter.exe pinetreepack\n"
+        << "  converter.exe skybox\n"
         << "  converter.exe --source <path> --out <path> --name <pack>\n";
 }
 
 bool ParseArguments(int argc, char** argv, ConverterConfig* outConfig, std::string* error)
 {
-    outConfig->packName = "pinetreepack";
-    outConfig->sourceRoot = repoRoot() / "assets" / "source" / "pinetreepack";
-    outConfig->outputRoot = repoRoot() / "assets" / "runtime";
-    outConfig->fbxRoot = outConfig->sourceRoot / "fbx";
-    outConfig->textureRoot = outConfig->sourceRoot / "tex";
+    ApplyPackDefaults("pinetreepack", outConfig);
 
     for (int index = 1; index < argc; ++index)
     {
@@ -61,7 +78,7 @@ bool ParseArguments(int argc, char** argv, ConverterConfig* outConfig, std::stri
                 *error = "--name requires a value";
                 return false;
             }
-            outConfig->packName = argv[++index];
+            ApplyPackDefaults(argv[++index], outConfig);
         }
         else if (arg == "--help" || arg == "-h")
         {
@@ -70,11 +87,7 @@ bool ParseArguments(int argc, char** argv, ConverterConfig* outConfig, std::stri
         }
         else if (!arg.empty() && arg[0] != '-')
         {
-            outConfig->packName = std::string(arg);
-            outConfig->sourceRoot = repoRoot() / "assets" / "source" / outConfig->packName;
-            outConfig->outputRoot = repoRoot() / "assets" / "runtime";
-            outConfig->fbxRoot = outConfig->sourceRoot / "fbx";
-            outConfig->textureRoot = outConfig->sourceRoot / "tex";
+            ApplyPackDefaults(arg, outConfig);
         }
         else
         {

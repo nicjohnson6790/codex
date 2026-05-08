@@ -2,6 +2,7 @@
 
 #include "AppConfig.hpp"
 #include "FoliageTypes.hpp"
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_gpu.h>
 
 #include <imgui.h>
@@ -15,6 +16,20 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+
+namespace
+{
+std::filesystem::path executableRelativePath(const std::filesystem::path& relativePath)
+{
+    const char* basePath = SDL_GetBasePath();
+    if (basePath == nullptr)
+    {
+        throw std::runtime_error(std::string("Failed to resolve executable base path: ") + SDL_GetError());
+    }
+
+    return std::filesystem::path(basePath) / relativePath;
+}
+}
 
 App::App(const Options& options)
     : m_options(options)
@@ -170,7 +185,7 @@ void App::initialize()
     m_renderer.initialize(m_window);
     logStartup("SDL GPU renderer initialized");
 
-    const std::filesystem::path shaderDirectory = TERRAIN_SANDBOX_SHADER_DIR;
+    const std::filesystem::path shaderDirectory = executableRelativePath(TERRAIN_SANDBOX_SHADER_DIR);
     logStartup("init triangle renderer");
     m_triangleRenderer.initialize(
         m_renderer.device(),
@@ -234,8 +249,7 @@ void App::initialize()
         m_renderer.device(),
         m_renderer.swapchainFormat(),
         m_renderer.viewportDepthFormat(),
-        shaderDirectory,
-        std::filesystem::path(TERRAIN_SANDBOX_RESOURCE_DIR)
+        shaderDirectory
     );
 
     logStartup("create ImGui context");

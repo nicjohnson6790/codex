@@ -1,8 +1,9 @@
 #include "SkyboxRenderer.hpp"
 
 #include "AppConfig.hpp"
+#include "assets/RuntimeAssetReader.hpp"
 
-#include <SDL3_image/SDL_image.h>
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_stdinc.h>
 #include <glm/common.hpp>
 #include <glm/ext/scalar_constants.hpp>
@@ -26,38 +27,6 @@ constexpr std::array<SkyboxRenderer::Vertex, 6> kFullscreenQuadVertices{{
     {{  1.0f,  1.0f }},
     {{ -1.0f,  1.0f }},
 }};
-
-struct DecodedImage
-{
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    std::vector<std::uint8_t> pixels;
-};
-
-DecodedImage decodePngRgba8(const std::filesystem::path& path)
-{
-    SDL_Surface* loadedSurface = IMG_Load(path.string().c_str());
-    if (loadedSurface == nullptr)
-    {
-        throw std::runtime_error("Failed to load skybox texture: " + path.string() + " " + SDL_GetError());
-    }
-
-    SDL_Surface* rgbaSurface = SDL_ConvertSurface(loadedSurface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(loadedSurface);
-    if (rgbaSurface == nullptr)
-    {
-        throw std::runtime_error("Failed to convert skybox texture to RGBA32: " + path.string() + " " + SDL_GetError());
-    }
-
-    DecodedImage image{};
-    image.width = static_cast<std::uint32_t>(rgbaSurface->w);
-    image.height = static_cast<std::uint32_t>(rgbaSurface->h);
-    image.pixels.resize(static_cast<std::size_t>(rgbaSurface->w) * static_cast<std::size_t>(rgbaSurface->h) * 4u);
-    std::memcpy(image.pixels.data(), rgbaSurface->pixels, image.pixels.size());
-    SDL_DestroySurface(rgbaSurface);
-
-    return image;
-}
 
 float saturate(float value)
 {
@@ -111,18 +80,28 @@ float approximateAirMass(float sunHeight)
         (0.50572f * std::pow(safeElevationDegrees + 6.07995f, -1.6364f));
     return 1.0f / std::max(denominator, 0.08f);
 }
+
+std::filesystem::path executableRelativePath(const std::filesystem::path& relativePath)
+{
+    const char* basePath = SDL_GetBasePath();
+    if (basePath == nullptr)
+    {
+        throw std::runtime_error(std::string("Failed to resolve executable base path: ") + SDL_GetError());
+    }
+
+    return std::filesystem::path(basePath) / relativePath;
+}
 }
 
 void SkyboxRenderer::initialize(
     SDL_GPUDevice* device,
     SDL_GPUTextureFormat colorFormat,
     SDL_GPUTextureFormat depthFormat,
-    const std::filesystem::path& shaderDirectory,
-    const std::filesystem::path& resourceDirectory)
+    const std::filesystem::path& shaderDirectory)
 {
     initializeRendererBase(device, colorFormat, depthFormat);
     createStaticVertexResources();
-    createCubemapTexture(resourceDirectory);
+    createCubemapTexture();
     createAtmosphereLutTexture();
     createPipeline(shaderDirectory);
 }
@@ -421,33 +400,54 @@ void SkyboxRenderer::createStaticVertexResources()
     }
 }
 
-void SkyboxRenderer::createCubemapTexture(const std::filesystem::path& resourceDirectory)
+void SkyboxRenderer::createCubemapTexture()
 {
-    const std::array<std::filesystem::path, 6> facePaths{
-        resourceDirectory / "skybox" / "px.png",
-        resourceDirectory / "skybox" / "nx.png",
-        resourceDirectory / "skybox" / "py.png",
-        resourceDirectory / "skybox" / "ny.png",
-        resourceDirectory / "skybox" / "pz.png",
-        resourceDirectory / "skybox" / "nz.png",
-    };
-
-    std::array<DecodedImage, 6> decodedFaces{};
-    for (std::size_t faceIndex = 0; faceIndex < facePaths.size(); ++faceIndex)
+    RuntimeAssets::LoadedAssetBinView assetBin;
+    RuntimeAssets::LoadedTexBinView texBin;
+    std::string error;
+    const std::filesystem::path assetRoot = executableRelativePath("assets/runtime");
+    if (!RuntimeAssets::LoadAssetBinFromSDL((assetRoot / "skybox.assetbin").string().c_str(), &assetBin, &error) ||
+        !RuntimeAssets::LoadTexBinFromSDL((assetRoot / "skybox.texbin").string().c_str(), assetBin, &texBin, &error))
     {
-        decodedFaces[faceIndex] = decodePngRgba8(facePaths[faceIndex]);
+        throw std::runtime_error("Failed to load skybox runtime assets: " + error);
     }
 
-    const std::uint32_t faceWidth = decodedFaces[0].width;
-    const std::uint32_t faceHeight = decodedFaces[0].height;
+    const std::array<const char*, 6> faceNames{
+        "px",
+        "nx",
+        "py",
+        "ny",
+        "pz",
+        "nz",
+    };
+
+    std::array<const RuntimeAssets::TextureRecord*, 6> faceTextures{};
+    for (std::size_t faceIndex = 0; faceIndex < faceNames.size(); ++faceIndex)
+    {
+        for (const RuntimeAssets::TextureRecord& texture : texBin.textures)
+        {
+            if (std::strcmp(texBin.stringAt(texture.nameOffset), faceNames[faceIndex]) == 0)
+            {
+                faceTextures[faceIndex] = &texture;
+                break;
+            }
+        }
+        if (faceTextures[faceIndex] == nullptr)
+        {
+            throw std::runtime_error(std::string("Skybox runtime pack is missing face texture: ") + faceNames[faceIndex]);
+        }
+    }
+
+    const std::uint32_t faceWidth = faceTextures[0]->width;
+    const std::uint32_t faceHeight = faceTextures[0]->height;
     if (faceWidth == 0 || faceHeight == 0 || faceWidth != faceHeight)
     {
         throw std::runtime_error("Skybox cubemap faces must be non-empty square textures.");
     }
 
-    for (const DecodedImage& face : decodedFaces)
+    for (const RuntimeAssets::TextureRecord* face : faceTextures)
     {
-        if (face.width != faceWidth || face.height != faceHeight)
+        if (face->width != faceWidth || face->height != faceHeight)
         {
             throw std::runtime_error("All skybox cubemap faces must share the same dimensions.");
         }
@@ -471,7 +471,7 @@ void SkyboxRenderer::createCubemapTexture(const std::filesystem::path& resourceD
     const std::size_t faceSizeBytes = static_cast<std::size_t>(faceWidth) * static_cast<std::size_t>(faceHeight) * 4u;
     SDL_GPUTransferBufferCreateInfo transferInfo{};
     transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    transferInfo.size = static_cast<Uint32>(faceSizeBytes * decodedFaces.size());
+    transferInfo.size = static_cast<Uint32>(faceSizeBytes * faceTextures.size());
     SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
     if (transferBuffer == nullptr)
     {
@@ -479,16 +479,20 @@ void SkyboxRenderer::createCubemapTexture(const std::filesystem::path& resourceD
     }
 
     std::uint8_t* mapped = static_cast<std::uint8_t*>(SDL_MapGPUTransferBuffer(m_device, transferBuffer, false));
-    for (std::size_t faceIndex = 0; faceIndex < decodedFaces.size(); ++faceIndex)
+    for (std::size_t faceIndex = 0; faceIndex < faceTextures.size(); ++faceIndex)
     {
-        std::memcpy(mapped + (faceIndex * faceSizeBytes), decodedFaces[faceIndex].pixels.data(), faceSizeBytes);
+        const RuntimeAssets::TextureRecord& face = *faceTextures[faceIndex];
+        std::memcpy(
+            mapped + (faceIndex * faceSizeBytes),
+            texBin.pixelData.data() + face.dataOffset,
+            faceSizeBytes);
     }
     SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
 
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
 
-    for (std::size_t faceIndex = 0; faceIndex < decodedFaces.size(); ++faceIndex)
+    for (std::size_t faceIndex = 0; faceIndex < faceTextures.size(); ++faceIndex)
     {
         SDL_GPUTextureTransferInfo source{};
         source.transfer_buffer = transferBuffer;

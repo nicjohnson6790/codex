@@ -11,11 +11,26 @@
 
 struct ConverterConfig
 {
+    enum class PackKind
+    {
+        PineTree,
+        Skybox,
+    };
+
     std::filesystem::path sourceRoot;
     std::filesystem::path fbxRoot;
     std::filesystem::path textureRoot;
     std::filesystem::path outputRoot;
     std::string packName;
+    PackKind packKind = PackKind::PineTree;
+};
+
+struct TextureImportOptions
+{
+    bool allowTga = true;
+    bool allowPng = false;
+    bool forceSrgb = false;
+    std::uint32_t resizeSquare = 0;
 };
 
 struct ImportedMesh

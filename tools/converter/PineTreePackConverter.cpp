@@ -56,12 +56,13 @@ void RebuildMaterialLayout(ImportedPack* pack)
 }
 
 bool ValidateCrossReferences(
-    const RuntimeAssets::LoadedMeshBinView& meshBin,
+    const RuntimeAssets::LoadedMeshBinView* meshBin,
     const RuntimeAssets::LoadedTexBinView& texBin,
     const RuntimeAssets::LoadedAssetBinView& assetBin,
     std::string* error)
 {
-    if (assetBin.meshBlobs.size() != meshBin.meshes.size())
+    const std::size_t meshCount = meshBin != nullptr ? meshBin->meshes.size() : 0u;
+    if (assetBin.meshBlobs.size() != meshCount)
     {
         if (error != nullptr)
         {
@@ -81,7 +82,7 @@ bool ValidateCrossReferences(
 
     for (const RuntimeAssets::MeshRefRecord& meshRef : assetBin.meshRefs)
     {
-        if (meshRef.meshIndex >= meshBin.meshes.size())
+        if (meshRef.meshIndex >= meshCount)
         {
             if (error != nullptr)
             {
@@ -116,15 +117,18 @@ bool ValidateCrossReferences(
         }
     }
 
-    for (const RuntimeAssets::SubmeshRecord& submesh : meshBin.submeshes)
+    if (meshBin != nullptr)
     {
-        if (submesh.materialIndex >= assetBin.materials.size())
+        for (const RuntimeAssets::SubmeshRecord& submesh : meshBin->submeshes)
         {
-            if (error != nullptr)
+            if (submesh.materialIndex >= assetBin.materials.size())
             {
-                *error = "meshbin submesh materialIndex points past assetbin.materialCount";
+                if (error != nullptr)
+                {
+                    *error = "meshbin submesh materialIndex points past assetbin.materialCount";
+                }
+                return false;
             }
-            return false;
         }
     }
 
@@ -137,15 +141,23 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
 {
     ImportedPack pack;
     std::size_t fbxFileCount = 0;
-    if (!ImportTextureFolder(config.textureRoot, &pack, error))
+    const TextureImportOptions textureOptions =
+        config.packKind == ConverterConfig::PackKind::Skybox
+        ? TextureImportOptions{ .allowTga = false, .allowPng = true, .forceSrgb = true, .resizeSquare = 0u }
+        : TextureImportOptions{ .allowTga = true, .allowPng = false, .forceSrgb = false, .resizeSquare = 512u };
+    if (!ImportTextureFolder(config.textureRoot, textureOptions, &pack, error))
     {
         return false;
     }
-    if (!ImportFbxFolder(config.fbxRoot, &pack, &fbxFileCount, error))
+    if (config.packKind == ConverterConfig::PackKind::PineTree &&
+        !ImportFbxFolder(config.fbxRoot, &pack, &fbxFileCount, error))
     {
         return false;
     }
-    RebuildMaterialLayout(&pack);
+    if (config.packKind == ConverterConfig::PackKind::PineTree)
+    {
+        RebuildMaterialLayout(&pack);
+    }
 
     std::filesystem::create_directories(config.outputRoot);
     const std::filesystem::path meshBinPath = config.outputRoot / (config.packName + ".meshbin");
@@ -157,9 +169,21 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     std::uint64_t assetBinSize = 0;
     std::vector<RuntimeAssets::MeshBlobRecord> meshBlobs;
     std::vector<RuntimeAssets::TextureBlobRecord> textureBlobs;
-    if (!WriteMeshBin(pack, meshBinPath, &meshBlobs, &meshBinSize, error) ||
-        !WriteTexBin(pack, texBinPath, &textureBlobs, &texBinSize, error) ||
-        !WriteAssetBin(pack, meshBlobs, textureBlobs, config.packName, assetBinPath, &assetBinSize, error))
+    if (config.packKind == ConverterConfig::PackKind::PineTree &&
+        !WriteMeshBin(pack, meshBinPath, &meshBlobs, &meshBinSize, error))
+    {
+        return false;
+    }
+    if (!WriteTexBin(pack, texBinPath, &textureBlobs, &texBinSize, error) ||
+        !WriteAssetBin(
+            pack,
+            meshBlobs,
+            textureBlobs,
+            config.packKind == ConverterConfig::PackKind::PineTree ? (config.packName + ".meshbin") : "",
+            config.packName + ".texbin",
+            assetBinPath,
+            &assetBinSize,
+            error))
     {
         return false;
     }
@@ -167,14 +191,25 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     RuntimeAssets::LoadedMeshBinView loadedMesh;
     RuntimeAssets::LoadedTexBinView loadedTex;
     RuntimeAssets::LoadedAssetBinView loadedAsset;
-    if (!RuntimeAssets::LoadAssetBinFromSDL(assetBinPath.string().c_str(), &loadedAsset, error) ||
-        !RuntimeAssets::LoadMeshBinFromSDL(meshBinPath.string().c_str(), loadedAsset, &loadedMesh, error) ||
-        !RuntimeAssets::LoadTexBinFromSDL(texBinPath.string().c_str(), loadedAsset, &loadedTex, error))
+    if (!RuntimeAssets::LoadAssetBinFromSDL(assetBinPath.string().c_str(), &loadedAsset, error))
+    {
+        return false;
+    }
+    if (config.packKind == ConverterConfig::PackKind::PineTree &&
+        !RuntimeAssets::LoadMeshBinFromSDL(meshBinPath.string().c_str(), loadedAsset, &loadedMesh, error))
+    {
+        return false;
+    }
+    if (!RuntimeAssets::LoadTexBinFromSDL(texBinPath.string().c_str(), loadedAsset, &loadedTex, error))
     {
         return false;
     }
 
-    if (!ValidateCrossReferences(loadedMesh, loadedTex, loadedAsset, error))
+    if (!ValidateCrossReferences(
+            config.packKind == ConverterConfig::PackKind::PineTree ? &loadedMesh : nullptr,
+            loadedTex,
+            loadedAsset,
+            error))
     {
         return false;
     }

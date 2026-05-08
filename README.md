@@ -4,11 +4,11 @@
 
 This project is a small editor-style sandbox built around SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage markers, nearby decoded foliage mesh rendering, far-distance canopy impostors, and shared-cascade FFT water.
 
-It also now includes a standalone offline asset-conversion subproject under [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md) for importing source FBX/TGA content into simple runtime binary asset packs.
+It also now includes a standalone offline asset-conversion subproject under [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md) for importing source FBX/TGA/PNG content into simple runtime binary asset packs.
 
 The runtime asset packs now store per-mesh and per-texture payloads as individually LZ4-compressed blobs, with `assetbin` carrying the manifest metadata needed to decompress those items on load.
 
-This branch does not include the required pine source assets or generated runtime asset bins. To use the nearby tree-mesh path, you need to supply the `assets/source/pinetreepack` content yourself and run the standalone converter to produce `assets/runtime/pinetreepack.meshbin`, `assets/runtime/pinetreepack.texbin`, and `assets/runtime/pinetreepack.assetbin`.
+This branch does not include the required pine source assets or generated runtime asset bins. To use the nearby tree-mesh path, you need to supply the `assets/source/pinetreepack` content yourself and run the asset build step to produce the runtime bins under `assets/runtime`.
 
 ## Overview
 
@@ -158,7 +158,7 @@ The renderer then:
   - larger patches use only the top cascade
 - Sky/atmosphere-aware PBR-style water shading using the same cubemap and atmosphere LUT as the skybox pass
 - Depth-driven water color, absorption, transmission, and transparency beyond the shoreline band
-- Skybox cubemap rendering from `resources/skybox`
+- Skybox cubemap rendering from runtime asset bins generated from `assets/source/skybox/tex`
 - Deep-atmosphere sky and water reflection probes that do not clamp atmospheric traversal to a ground plane at `y = 0`
 - Time-of-day controls that rotate both the sun and skybox around a shared orbit axis
 - Runtime terrain tuning:
@@ -188,7 +188,7 @@ The renderer then:
 - `src/FoliageImposterRenderer.*`: foliage marker draw path and resident page-pool handling
 - `src/NearbyFoliageRenderer.*`: decoded nearby-page expansion, CPU readback/LRU management, runtime asset upload, and nearby mesh rendering
 - `src/QuadtreeWaterMeshRenderer.*`: water draw path, bridge meshes, and FFT compute integration
-- `src/SkyboxRenderer.*`: cubemap loading and fullscreen skybox rendering
+- `src/SkyboxRenderer.*`: cubemap loading from runtime bins and fullscreen skybox rendering
 - `src/WorldGridQuadtree.*`: quadtree state and traversal
 - `src/WorldGridQuadtreeHeightmapManager.*`: heightmap LRU and compute queue management
 - `src/WorldGridFoliageCanopyManager.*`: far-canopy LRU and canopy-cell generation queue management
@@ -201,7 +201,7 @@ The renderer then:
 - `src/CameraManager.*`: camera storage and projection building
 - `src/FreeFlightCameraController.*`: free-flight controls
 - `src/LightingSystem.*`: sun-light state
-- `resources/skybox/*.png`: cubemap faces for the skybox
+- `assets/source/skybox/tex/*.png`: source cubemap faces for the skybox converter pack
 - `src/PerformanceCapture.*`: timing capture
 - `src/PerfPanel.*`: performance UI
 - `src/Position.hpp`: large-world grid/local position type
@@ -234,10 +234,11 @@ The renderer then:
 The repository code builds without the authored tree pack, but the nearby tree-mesh runtime path depends on external assets that are not checked into this branch.
 
 - missing source content: `assets/source/pinetreepack`
-- generated runtime outputs expected by the app: `assets/runtime/pinetreepack.meshbin`, `assets/runtime/pinetreepack.texbin`, `assets/runtime/pinetreepack.assetbin`
+- included source content: `assets/source/skybox/tex`
+- generated runtime outputs expected by the app: `assets/runtime/pinetreepack.meshbin`, `assets/runtime/pinetreepack.texbin`, `assets/runtime/pinetreepack.assetbin`, `assets/runtime/skybox.texbin`, `assets/runtime/skybox.assetbin`
 - generation path: build and run the standalone converter described in [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md)
 
-Without those files, the terrain, water, and marker-foliage systems can still build, but the nearby foliage mesh renderer will not have the required art data.
+Without those files, the terrain, water, and marker-foliage systems can still build, but the nearby foliage mesh renderer will not have the required pine art data.
 
 ## Dependencies
 
@@ -249,13 +250,13 @@ Without those files, the terrain, water, and marker-foliage systems can still bu
 Fetched dependencies:
 
 - SDL `release-3.4.0`
-- SDL_image `release-3.2.4`
 - Dear ImGui `v1.92.5-docking`
 - GLM `1.0.1`
 - LZ4 `v1.10.0`
 
 Converter-only fetched dependencies:
 
+- SDL_image `release-3.2.4`
 - Assimp `v5.4.3`
 
 ## Configure And Build
@@ -289,10 +290,13 @@ Build-speed notes:
 Standalone converter:
 
 ```powershell
-cmake -S tools/converter -B build/converter
-cmake --build build/converter
-.\build\converter\converter.exe pinetreepack
+tools\build.cmd Assets
 ```
+
+`tools\build.cmd Assets` configures and builds the standalone converter into `build\Assets`, then regenerates both runtime packs:
+
+- `skybox`
+- `pinetreepack`
 
 The converter project is intentionally separate from the main runtime target so Assimp and source-format parsing stay out of the application build and load path.
 
@@ -334,7 +338,7 @@ Windows GPU preference:
 ## Notes
 
 - The rendering API is SDL GPU, with shaders compiled by `glslc`.
-- Skybox faces are loaded through SDL_image and uploaded into an SDL GPU cubemap texture.
+- Skybox faces are loaded from `skybox.assetbin` + `skybox.texbin` and uploaded into an SDL GPU cubemap texture.
 - World positions use large horizontal grid cells plus local coordinates for stable camera-relative rendering.
 - The maintained terrain path is the runtime GPU compute path; the older standalone quadtree sanity executable has been removed.
 - Terrain extents are produced on the GPU and read back asynchronously, so newly generated slices may briefly fall back to conservative bounds until their readback completes.
@@ -357,4 +361,4 @@ Windows GPU preference:
 - Visible foam is a second-stage shading pass over that history: a startup-generated cellular SDF provides the bubble structure, while a startup-generated smooth-noise texture adds world-space wobble to the history/detail lookups and a separate breakup overlay to reduce visible repetition. The same detail textures are also reused to shape resident shoreline foam, and visible foam reduces water reflectivity by raising roughness and damping specular/reflection response.
 - Far-water shading intentionally gets cheaper as distance increases: unresolved displacement, slope, and foam-history cascades are skipped, foam fades out, and the shading normal/roughness response is filtered toward a broad far-field water surface.
 - The skybox is drawn at the end of the viewport pass on background pixels only, using a fullscreen quad and inverse view-projection reconstruction. Both the skybox path and the water reflection probe treat the atmosphere as a deep medium rather than intersecting a hard `y = 0` ground plane.
-- Shader binaries are emitted into the active build directory, for example `build/Debug/shaders`.
+- The build outputs are intended to be self-contained: shader binaries are emitted into the active build directory, for example `build/Debug/shaders`, and runtime asset bins are staged into `build/<Config>/assets/runtime`.

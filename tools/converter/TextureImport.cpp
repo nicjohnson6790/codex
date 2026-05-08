@@ -1,5 +1,7 @@
 #include "TextureImport.hpp"
 
+#include <SDL3_image/SDL_image.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -69,6 +71,12 @@ bool ParseTgaHeader(std::span<const std::byte> bytes, TgaHeader* outHeader)
 bool IsSrgbTexture(const std::string& lowerName)
 {
     return lowerName.find("color") != std::string::npos ||
+        lowerName == "px" ||
+        lowerName == "nx" ||
+        lowerName == "py" ||
+        lowerName == "ny" ||
+        lowerName == "pz" ||
+        lowerName == "nz" ||
         lowerName.find("_bc") != std::string::npos ||
         lowerName.find("basecolor") != std::string::npos ||
         lowerName.find("diffuse") != std::string::npos;
@@ -285,10 +293,36 @@ bool DecodeTga(const std::filesystem::path& path, ImportedTexture* outTexture, s
     return true;
 }
 
+bool DecodeSdlImage(const std::filesystem::path& path, ImportedTexture* outTexture, std::string* error)
+{
+    SDL_Surface* loadedSurface = IMG_Load(path.string().c_str());
+    if (loadedSurface == nullptr)
+    {
+        *error = "failed to load image: " + path.string() + " " + SDL_GetError();
+        return false;
+    }
+
+    SDL_Surface* rgbaSurface = SDL_ConvertSurface(loadedSurface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(loadedSurface);
+    if (rgbaSurface == nullptr)
+    {
+        *error = "failed to convert image to RGBA32: " + path.string() + " " + SDL_GetError();
+        return false;
+    }
+
+    outTexture->width = static_cast<std::uint32_t>(rgbaSurface->w);
+    outTexture->height = static_cast<std::uint32_t>(rgbaSurface->h);
+    outTexture->pixels.resize(static_cast<std::size_t>(rgbaSurface->w) * static_cast<std::size_t>(rgbaSurface->h) * 4u);
+    std::memcpy(outTexture->pixels.data(), rgbaSurface->pixels, outTexture->pixels.size());
+    SDL_DestroySurface(rgbaSurface);
+    return true;
+}
+
 } // namespace
 
 bool ImportTextureFolder(
     const std::filesystem::path& textureRoot,
+    const TextureImportOptions& options,
     ImportedPack* outPack,
     std::string* error)
 {
@@ -301,7 +335,15 @@ bool ImportTextureFolder(
     std::vector<std::filesystem::path> textureFiles;
     for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(textureRoot))
     {
-        if (entry.is_regular_file() && ToLower(entry.path().extension().string()) == ".tga")
+        if (!entry.is_regular_file())
+        {
+            continue;
+        }
+
+        const std::string extension = ToLower(entry.path().extension().string());
+        const bool isTga = extension == ".tga";
+        const bool isPng = extension == ".png";
+        if ((isTga && options.allowTga) || (isPng && options.allowPng))
         {
             textureFiles.push_back(entry.path());
         }
@@ -320,24 +362,30 @@ bool ImportTextureFolder(
         texture.name = ToLower(texturePath.stem().string());
         texture.normalizedBasename = basename;
         texture.sourcePath = texturePath.generic_string();
-        if (!DecodeTga(texturePath, &texture, error))
+        const std::string extension = ToLower(texturePath.extension().string());
+        const bool decoded =
+            (extension == ".tga" && DecodeTga(texturePath, &texture, error)) ||
+            (extension == ".png" && DecodeSdlImage(texturePath, &texture, error));
+        if (!decoded)
         {
             return false;
         }
 
-        if (texture.width != kRuntimeTextureSize || texture.height != kRuntimeTextureSize)
+        const std::uint32_t resizeSquare = options.resizeSquare == 0 ? kRuntimeTextureSize : options.resizeSquare;
+        if (options.resizeSquare != 0 &&
+            (texture.width != resizeSquare || texture.height != resizeSquare))
         {
             texture.pixels = ResizeRgbaImage(
                 texture.pixels,
                 texture.width,
                 texture.height,
-                kRuntimeTextureSize,
-                kRuntimeTextureSize);
-            texture.width = kRuntimeTextureSize;
-            texture.height = kRuntimeTextureSize;
+                resizeSquare,
+                resizeSquare);
+            texture.width = resizeSquare;
+            texture.height = resizeSquare;
         }
 
-        if (IsSrgbTexture(texture.name))
+        if (options.forceSrgb || IsSrgbTexture(texture.name))
         {
             texture.format = RuntimeAssets::TextureFormat::RGBA8_SRGB;
             texture.flags |= RuntimeAssets::TextureFlagSrgb;

@@ -32,11 +32,6 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-    SDL3_image
-    URL https://github.com/libsdl-org/SDL_image/archive/refs/tags/release-3.2.4.zip
-)
-
-FetchContent_Declare(
     glm
     URL https://github.com/g-truc/glm/archive/refs/tags/1.0.1.zip
 )
@@ -52,32 +47,10 @@ set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_TESTS OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_BACKEND_STB ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_BACKEND_WIC OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_AVIF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_BMP OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_GIF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_JPG OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_JXL OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_LBM OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_PCX OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNG ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNM OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_QOI OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_SVG OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_TGA OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_TIF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_WEBP OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_XCF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_XPM OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_XV OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNG_SAVE OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(SDL3 SDL3_image imgui glm lz4)
+FetchContent_MakeAvailable(SDL3 imgui glm lz4)
 
 add_library(lz4_local STATIC
     ${lz4_SOURCE_DIR}/lib/lz4.c
@@ -110,6 +83,8 @@ target_link_libraries(imgui_backend
 )
 
 set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
+set(RUNTIME_ASSET_SOURCE_DIR ${CMAKE_SOURCE_DIR}/assets/runtime)
+set(RUNTIME_ASSET_OUTPUT_DIR ${CMAKE_BINARY_DIR}/assets/runtime)
 file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
 
 function(compile_shader SOURCE_FILE OUTPUT_FILE)
@@ -254,6 +229,36 @@ add_executable(terrain_sandbox
 
 add_dependencies(terrain_sandbox shaders)
 
+file(GENERATE
+    OUTPUT ${CMAKE_BINARY_DIR}/copy_runtime_assets.cmake
+    CONTENT [=[
+set(asset_source_dir "$ENV{ASSET_SOURCE_DIR}")
+set(asset_output_dir "$ENV{ASSET_OUTPUT_DIR}")
+
+file(MAKE_DIRECTORY "${asset_output_dir}")
+file(GLOB runtime_asset_bins
+    "${asset_source_dir}/*.meshbin"
+    "${asset_source_dir}/*.texbin"
+    "${asset_source_dir}/*.assetbin")
+
+foreach(asset_bin IN LISTS runtime_asset_bins)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E copy "${asset_bin}" "${asset_output_dir}"
+        COMMAND_ERROR_IS_FATAL ANY)
+endforeach()
+]=]
+)
+
+add_custom_target(stage_runtime_assets ALL
+    COMMAND ${CMAKE_COMMAND} -E env
+        ASSET_SOURCE_DIR=${RUNTIME_ASSET_SOURCE_DIR}
+        ASSET_OUTPUT_DIR=${RUNTIME_ASSET_OUTPUT_DIR}
+        ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/copy_runtime_assets.cmake
+    VERBATIM
+)
+
+add_dependencies(terrain_sandbox stage_runtime_assets)
+
 add_custom_command(TARGET terrain_sandbox POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy -t $<TARGET_FILE_DIR:terrain_sandbox> $<TARGET_RUNTIME_DLLS:terrain_sandbox>
     COMMAND_EXPAND_LISTS
@@ -267,9 +272,8 @@ target_include_directories(terrain_sandbox
 
 target_compile_definitions(terrain_sandbox
     PRIVATE
-        TERRAIN_SANDBOX_SHADER_DIR="${SHADER_OUTPUT_DIR}"
-        TERRAIN_SANDBOX_RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources"
-        TERRAIN_SANDBOX_ASSET_DIR="${CMAKE_SOURCE_DIR}/assets/runtime"
+        TERRAIN_SANDBOX_SHADER_DIR="shaders"
+        TERRAIN_SANDBOX_ASSET_DIR="assets/runtime"
         NOMINMAX
 )
 
@@ -278,7 +282,6 @@ target_link_libraries(terrain_sandbox
         imgui_backend
         lz4_local
         SDL3::SDL3
-        SDL3_image::SDL3_image
 )
 
 if (MSVC)

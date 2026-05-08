@@ -1,8 +1,8 @@
-# Pine Tree Pack Converter
+# Runtime Asset Converter
 
-This folder contains a standalone offline asset-conversion project for turning the source pine tree pack into runtime-friendly binary files.
+This folder contains a standalone offline asset-conversion project for turning source asset groups into runtime-friendly binary files.
 
-The required source art is not included in this branch. You need to provide the `assets/source/pinetreepack` FBX and TGA content yourself before the converter can produce runtime output.
+The required pine source art is not included in this branch. You need to provide the `assets/source/pinetreepack` FBX and TGA content yourself before the converter can produce that pack's runtime output. The skybox source PNGs live in `assets/source/skybox/tex`.
 
 The converter is intentionally separate from the main terrain sandbox runtime:
 
@@ -13,8 +13,11 @@ The converter is intentionally separate from the main terrain sandbox runtime:
 
 ## Outputs
 
-Running the converter for `pinetreepack` produces:
+Running the converter currently produces two pack types:
 
+- `skybox`
+  - `assets/runtime/skybox.texbin`
+  - `assets/runtime/skybox.assetbin`
 - `assets/runtime/pinetreepack.meshbin`
 - `assets/runtime/pinetreepack.texbin`
 - `assets/runtime/pinetreepack.assetbin`
@@ -28,27 +31,33 @@ Those files are versioned binary containers described by [src/assets/RuntimeAsse
 From the repo root, configure and build the standalone converter project:
 
 ```powershell
-cmake -S tools/converter -B build/converter
-cmake --build build/converter
+tools\build.cmd Assets
 ```
 
-Then run either:
+That command configures the standalone converter into `build\Assets`, builds it, and regenerates both runtime packs.
+
+If you want to run the converter manually after that, use:
 
 ```powershell
-.\build\converter\converter.exe pinetreepack
+.\build\Assets\converter.exe skybox
+.\build\Assets\converter.exe pinetreepack
 ```
 
 or:
 
 ```powershell
-.\build\converter\converter.exe --source assets/source/pinetreepack --out assets/runtime --name pinetreepack
+.\build\Assets\converter.exe --source assets/source/pinetreepack --out assets/runtime --name pinetreepack
 ```
 
 Default paths:
 
-- source root: `assets/source/pinetreepack`
-- FBX root: `assets/source/pinetreepack/fbx`
-- texture root: `assets/source/pinetreepack/tex`
+- `pinetreepack`
+  - source root: `assets/source/pinetreepack`
+  - FBX root: `assets/source/pinetreepack/fbx`
+  - texture root: `assets/source/pinetreepack/tex`
+- `skybox`
+  - source root: `assets/source/skybox`
+  - texture root: `assets/source/skybox/tex`
 - output root: `assets/runtime`
 
 ## Architecture
@@ -67,9 +76,9 @@ That separation keeps the import code format-aware while keeping the runtime for
 - [FbxImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FbxImport.cpp)
   Uses Assimp to load FBX meshes, convert FBX units to meters, traverse FBX node hierarchy, preserve per-node LOD grouping, bake node transforms into vertices, preserve tangent handedness, infer pack-specific material assignments, and compute per-mesh bounds.
 - [TextureImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TextureImport.cpp)
-  Decodes TGA textures into RGBA8, infers sRGB versus linear usage from filenames, and deduplicates textures by normalized basename.
+  Decodes TGA and PNG textures into RGBA8, applies pack-specific resize rules, infers sRGB versus linear usage from filenames, and deduplicates textures by normalized basename.
 - [PineTreePackConverter.hpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.hpp)
-  Defines the normalized in-memory data model used between import and serialization.
+  Defines the normalized in-memory data model and pack-type configuration used between import and serialization.
 
 ### Runtime-Format Layer
 
@@ -99,9 +108,10 @@ It also now decompresses each mesh and texture blob individually on load using t
 
 ## Current Runtime Use
 
-The generated `pinetreepack` runtime bins are now used directly by the main app's nearby foliage path:
+The generated runtime bins are now used directly by the main app:
 
 - `NearbyFoliageRenderer` loads `meshbin`, `texbin`, and `assetbin` at startup
+- `SkyboxRenderer` loads `skybox.texbin` + `skybox.assetbin` at startup
 - the nearby tree path uses real mesh LODs at `25m`, `50m`, and `100m` across the imported pine tree variants
 - textures are uploaded once into shared `2D` texture arrays
 - material metadata is uploaded once into a static GPU storage buffer
@@ -154,8 +164,8 @@ The current version still keeps the format flat and explicit, but now applies pe
 - [PineTreePackConverter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.cpp)
   Orchestrates import, serialization, reload validation, and summary reporting.
 - [CMakeLists.txt](C:/Users/siarr/source/repos/codex/tools/converter/CMakeLists.txt)
-  Defines the standalone build with its own `FetchContent` dependencies for SDL3 and Assimp.
+  Defines the standalone build with its own `FetchContent` dependencies for SDL3, SDL_image, and Assimp.
 
 ## Important Constraint
 
-Assimp is only used in this converter project. The main terrain sandbox runtime should only need the generated binary files plus the shared runtime reader.
+Assimp and SDL_image are only used in this converter project. The main terrain sandbox runtime should only need the generated binary files plus the shared runtime reader.

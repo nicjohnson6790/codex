@@ -77,7 +77,8 @@ bool WriteAssetBin(
     const ImportedPack& pack,
     std::span<const RuntimeAssets::MeshBlobRecord> meshBlobs,
     std::span<const RuntimeAssets::TextureBlobRecord> textureBlobs,
-    const std::string& packName,
+    std::string_view meshBinFileName,
+    std::string_view texBinFileName,
     const std::filesystem::path& outputPath,
     std::uint64_t* outFileSize,
     std::string* error)
@@ -142,8 +143,8 @@ bool WriteAssetBin(
     header.meshRefCount = static_cast<std::uint32_t>(meshRefs.size());
     header.meshBlobCount = static_cast<std::uint32_t>(meshBlobs.size());
     header.textureBlobCount = static_cast<std::uint32_t>(textureBlobs.size());
-    header.meshBinPathOffset = AppendString(packName + ".meshbin", &stringTable);
-    header.texBinPathOffset = AppendString(packName + ".texbin", &stringTable);
+    header.meshBinPathOffset = AppendString(meshBinFileName, &stringTable);
+    header.texBinPathOffset = AppendString(texBinFileName, &stringTable);
 
     ByteWriter writer;
     writer.appendValue(header);
