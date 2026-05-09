@@ -213,10 +213,26 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
 {
     ImportedPack pack;
     std::size_t fbxFileCount = 0;
-    const TextureImportOptions textureOptions =
-        config.packKind == ConverterConfig::PackKind::Skybox
-        ? TextureImportOptions{ .allowTga = false, .allowPng = true, .forceSrgb = true, .resizeSquare = 0u }
-        : TextureImportOptions{ .allowTga = true, .allowPng = false, .forceSrgb = false, .resizeSquare = 1024u };
+    TextureImportOptions textureOptions{};
+    switch (config.packKind)
+    {
+    case ConverterConfig::PackKind::Skybox:
+        textureOptions = TextureImportOptions{ .allowTga = false, .allowPng = true, .forceSrgb = true, .resizeSquare = 0u };
+        break;
+    case ConverterConfig::PackKind::Pbr:
+        textureOptions = TextureImportOptions{
+            .allowTga = false,
+            .allowPng = true,
+            .forceSrgb = false,
+            .resizeSquare = 1024u,
+            .compressPbrToBc = true,
+        };
+        break;
+    case ConverterConfig::PackKind::PineTree:
+        textureOptions = TextureImportOptions{ .allowTga = true, .allowPng = false, .forceSrgb = false, .resizeSquare = 1024u };
+        break;
+    }
+
     if (!ImportTextureFolder(config.textureRoot, textureOptions, &pack, error))
     {
         return false;

@@ -54,6 +54,16 @@ float saturate(float value)
     return clamp(value, 0.0, 1.0);
 }
 
+float sunVisibility(float sunHeight)
+{
+    return smoothstep(-0.045, 0.02, sunHeight);
+}
+
+float daylightVisibility(float sunHeight)
+{
+    return smoothstep(-0.12, 0.10, sunHeight);
+}
+
 float interleavedGradientNoise(vec2 pixelCoord)
 {
     return fract(52.9829189 * fract(dot(pixelCoord, vec2(0.06711056, 0.00583715))));
@@ -214,7 +224,9 @@ void main()
     float backScatter = pow(saturate(dot(-viewDirection, sunDirection)), 2.0) * saturate(dot(-normal, sunDirection));
     vec3 transmission = subsurfaceColor * albedoSample.rgb * backScatter * transmissionStrength;
 
-    vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunDirectionIntensity.w;
+    float directVisibility = sunVisibility(sunDirection.y);
+    float ambientVisibility = mix(0.10, 1.0, daylightVisibility(sunDirection.y));
+    vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunDirectionIntensity.w * directVisibility;
     vec3 directLighting =
         (diffuse * sunRadiance * 1.18) +
         (specular * sunRadiance * 0.06) +
@@ -229,8 +241,8 @@ void main()
         mix(0.35, 0.7, pow(1.0 - nDotV, 0.35));
     environmentSpecular *= mix(0.8, 1.0, effectiveAo) * 0.28;
 
-    float ambientScale = foliageMaterial.sunColorAmbient.a;
-    vec3 skyFill = sampleSkyRadiance(normal) * albedoSample.rgb * kFoliageSkyFillStrength;
+    float ambientScale = foliageMaterial.sunColorAmbient.a * ambientVisibility;
+    vec3 skyFill = sampleSkyRadiance(normal) * albedoSample.rgb * kFoliageSkyFillStrength * ambientVisibility;
     vec3 ambient = albedoSample.rgb * ambientScale * mix(0.92, 1.0, effectiveAo) * kFoliageAmbientBoost;
     vec3 litColor = (ambient + skyFill + directLighting + environmentSpecular) * kFoliageLightingScale;
 

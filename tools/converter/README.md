@@ -11,7 +11,7 @@ The converter is separate on purpose:
 
 ## Supported Packs
 
-The converter currently builds two asset groups:
+The converter currently builds three asset groups:
 
 - `pinetreepack`
   - source root: `assets/source/pinetreepack`
@@ -19,6 +19,10 @@ The converter currently builds two asset groups:
 - `skybox`
   - source root: `assets/source/skybox`
   - outputs: `skybox.texbin`, `skybox.assetbin`
+- `pbr`
+  - source root: `assets/source/pbr`
+  - outputs: `pbr.texbin`, `pbr.assetbin`
+  - textures are resized to `1024x1024` with full mip chains; albedo maps use `BC3` sRGB, normal maps use `BC5`, and the remaining maps use `BC3` UNORM
 
 All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/assets/runtime` by the main build.
 
@@ -67,13 +71,14 @@ From the repo root:
 tools\build.cmd Assets
 ```
 
-That command configures the standalone converter into `build\Assets`, builds it, and regenerates both supported packs.
+That command configures the standalone converter into `build\Assets`, builds it, and regenerates the supported packs.
 
 Manual runs after that:
 
 ```powershell
 .\build\Assets\converter.exe skybox
 .\build\Assets\converter.exe pinetreepack
+.\build\Assets\converter.exe pbr
 ```
 
 Or with explicit paths:
@@ -91,6 +96,9 @@ Default roots:
 - `skybox`
   - source root: `assets/source/skybox`
   - texture root: `assets/source/skybox/tex`
+- `pbr`
+  - source root: `assets/source/pbr`
+  - texture root: `assets/source/pbr/tex`
 - output root: `assets/runtime`
 
 ## Conversion Pipeline
@@ -175,6 +183,7 @@ The generated bins are loaded directly by the main app:
 - `NearbyFoliageRenderer` loads the pine `meshbin`, `texbin`, and `assetbin` for nearby tree mesh rendering
 - `FoliageImposterRenderer` loads the pine `texbin` and `assetbin` imposter metadata for the mid-distance tree pass
 - `SkyboxRenderer` loads `skybox.texbin` and `skybox.assetbin`
+- `QuadtreeMeshRenderer` loads `pbr.texbin` and `pbr.assetbin` for terrain material layers
 
 That makes converter correctness immediately visible in the runtime for mesh layout, material wiring, texture assignment, normal mapping, alpha-mask handling, and skybox cubemap assembly.
 

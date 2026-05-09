@@ -37,9 +37,6 @@ const uint kTreeClassCount = 16u;
 const float kCandidateCellSizeMeters = 4.0;
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
-const float kBaseDensity = 0.08;
-const float kClusterDensity = 0.18;
-const float kClusterScale = 1.0 / 96.0;
 
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {
@@ -66,11 +63,6 @@ float sampleHeightBilinear(uint sliceIndex, vec2 normalizedCoord)
     float row0 = mix(h00, h10, fracCoord.x);
     float row1 = mix(h01, h11, fracCoord.x);
     return mix(row0, row1, fracCoord.y);
-}
-
-float fractf(float value)
-{
-    return value - floor(value);
 }
 
 uint packFoliageInstance(uint candidateSlot, uint meshId, uint rotationBits, uint flags)
@@ -111,18 +103,9 @@ void main()
         vec2(0.0),
         vec2(1.0));
     float terrainHeight = sampleHeightBilinear(terrainSliceIndex, normalizedTerrainCoord);
-    if (terrainHeight <= (waterLevel + 5.0))
-    {
-        return;
-    }
-
     vec2 worldSample = pageWorldMin + localOffsetMeters;
-    float clusterNoise = fractf(
-        sin((worldSample.x * kClusterScale) + (worldSample.y * (kClusterScale * 1.37)) + (terrainHeight * 0.0035)) *
-        43758.5453);
-    float density = clamp(kBaseDensity + (clusterNoise * kClusterDensity), 0.0, 0.9);
-    uint slotSeed = leafSeed ^ (candidateSlot * 0x9e3779b9u);
-    if (foliageHash01(slotSeed) > density)
+    uint slotSeed = foliageCandidateSeed(leafSeed, candidateSlot);
+    if (!foliageCandidateAccepted(slotSeed, worldSample, terrainHeight, waterLevel))
     {
         return;
     }

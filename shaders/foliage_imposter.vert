@@ -139,7 +139,7 @@ void main()
     TreeClassData treeClass = treeClassBuffer.treeClasses[meshId];
     uint candidateX = candidateSlot & 63u;
     uint candidateZ = candidateSlot >> 6u;
-    vec2 jitter = foliageJitterOffset(page.seedData.x ^ candidateSlot);
+    vec2 jitter = foliageJitterOffset(foliageCandidateSeed(page.seedData.x, candidateSlot));
     vec2 localOffset = vec2(
         (float(candidateX) + 0.5) * kCandidateCellSizeMeters,
         (float(candidateZ) + 0.5) * kCandidateCellSizeMeters) + jitter;

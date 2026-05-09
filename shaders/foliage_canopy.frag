@@ -75,13 +75,25 @@ float unpackEdgeFadeStrength(uint packedStrengths, uint edgeIndex)
     return float((packedStrengths >> (edgeIndex * 8u)) & 0xFFu) / 255.0;
 }
 
+float sunVisibility(float sunHeight)
+{
+    return smoothstep(-0.045, 0.02, sunHeight);
+}
+
+float daylightVisibility(float sunHeight)
+{
+    return smoothstep(-0.12, 0.10, sunHeight);
+}
+
 void main()
 {
     CanopyDrawData draw = drawMetadataBuffer.draws[fragDrawIndex];
     vec2 clampedPatchMeters = clamp(fragPatchMeters, vec2(0.0), vec2(draw.patchOriginAndSize.w));
-    vec2 cellCoord = min(floor(clampedPatchMeters / kCellSizeMeters), vec2(7.0));
+    uint cellsPerSide = clamp(uint(round(draw.patchOriginAndSize.w / kCellSizeMeters)), 1u, 8u);
+    vec2 maxCellCoord = vec2(float(cellsPerSide - 1u));
+    vec2 cellCoord = min(floor(clampedPatchMeters / kCellSizeMeters), maxCellCoord);
     uvec2 cellIndex = uvec2(cellCoord);
-    uint flatCellIndex = (cellIndex.y * 8u) + cellIndex.x;
+    uint flatCellIndex = (cellIndex.y * cellsPerSide) + cellIndex.x;
     uint packedCellIndex = flatCellIndex >> 2u;
     uint packedCellLane = flatCellIndex & 3u;
     uint cellSlotIndex = draw.cellSlots[packedCellIndex][packedCellLane];
@@ -112,7 +124,7 @@ void main()
             continue;
         }
 
-        uint slotSeed = cellSeed ^ candidateSlot;
+        uint slotSeed = foliageCandidateSeed(cellSeed, candidateSlot);
         vec2 crownCenter =
             vec2(candidateGrid) * kCandidateCellSizeMeters +
             vec2(kCandidateCellSizeMeters * 0.5) +
@@ -143,9 +155,10 @@ void main()
     }
 
     vec3 lightDirection = normalize(canopy.sunDirectionIntensity.xyz);
+    float directVisibility = sunVisibility(lightDirection.y);
+    float ambient = mix(0.08, 0.42, daylightVisibility(lightDirection.y));
     float diffuse = clamp(dot(bestNormal, lightDirection), 0.0, 1.0);
-    float ambient = 0.42;
-    float lighting = ambient + (diffuse * 0.58);
+    float lighting = ambient + (diffuse * 0.58 * directVisibility);
     vec3 color = bestColor * lighting * canopy.sunDirectionIntensity.w * kCanopyDarkeningScale;
 
     uint edgeFadeStrengths = draw.patchSeedData.y;

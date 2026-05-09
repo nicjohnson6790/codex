@@ -63,7 +63,7 @@ void main()
     uint rotationBits = (packedInstance >> 16u) & 0x0FFFu;
     uint candidateX = candidateSlot & 63u;
     uint candidateZ = candidateSlot >> 6u;
-    vec2 jitter = foliageJitterOffset(pageSeed ^ candidateSlot);
+    vec2 jitter = foliageJitterOffset(foliageCandidateSeed(pageSeed, candidateSlot));
     vec2 localOffset =
         vec2(
             (float(candidateX) + 0.5) * kCandidateCellSizeMeters,

@@ -2,7 +2,9 @@
 
 #include "AppConfig.hpp"
 #include "PerformanceCapture.hpp"
+#include "assets/RuntimeAssetReader.hpp"
 
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
@@ -11,7 +13,10 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace
@@ -37,6 +42,7 @@ constexpr std::uint32_t kBridgeOuterVertexCount = AppConfig::Terrain::kHeightmap
 constexpr std::uint32_t kBridgeInnerVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount - 1;
 constexpr std::uint32_t kCoarseBridgeOuterVertexCount = (AppConfig::Terrain::kHeightmapLeafIntervalCount / 2) + 1;
 constexpr std::uint32_t kCausticsTextureResolution = 256;
+constexpr std::uint32_t kTerrainMaterialLayerCount = 5;
 
 struct GeneratedImage
 {
@@ -238,6 +244,45 @@ std::uint64_t hashLeafId(const WorldGridQuadtreeLeafId& leafId)
     hash = mixLeafHash64(hash);
     return hash;
 }
+
+std::uint32_t textureTransferStrideExtent(RuntimeAssets::TextureFormat format, std::uint32_t mipExtent)
+{
+    if (!RuntimeAssets::TextureFormatIsBlockCompressed(format))
+    {
+        return mipExtent;
+    }
+
+    return std::max<std::uint32_t>(((mipExtent + 3u) / 4u) * 4u, 4u);
+}
+
+SDL_GPUTextureFormat textureFormatFromRuntimeFormat(RuntimeAssets::TextureFormat format)
+{
+    switch (format)
+    {
+    case RuntimeAssets::TextureFormat::BC3_RGBA_UNORM:
+        return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
+    case RuntimeAssets::TextureFormat::BC3_RGBA_SRGB:
+        return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB;
+    case RuntimeAssets::TextureFormat::BC5_RG_UNORM:
+        return SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM;
+    case RuntimeAssets::TextureFormat::RGBA8_SRGB:
+        return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+    case RuntimeAssets::TextureFormat::RGBA8_UNORM:
+    default:
+        return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    }
+}
+
+std::filesystem::path executableRelativePath(const std::filesystem::path& relativePath)
+{
+    const char* basePath = SDL_GetBasePath();
+    if (basePath == nullptr)
+    {
+        throw std::runtime_error(std::string("Failed to resolve executable base path: ") + SDL_GetError());
+    }
+
+    return std::filesystem::path(basePath) / relativePath;
+}
 }
 
 void QuadtreeMeshRenderer::initialize(
@@ -251,6 +296,8 @@ void QuadtreeMeshRenderer::initialize(
     createStaticMeshResources();
     createCausticsTextures();
     createCausticsSampler();
+    createPbrSampler();
+    loadPbrTextures();
     createPipelines(shaderDirectory);
     createHeightmapComputePipeline(shaderDirectory);
     createFoliageInstanceComputePipeline(shaderDirectory);
@@ -459,6 +506,8 @@ void QuadtreeMeshRenderer::shutdown()
         readback.count = 0;
     }
     destroyCausticsSampler();
+    destroyPbrSampler();
+    destroyPbrTextures();
     destroyCausticsTextures();
     for (PendingExtentsReadback& readback : m_pendingExtentsReadbacks)
     {
@@ -1408,12 +1457,16 @@ void QuadtreeMeshRenderer::render(
 
         SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_instanceBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[3]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
             { waterRenderer.displacementTexture(), waterRenderer.waterSampler() },
             { waterRenderer.slopeTexture(), waterRenderer.waterSampler() },
             { m_causticsTextureA, m_causticsSampler },
+            { m_pbrAlbedoTextureArray, m_pbrSampler },
+            { m_pbrNormalTextureArray, m_pbrSampler },
+            { m_pbrRoughnessTextureArray, m_pbrSampler },
+            { m_pbrAoTextureArray, m_pbrSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 3);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
     }
 
@@ -1429,12 +1482,16 @@ void QuadtreeMeshRenderer::render(
 
         SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_bridgeInstanceBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[3]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
             { waterRenderer.displacementTexture(), waterRenderer.waterSampler() },
             { waterRenderer.slopeTexture(), waterRenderer.waterSampler() },
             { m_causticsTextureA, m_causticsSampler },
+            { m_pbrAlbedoTextureArray, m_pbrSampler },
+            { m_pbrNormalTextureArray, m_pbrSampler },
+            { m_pbrRoughnessTextureArray, m_pbrSampler },
+            { m_pbrAoTextureArray, m_pbrSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 3);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, m_bridgeIndirectCommandCount);
     }
 }
@@ -1501,7 +1558,7 @@ void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path& shaderDi
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             1,
             0,
-            3);
+            7);
 
         pipelineInfo.vertex_shader = vertexShader;
         pipelineInfo.fragment_shader = fragmentShader;
@@ -1955,6 +2012,253 @@ void QuadtreeMeshRenderer::destroyCausticsSampler()
     {
         SDL_ReleaseGPUSampler(m_device, m_causticsSampler);
         m_causticsSampler = nullptr;
+    }
+}
+
+void QuadtreeMeshRenderer::createPbrSampler()
+{
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.min_lod = 0.0f;
+    samplerInfo.max_lod = 16.0f;
+    samplerInfo.enable_anisotropy = false;
+    samplerInfo.max_anisotropy = 1.0f;
+    m_pbrSampler = SDL_CreateGPUSampler(m_device, &samplerInfo);
+    if (m_pbrSampler == nullptr)
+    {
+        throwSdlError("Failed to create terrain PBR sampler.");
+    }
+}
+
+void QuadtreeMeshRenderer::destroyPbrSampler()
+{
+    if (m_pbrSampler != nullptr)
+    {
+        SDL_ReleaseGPUSampler(m_device, m_pbrSampler);
+        m_pbrSampler = nullptr;
+    }
+}
+
+void QuadtreeMeshRenderer::loadPbrTextures()
+{
+    RuntimeAssets::LoadedAssetBinView assetBin;
+    RuntimeAssets::LoadedTexBinView texBin;
+    std::string error;
+    const std::filesystem::path assetRoot = executableRelativePath("assets/runtime");
+    if (!RuntimeAssets::LoadAssetBinFromSDL((assetRoot / "pbr.assetbin").string().c_str(), &assetBin, &error) ||
+        !RuntimeAssets::LoadTexBinFromSDL((assetRoot / "pbr.texbin").string().c_str(), assetBin, &texBin, &error))
+    {
+        throw std::runtime_error("Failed to load terrain PBR runtime assets: " + error);
+    }
+
+    std::unordered_map<std::string, std::uint32_t> textureIndexByName;
+    for (std::uint32_t textureIndex = 0; textureIndex < texBin.textures.size(); ++textureIndex)
+    {
+        textureIndexByName.emplace(texBin.stringAt(texBin.textures[textureIndex].nameOffset), textureIndex);
+    }
+
+    auto requireTexture = [&](const std::string& textureName) -> std::uint32_t {
+        const auto found = textureIndexByName.find(textureName);
+        if (found == textureIndexByName.end())
+        {
+            throw std::runtime_error("Terrain PBR texture is missing: " + textureName);
+        }
+        return found->second;
+    };
+
+    const std::array<std::uint32_t, kTerrainMaterialLayerCount> albedoIndices{
+        requireTexture("mud_albedo"),
+        requireTexture("wavy-sand_albedo"),
+        requireTexture("pineneedles_albedo"),
+        requireTexture("jagged-rocky-ground_albedo"),
+        requireTexture("snowdrift1_albedo"),
+    };
+    const std::array<std::uint32_t, kTerrainMaterialLayerCount> normalIndices{
+        requireTexture("mud_normal"),
+        requireTexture("wavy-sand_normal"),
+        requireTexture("pineneedles_normal"),
+        requireTexture("jagged-rocky-ground_normal"),
+        requireTexture("snowdrift1_normal-dx"),
+    };
+    const std::array<std::uint32_t, kTerrainMaterialLayerCount> roughnessIndices{
+        requireTexture("mud_roughness"),
+        requireTexture("wavy-sand_roughness"),
+        requireTexture("pineneedles_roughness"),
+        requireTexture("jagged-rocky-ground_roughness"),
+        requireTexture("snowdrift1_roughness"),
+    };
+    const std::array<std::uint32_t, kTerrainMaterialLayerCount> aoIndices{
+        requireTexture("mud_ao"),
+        requireTexture("wavy-sand_ao"),
+        requireTexture("pineneedles_ao"),
+        requireTexture("jagged-rocky-ground_ao"),
+        requireTexture("snowdrift1_ao"),
+    };
+
+    const auto createArray = [&](std::span<const std::uint32_t> textureIndices,
+                                 RuntimeAssets::TextureFormat expectedFormat,
+                                 const char* label) -> SDL_GPUTexture* {
+        const RuntimeAssets::TextureRecord& reference = texBin.textures[textureIndices.front()];
+        if (reference.format != static_cast<std::uint32_t>(expectedFormat) ||
+            reference.dimension != static_cast<std::uint32_t>(RuntimeAssets::TextureDimension::Texture2D) ||
+            reference.layerCount != 1u)
+        {
+            throw std::runtime_error(std::string("Terrain PBR ") + label + " texture metadata is not the expected format.");
+        }
+
+        const RuntimeAssets::TextureFormat runtimeFormat = static_cast<RuntimeAssets::TextureFormat>(reference.format);
+        const SDL_GPUTextureFormat gpuFormat = textureFormatFromRuntimeFormat(runtimeFormat);
+        if (!SDL_GPUTextureSupportsFormat(
+                m_device,
+                gpuFormat,
+                SDL_GPU_TEXTURETYPE_2D_ARRAY,
+                SDL_GPU_TEXTUREUSAGE_SAMPLER))
+        {
+            throw std::runtime_error(std::string("SDL GPU device does not support terrain PBR ") + label + " texture format.");
+        }
+
+        std::uint64_t totalTransferBytes = 0u;
+        for (const std::uint32_t textureIndex : textureIndices)
+        {
+            const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
+            if (record.width != reference.width ||
+                record.height != reference.height ||
+                record.layerCount != reference.layerCount ||
+                record.mipCount != reference.mipCount ||
+                record.format != reference.format ||
+                record.dimension != reference.dimension)
+            {
+                throw std::runtime_error(std::string("Terrain PBR ") + label + " textures do not share a consistent array layout.");
+            }
+            totalTransferBytes += record.dataUncompressedSize;
+        }
+
+        SDL_GPUTextureCreateInfo textureInfo{};
+        textureInfo.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        textureInfo.format = gpuFormat;
+        textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        textureInfo.width = reference.width;
+        textureInfo.height = reference.height;
+        textureInfo.layer_count_or_depth = static_cast<Uint32>(textureIndices.size());
+        textureInfo.num_levels = reference.mipCount;
+        textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        SDL_GPUTexture* texture = SDL_CreateGPUTexture(m_device, &textureInfo);
+        if (texture == nullptr)
+        {
+            throwSdlError(("Failed to create terrain PBR " + std::string(label) + " texture array.").c_str());
+        }
+
+        SDL_GPUTransferBufferCreateInfo transferInfo{};
+        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        transferInfo.size = static_cast<Uint32>(totalTransferBytes);
+        SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+        if (transferBuffer == nullptr)
+        {
+            SDL_ReleaseGPUTexture(m_device, texture);
+            throwSdlError(("Failed to create terrain PBR " + std::string(label) + " transfer buffer.").c_str());
+        }
+
+        std::byte* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(m_device, transferBuffer, false));
+        std::uint64_t transferOffset = 0u;
+        std::array<std::uint64_t, kTerrainMaterialLayerCount> textureOffsets{};
+        for (std::size_t layerIndex = 0; layerIndex < textureIndices.size(); ++layerIndex)
+        {
+            const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndices[layerIndex]];
+            textureOffsets[layerIndex] = transferOffset;
+            const std::byte* sourceBytes = texBin.pixelData.data() + record.dataOffset;
+            std::memcpy(mapped + transferOffset, sourceBytes, static_cast<std::size_t>(record.dataUncompressedSize));
+            transferOffset += record.dataUncompressedSize;
+        }
+        SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
+
+        SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+        if (commandBuffer == nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+            SDL_ReleaseGPUTexture(m_device, texture);
+            throwSdlError(("Failed to acquire command buffer for terrain PBR " + std::string(label) + " upload.").c_str());
+        }
+
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+        if (copyPass == nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+            SDL_ReleaseGPUTexture(m_device, texture);
+            throwSdlError(("Failed to begin terrain PBR " + std::string(label) + " upload copy pass.").c_str());
+        }
+
+        for (std::size_t layerIndex = 0; layerIndex < textureIndices.size(); ++layerIndex)
+        {
+            const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndices[layerIndex]];
+            std::uint64_t sourceOffset = textureOffsets[layerIndex];
+            for (std::uint32_t mipIndex = 0; mipIndex < record.mipCount; ++mipIndex)
+            {
+                const std::uint32_t mipWidth = RuntimeAssets::TextureMipExtent(record.width, mipIndex);
+                const std::uint32_t mipHeight = RuntimeAssets::TextureMipExtent(record.height, mipIndex);
+                const std::uint64_t mipByteSize = RuntimeAssets::CalculateTextureMipByteSize(runtimeFormat, mipWidth, mipHeight);
+
+                SDL_GPUTextureTransferInfo source{};
+                source.transfer_buffer = transferBuffer;
+                source.offset = static_cast<Uint32>(sourceOffset);
+                source.pixels_per_row = textureTransferStrideExtent(runtimeFormat, mipWidth);
+                source.rows_per_layer = textureTransferStrideExtent(runtimeFormat, mipHeight);
+
+                SDL_GPUTextureRegion destination{};
+                destination.texture = texture;
+                destination.mip_level = mipIndex;
+                destination.layer = static_cast<Uint32>(layerIndex);
+                destination.w = mipWidth;
+                destination.h = mipHeight;
+                destination.d = 1u;
+                SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
+                sourceOffset += mipByteSize;
+            }
+        }
+
+        SDL_EndGPUCopyPass(copyPass);
+        const bool submitted = SDL_SubmitGPUCommandBuffer(commandBuffer);
+        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
+        if (!submitted)
+        {
+            SDL_ReleaseGPUTexture(m_device, texture);
+            throwSdlError(("Failed to submit terrain PBR " + std::string(label) + " texture upload.").c_str());
+        }
+
+        return texture;
+    };
+
+    m_pbrAlbedoTextureArray = createArray(albedoIndices, RuntimeAssets::TextureFormat::BC3_RGBA_SRGB, "albedo");
+    m_pbrNormalTextureArray = createArray(normalIndices, RuntimeAssets::TextureFormat::BC5_RG_UNORM, "normal");
+    m_pbrRoughnessTextureArray = createArray(roughnessIndices, RuntimeAssets::TextureFormat::BC3_RGBA_UNORM, "roughness");
+    m_pbrAoTextureArray = createArray(aoIndices, RuntimeAssets::TextureFormat::BC3_RGBA_UNORM, "ao");
+}
+
+void QuadtreeMeshRenderer::destroyPbrTextures()
+{
+    if (m_pbrAoTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_pbrAoTextureArray);
+        m_pbrAoTextureArray = nullptr;
+    }
+    if (m_pbrRoughnessTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_pbrRoughnessTextureArray);
+        m_pbrRoughnessTextureArray = nullptr;
+    }
+    if (m_pbrNormalTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_pbrNormalTextureArray);
+        m_pbrNormalTextureArray = nullptr;
+    }
+    if (m_pbrAlbedoTextureArray != nullptr)
+    {
+        SDL_ReleaseGPUTexture(m_device, m_pbrAlbedoTextureArray);
+        m_pbrAlbedoTextureArray = nullptr;
     }
 }
 

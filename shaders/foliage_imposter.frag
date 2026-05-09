@@ -29,6 +29,16 @@ float saturate(float value)
     return clamp(value, 0.0, 1.0);
 }
 
+float sunVisibility(float sunHeight)
+{
+    return smoothstep(-0.045, 0.02, sunHeight);
+}
+
+float daylightVisibility(float sunHeight)
+{
+    return smoothstep(-0.12, 0.10, sunHeight);
+}
+
 void main()
 {
     vec4 colorSample0 = texture(imposterColorTextureArray, vec3(fragUv0, float(fragLayerIndex0)));
@@ -54,12 +64,14 @@ void main()
     float nDotV = saturate(dot(worldNormal, viewDirection));
     float backScatter = pow(saturate(dot(-viewDirection, sunDirection)), 2.0) * saturate(dot(-worldNormal, sunDirection));
     float sunIntensity = foliageMaterial.sunDirectionIntensity.w;
-    vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * sunIntensity;
-    vec3 ambient = colorSample.rgb * foliageMaterial.sunColorAmbient.a * kFoliageAmbientBoost;
-    vec3 skyFill = colorSample.rgb * foliageMaterial.sunColorAmbient.a * kFoliageSkyFillStrength;
+    float directVisibility = sunVisibility(sunDirection.y);
+    float ambientVisibility = mix(0.10, 1.0, daylightVisibility(sunDirection.y));
+    vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * sunIntensity * directVisibility;
+    vec3 ambient = colorSample.rgb * foliageMaterial.sunColorAmbient.a * kFoliageAmbientBoost * ambientVisibility;
+    vec3 skyFill = colorSample.rgb * foliageMaterial.sunColorAmbient.a * kFoliageSkyFillStrength * ambientVisibility;
     vec3 direct = colorSample.rgb * sunRadiance * (0.42 + (nDotL * 0.58));
     vec3 transmission = colorSample.rgb * sunRadiance * (0.18 * backScatter);
-    vec3 fresnel = vec3(0.018) * pow(1.0 - nDotV, 5.0) * sunIntensity;
+    vec3 fresnel = vec3(0.018) * pow(1.0 - nDotV, 5.0) * sunIntensity * directVisibility;
     vec3 litColor = (ambient + skyFill + direct + transmission + fresnel) * kFoliageLightingScale;
 
     outColor = vec4(litColor, colorSample.a);

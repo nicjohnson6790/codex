@@ -56,3 +56,5 @@ if errorlevel 1 exit /b %errorlevel%
 "%BUILD_DIR%\converter.exe" skybox
 if errorlevel 1 exit /b %errorlevel%
 "%BUILD_DIR%\converter.exe" pinetreepack
+if errorlevel 1 exit /b %errorlevel%
+"%BUILD_DIR%\converter.exe" pbr

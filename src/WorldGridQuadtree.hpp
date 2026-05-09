@@ -154,6 +154,7 @@ private:
     void updateNodeCanopyResidencyHints(const QuadtreeNode& node);
     void updateNodeNearbyFoliageState(QuadtreeNode& node, std::uint64_t frameIndex);
     [[nodiscard]] bool nodeIsInNearbyFoliageTopology(const QuadtreeNode& node) const;
+    [[nodiscard]] bool nodeIntersectsNearbyFoliageRange(const QuadtreeNode& node) const;
     void updateCanopyNeighborAgeHintsForNode(std::uint16_t nodeIndex);
     void emitTerrainDrawForNode(std::uint16_t nodeIndex, const QuadtreeNode& node, RenderEngines& renderEngines);
     void emitFoliageDrawForNode(

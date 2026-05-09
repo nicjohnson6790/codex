@@ -210,6 +210,10 @@ private:
     void destroyCausticsTextures();
     void createCausticsSampler();
     void destroyCausticsSampler();
+    void createPbrSampler();
+    void destroyPbrSampler();
+    void loadPbrTextures();
+    void destroyPbrTextures();
 
     // Builds the static mesh buffers for the reusable terrain meshes.
     void createStaticMeshResources();
@@ -235,6 +239,11 @@ private:
     SDL_GPUComputePipeline* m_foliageInstanceComputePipeline = nullptr;
     SDL_GPUTexture* m_causticsTextureA = nullptr;
     SDL_GPUSampler* m_causticsSampler = nullptr;
+    SDL_GPUSampler* m_pbrSampler = nullptr;
+    SDL_GPUTexture* m_pbrAlbedoTextureArray = nullptr;
+    SDL_GPUTexture* m_pbrNormalTextureArray = nullptr;
+    SDL_GPUTexture* m_pbrRoughnessTextureArray = nullptr;
+    SDL_GPUTexture* m_pbrAoTextureArray = nullptr;
     float m_causticsDecodeScaleA = 1.0f;
 
     // Static reusable terrain meshes plus their one-time upload buffers.

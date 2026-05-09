@@ -22,6 +22,7 @@ namespace
 {
 constexpr double kVisibilityBoundsHalfHeight = 10000.0;
 constexpr double kEdgeCoverageEpsilon = 1.0e-4;
+constexpr double kNearbyFoliageTreeHeightPaddingMeters = 45.0;
 constexpr std::uint8_t kEdgeWest = 0;
 constexpr std::uint8_t kEdgeSouth = 1;
 constexpr std::uint8_t kEdgeEast = 2;
@@ -637,18 +638,22 @@ void WorldGridQuadtree::emitFoliageDrawForNode(
         return;
     }
 
+    std::array<FoliageReadyPageInfo, 16> pageInfos{};
+    for (std::uint32_t pageIndex = 0; pageIndex < canonicalLeafCount; ++pageIndex)
+    {
+        if (!foliageManager.getReadyPageInfo(canonicalLeafIds[pageIndex], pageInfos[pageIndex]))
+        {
+            return;
+        }
+    }
+
     const auto [terrainLeafOrigin, terrainLeafMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
     (void)terrainLeafMaxCorner;
     const std::uint8_t terrainScalePow = worldGridQuadtreeLeafScalePow(node.nodeId);
 
     for (std::uint32_t pageIndex = 0; pageIndex < canonicalLeafCount; ++pageIndex)
     {
-        FoliageReadyPageInfo pageInfo{};
-        if (!foliageManager.getReadyPageInfo(canonicalLeafIds[pageIndex], pageInfo))
-        {
-            continue;
-        }
-
+        const FoliageReadyPageInfo& pageInfo = pageInfos[pageIndex];
         const auto [pageOrigin, pageMaxCorner] = worldGridQuadtreeLeafBounds(canonicalLeafIds[pageIndex]);
         (void)pageMaxCorner;
         foliageRenderer.addPageDraw({
@@ -1185,6 +1190,13 @@ bool WorldGridQuadtree::nodeShouldSuppressFoliageForCanopyTransition(
     std::uint16_t nodeIndex,
     const WorldGridFoliageCanopyManager& canopyManager) const
 {
+    (void)canopyManager;
+
+    if (nodeShouldDrawCanopy(m_nodes[nodeIndex]))
+    {
+        return true;
+    }
+
     std::uint16_t ancestorIndex = m_nodes[nodeIndex].parentIndex;
     while (ancestorIndex != QuadtreeNode::NullNodeIndex)
     {
@@ -1328,7 +1340,8 @@ void WorldGridQuadtree::updateNodeNearbyFoliageState(QuadtreeNode& node, std::ui
         return;
     }
 
-    if (!nodeIsInNearbyFoliageTopology(node))
+    if (!nodeIsInNearbyFoliageTopology(node) ||
+        !nodeIntersectsNearbyFoliageRange(node))
     {
         setNodeFlag(node, QuadtreeNode::NearbyFoliageCpuResidentThisFrameMask, false);
         return;
@@ -1367,6 +1380,38 @@ bool WorldGridQuadtree::nodeIsInNearbyFoliageTopology(const QuadtreeNode& node) 
     return
         std::abs(nodePageX - m_nearbyCameraPageX) <= 1 &&
         std::abs(nodePageZ - m_nearbyCameraPageZ) <= 1;
+}
+
+bool WorldGridQuadtree::nodeIntersectsNearbyFoliageRange(const QuadtreeNode& node) const
+{
+    if (!nodeHasFlag(node, QuadtreeNode::HasExtentsMask))
+    {
+        return false;
+    }
+
+    const double minHeight = static_cast<double>(node.minHeight);
+    const double maxHeight = static_cast<double>(node.maxHeight) + kNearbyFoliageTreeHeightPaddingMeters;
+    const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(
+        node.nodeId,
+        minHeight,
+        maxHeight);
+    const glm::dvec3 minWorld = minCorner.worldPosition();
+    const glm::dvec3 maxWorld = maxCorner.worldPosition();
+    const glm::dvec3 cameraWorld = m_activeCameraPosition.worldPosition();
+    const double range =
+        static_cast<double>(FoliageConfig::kNearbyDefaultRadiusMeters) +
+        static_cast<double>(FoliageConfig::kNearbyDecodeRangePaddingMeters);
+
+    return distanceSquaredToBounds(
+        cameraWorld.x,
+        cameraWorld.y,
+        cameraWorld.z,
+        minWorld.x,
+        minWorld.y,
+        minWorld.z,
+        maxWorld.x,
+        maxWorld.y,
+        maxWorld.z) <= (range * range);
 }
 
 void WorldGridQuadtree::recordTerrainLeafCount(const QuadtreeNode& node)

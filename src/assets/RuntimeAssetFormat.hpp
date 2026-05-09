@@ -29,6 +29,7 @@ enum class TextureFormat : std::uint32_t
     RGBA8_SRGB = 2,
     BC3_RGBA_UNORM = 3,
     BC5_RG_UNORM = 4,
+    BC3_RGBA_SRGB = 5,
 };
 
 enum class TextureDimension : std::uint32_t
@@ -136,6 +137,7 @@ constexpr std::uint32_t TextureBytesPerPixel(TextureFormat format)
         return 4u;
     case TextureFormat::BC3_RGBA_UNORM:
     case TextureFormat::BC5_RG_UNORM:
+    case TextureFormat::BC3_RGBA_SRGB:
         return 0u;
     }
     return 0u;
@@ -143,7 +145,9 @@ constexpr std::uint32_t TextureBytesPerPixel(TextureFormat format)
 
 constexpr bool TextureFormatIsBlockCompressed(TextureFormat format)
 {
-    return format == TextureFormat::BC3_RGBA_UNORM || format == TextureFormat::BC5_RG_UNORM;
+    return format == TextureFormat::BC3_RGBA_UNORM ||
+        format == TextureFormat::BC5_RG_UNORM ||
+        format == TextureFormat::BC3_RGBA_SRGB;
 }
 
 constexpr std::uint32_t TextureBlockSizeBytes(TextureFormat format)
@@ -152,6 +156,7 @@ constexpr std::uint32_t TextureBlockSizeBytes(TextureFormat format)
     {
     case TextureFormat::BC3_RGBA_UNORM:
     case TextureFormat::BC5_RG_UNORM:
+    case TextureFormat::BC3_RGBA_SRGB:
         return 16u;
     case TextureFormat::RGBA8_UNORM:
     case TextureFormat::RGBA8_SRGB:

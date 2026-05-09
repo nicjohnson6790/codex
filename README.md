@@ -11,10 +11,11 @@ This branch does not include the authored pine tree source assets needed to rebu
 - SDL3 GPU renderer presented inside an ImGui docking UI
 - Quadtree terrain with GPU-generated heightmaps and async min/max extent readback
 - Reusable terrain patch meshes with equal-LOD and `2:1` crack stitching
+- Terrain PBR material blending from generated `pbr` runtime texture arrays
 - GPU foliage generation into canonical `256m x 256m` resident pages
 - Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw plus a short dithered handoff band near the imposter range
 - Mid-distance foliage imposter path that renders BC-compressed pine imposter texture arrays with runtime lighting
-- Far-canopy path that renders procedural canopy mass from compact bitset coverage
+- Far-canopy path that renders deterministic procedural canopy coverage until foliage pages are ready
 - Shared-cascade FFT water with bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
 - Skybox and water shading driven by the same cubemap and atmosphere model
 - Offline asset converter that builds compressed runtime `meshbin`, `texbin`, and `assetbin` packs
@@ -113,6 +114,7 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 - `shaders/quadtree_mesh.*`: terrain shaders
 - `shaders/quadtree_mesh_bridge.vert`: terrain bridge vertex shader
 - `shaders/heightmap_generate.comp`: terrain generation compute shader
+- `shaders/foliage_common.glsl`: shared deterministic foliage candidate helpers
 - `shaders/foliage_generate.comp`: foliage page generation compute shader
 - `shaders/foliage_imposter.*`: mid-distance foliage imposter shaders
 - `shaders/nearby_foliage_decode.comp`: nearby foliage decode compute shader
@@ -177,6 +179,8 @@ Run:
 - `pinetreepack.assetbin`
 - `pinetreepack.meshbin`
 - `pinetreepack.texbin`
+- `pbr.assetbin`
+- `pbr.texbin`
 
 Current pine runtime asset details:
 
@@ -186,6 +190,15 @@ Current pine runtime asset details:
 - final imposter arrays are `512x512`, `32` layers, full mip chain
 - color/alpha imposters are stored as `BC3`
 - normal imposters are stored as `BC5`
+
+Current PBR runtime asset details:
+
+- source textures are imported from `assets/source/pbr/tex`
+- runtime textures are normalized to `1024x1024`
+- full mip chains are generated before BC compression
+- albedo maps are stored as `BC3` sRGB
+- normal maps are stored as `BC5`
+- roughness, AO, height, metallic, and similar scalar maps are stored as `BC3` UNORM
 
 ## Assets
 

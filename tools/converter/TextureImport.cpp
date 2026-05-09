@@ -1,10 +1,13 @@
 #include "TextureImport.hpp"
 
+#include "BcTextureCompression.hpp"
+
 #include <SDL3_image/SDL_image.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -71,6 +74,7 @@ bool ParseTgaHeader(std::span<const std::byte> bytes, TgaHeader* outHeader)
 bool IsSrgbTexture(const std::string& lowerName)
 {
     return lowerName.find("color") != std::string::npos ||
+        lowerName.find("albedo") != std::string::npos ||
         lowerName == "px" ||
         lowerName == "nx" ||
         lowerName == "py" ||
@@ -80,6 +84,11 @@ bool IsSrgbTexture(const std::string& lowerName)
         lowerName.find("_bc") != std::string::npos ||
         lowerName.find("basecolor") != std::string::npos ||
         lowerName.find("diffuse") != std::string::npos;
+}
+
+bool IsNormalTexture(const std::string& lowerName)
+{
+    return lowerName.find("normal") != std::string::npos;
 }
 
 std::vector<std::byte> ResizeRgbaImage(
@@ -136,6 +145,149 @@ std::vector<std::byte> ResizeRgbaImage(
     }
 
     return resized;
+}
+
+std::uint32_t FullMipCount(std::uint32_t width, std::uint32_t height)
+{
+    std::uint32_t mipCount = 1u;
+    while (width > 1u || height > 1u)
+    {
+        width = std::max(width / 2u, 1u);
+        height = std::max(height / 2u, 1u);
+        ++mipCount;
+    }
+    return mipCount;
+}
+
+std::vector<std::byte> DownsampleRgba2x(
+    std::span<const std::byte> sourcePixels,
+    std::uint32_t sourceWidth,
+    std::uint32_t sourceHeight,
+    bool normalMap)
+{
+    const std::uint32_t destinationWidth = std::max(sourceWidth / 2u, 1u);
+    const std::uint32_t destinationHeight = std::max(sourceHeight / 2u, 1u);
+    std::vector<std::byte> result(static_cast<std::size_t>(destinationWidth) * destinationHeight * 4u);
+
+    for (std::uint32_t y = 0; y < destinationHeight; ++y)
+    {
+        for (std::uint32_t x = 0; x < destinationWidth; ++x)
+        {
+            float channels[4]{};
+            float normalX = 0.0f;
+            float normalY = 0.0f;
+            float normalZ = 0.0f;
+            float sampleCount = 0.0f;
+
+            for (std::uint32_t oy = 0; oy < 2u; ++oy)
+            {
+                const std::uint32_t sy = std::min((y * 2u) + oy, sourceHeight - 1u);
+                for (std::uint32_t ox = 0; ox < 2u; ++ox)
+                {
+                    const std::uint32_t sx = std::min((x * 2u) + ox, sourceWidth - 1u);
+                    const std::size_t sourceIndex = (static_cast<std::size_t>(sy) * sourceWidth + sx) * 4u;
+                    if (normalMap)
+                    {
+                        const float nx = (static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceIndex + 0u])) / 255.0f) * 2.0f - 1.0f;
+                        const float ny = (static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceIndex + 1u])) / 255.0f) * 2.0f - 1.0f;
+                        const float nz = (static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceIndex + 2u])) / 255.0f) * 2.0f - 1.0f;
+                        normalX += nx;
+                        normalY += ny;
+                        normalZ += nz;
+                    }
+                    else
+                    {
+                        for (std::size_t channel = 0; channel < 4u; ++channel)
+                        {
+                            channels[channel] += static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceIndex + channel]));
+                        }
+                    }
+                    sampleCount += 1.0f;
+                }
+            }
+
+            const std::size_t destinationIndex = (static_cast<std::size_t>(y) * destinationWidth + x) * 4u;
+            if (normalMap)
+            {
+                const float length = std::sqrt((normalX * normalX) + (normalY * normalY) + (normalZ * normalZ));
+                const float invLength = length > 0.00001f ? 1.0f / length : 1.0f;
+                const float nx = normalX * invLength;
+                const float ny = normalY * invLength;
+                const float nz = normalZ * invLength;
+                result[destinationIndex + 0u] = std::byte{ static_cast<std::uint8_t>(std::clamp((nx * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f)) };
+                result[destinationIndex + 1u] = std::byte{ static_cast<std::uint8_t>(std::clamp((ny * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f)) };
+                result[destinationIndex + 2u] = std::byte{ static_cast<std::uint8_t>(std::clamp((nz * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f)) };
+                result[destinationIndex + 3u] = std::byte{ 0xFF };
+            }
+            else
+            {
+                for (std::size_t channel = 0; channel < 4u; ++channel)
+                {
+                    result[destinationIndex + channel] = std::byte{
+                        static_cast<std::uint8_t>(std::clamp(channels[channel] / sampleCount, 0.0f, 255.0f))
+                    };
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+bool AppendCompressedPbrMipChain(
+    const ImportedTexture& texture,
+    bool normalMap,
+    RuntimeAssets::TextureFormat* outFormat,
+    std::uint32_t* outMipCount,
+    std::vector<std::byte>* outPayload,
+    std::string* error)
+{
+    outPayload->clear();
+    *outMipCount = FullMipCount(texture.width, texture.height);
+
+    std::vector<std::byte> mipPixels = texture.payload;
+    std::uint32_t mipWidth = texture.width;
+    std::uint32_t mipHeight = texture.height;
+
+    for (std::uint32_t mipIndex = 0; mipIndex < *outMipCount; ++mipIndex)
+    {
+        std::vector<std::byte> compressedMip;
+        if (normalMap)
+        {
+            *outFormat = RuntimeAssets::TextureFormat::BC5_RG_UNORM;
+            if (!ConverterCompressBc5Rg(mipPixels, mipWidth, mipHeight, &compressedMip, error))
+            {
+                return false;
+            }
+        }
+        else if ((texture.flags & RuntimeAssets::TextureFlagSrgb) != 0u)
+        {
+            *outFormat = RuntimeAssets::TextureFormat::BC3_RGBA_SRGB;
+            if (!ConverterCompressBc3RgbaSrgb(mipPixels, mipWidth, mipHeight, &compressedMip, error))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            *outFormat = RuntimeAssets::TextureFormat::BC3_RGBA_UNORM;
+            if (!ConverterCompressBc3Rgba(mipPixels, mipWidth, mipHeight, &compressedMip, error))
+            {
+                return false;
+            }
+        }
+
+        outPayload->insert(outPayload->end(), compressedMip.begin(), compressedMip.end());
+
+        if (mipIndex + 1u < *outMipCount)
+        {
+            mipPixels = DownsampleRgba2x(mipPixels, mipWidth, mipHeight, normalMap);
+            mipWidth = std::max(mipWidth / 2u, 1u);
+            mipHeight = std::max(mipHeight / 2u, 1u);
+        }
+    }
+
+    return true;
 }
 
 bool DecodeTga(const std::filesystem::path& path, ImportedTexture* outTexture, std::string* error)
@@ -419,6 +571,53 @@ bool ImportTextureFolder(
                 resizeSquare);
             texture.width = resizeSquare;
             texture.height = resizeSquare;
+        }
+
+        if (options.compressPbrToBc)
+        {
+            if (!ConverterHasBcCompressionSupport())
+            {
+                *error = ConverterBcCompressionUnavailableReason();
+                return false;
+            }
+
+            std::vector<std::byte> compressedPayload;
+            RuntimeAssets::TextureFormat compressedFormat = RuntimeAssets::TextureFormat::RGBA8_UNORM;
+            std::uint32_t compressedMipCount = 1u;
+            if (IsNormalTexture(texture.name))
+            {
+                if (!AppendCompressedPbrMipChain(
+                        texture,
+                        true,
+                        &compressedFormat,
+                        &compressedMipCount,
+                        &compressedPayload,
+                        error))
+                {
+                    return false;
+                }
+                texture.flags &= ~RuntimeAssets::TextureFlagSrgb;
+            }
+            else
+            {
+                if (!AppendCompressedPbrMipChain(
+                        texture,
+                        false,
+                        &compressedFormat,
+                        &compressedMipCount,
+                        &compressedPayload,
+                        error))
+                {
+                    return false;
+                }
+                if (compressedFormat == RuntimeAssets::TextureFormat::BC3_RGBA_UNORM)
+                {
+                    texture.flags &= ~RuntimeAssets::TextureFlagSrgb;
+                }
+            }
+            texture.format = compressedFormat;
+            texture.mipCount = compressedMipCount;
+            texture.payload = std::move(compressedPayload);
         }
 
         const std::uint32_t textureIndex = static_cast<std::uint32_t>(outPack->textures.size());

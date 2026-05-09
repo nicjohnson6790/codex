@@ -29,6 +29,15 @@ void ApplyPackDefaults(std::string_view packName, ConverterConfig* outConfig)
         return;
     }
 
+    if (packName == "pbr")
+    {
+        outConfig->packKind = ConverterConfig::PackKind::Pbr;
+        outConfig->sourceRoot = repoRoot() / "assets" / "source" / "pbr";
+        outConfig->fbxRoot.clear();
+        outConfig->textureRoot = outConfig->sourceRoot / "tex";
+        return;
+    }
+
     outConfig->packKind = ConverterConfig::PackKind::PineTree;
     outConfig->sourceRoot = repoRoot() / "assets" / "source" / outConfig->packName;
     outConfig->fbxRoot = outConfig->sourceRoot / "fbx";
@@ -41,6 +50,7 @@ void PrintUsage()
         << "Usage:\n"
         << "  converter.exe pinetreepack\n"
         << "  converter.exe skybox\n"
+        << "  converter.exe pbr\n"
         << "  converter.exe --source <path> --out <path> --name <pack>\n";
 }
 

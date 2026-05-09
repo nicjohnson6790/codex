@@ -411,6 +411,8 @@ SDL_GPUTextureFormat FoliageImposterRenderer::textureFormatFromRuntimeFormat(Run
     {
     case RuntimeAssets::TextureFormat::BC3_RGBA_UNORM:
         return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
+    case RuntimeAssets::TextureFormat::BC3_RGBA_SRGB:
+        return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB;
     case RuntimeAssets::TextureFormat::BC5_RG_UNORM:
         return SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM;
     case RuntimeAssets::TextureFormat::RGBA8_SRGB:

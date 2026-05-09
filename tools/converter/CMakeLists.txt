@@ -176,6 +176,11 @@ add_executable(converter
 
 add_dependencies(converter converter_shaders)
 
+add_custom_command(TARGET converter POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy -t $<TARGET_FILE_DIR:converter> $<TARGET_RUNTIME_DLLS:converter>
+    COMMAND_EXPAND_LISTS
+)
+
 target_compile_definitions(converter
     PRIVATE
         CONVERTER_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../.."

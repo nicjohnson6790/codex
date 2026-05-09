@@ -146,6 +146,48 @@ bool ConverterCompressBc3Rgba(
 #endif
 }
 
+bool ConverterCompressBc3RgbaSrgb(
+    std::span<const std::byte> rgbaPixels,
+    std::uint32_t width,
+    std::uint32_t height,
+    std::vector<std::byte>* outCompressedBlocks,
+    std::string* error)
+{
+    outCompressedBlocks->clear();
+    if (!ValidateSourceImage(rgbaPixels, width, height, error))
+    {
+        return false;
+    }
+
+#if !defined(CONVERTER_HAS_DIRECTXTEX)
+    *error = kBcCompressionUnavailableReason;
+    return false;
+#else
+    const std::size_t expectedBytes = static_cast<std::size_t>(RuntimeAssets::CalculateTextureMipByteSize(
+        RuntimeAssets::TextureFormat::BC3_RGBA_SRGB,
+        width,
+        height));
+    if (!ConvertToCompressedFormat(
+            rgbaPixels,
+            width,
+            height,
+            DXGI_FORMAT_BC3_UNORM_SRGB,
+            DirectX::TEX_COMPRESS_DEFAULT,
+            outCompressedBlocks,
+            error))
+    {
+        return false;
+    }
+    if (outCompressedBlocks->size() != expectedBytes)
+    {
+        *error = "DirectXTex BC3 sRGB output size does not match BC block sizing rules";
+        outCompressedBlocks->clear();
+        return false;
+    }
+    return true;
+#endif
+}
+
 bool ConverterCompressBc5Rg(
     std::span<const std::byte> rgbaPixels,
     std::uint32_t width,

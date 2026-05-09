@@ -13,6 +13,13 @@ bool ConverterCompressBc3Rgba(
     std::vector<std::byte>* outCompressedBlocks,
     std::string* error);
 
+bool ConverterCompressBc3RgbaSrgb(
+    std::span<const std::byte> rgbaPixels,
+    std::uint32_t width,
+    std::uint32_t height,
+    std::vector<std::byte>* outCompressedBlocks,
+    std::string* error);
+
 bool ConverterCompressBc5Rg(
     std::span<const std::byte> rgbaPixels,
     std::uint32_t width,

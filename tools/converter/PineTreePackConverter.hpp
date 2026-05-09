@@ -16,6 +16,7 @@ struct ConverterConfig
     {
         PineTree,
         Skybox,
+        Pbr,
     };
 
     std::filesystem::path sourceRoot;
@@ -32,6 +33,7 @@ struct TextureImportOptions
     bool allowPng = false;
     bool forceSrgb = false;
     std::uint32_t resizeSquare = 0;
+    bool compressPbrToBc = false;
 };
 
 struct ImportedMesh
