@@ -79,6 +79,23 @@ float horizontalRadiusForBounds(const RuntimeAssets::MeshRecord& mesh)
     }
     return radius;
 }
+
+std::uint32_t textureTransferStrideExtent(RuntimeAssets::TextureFormat format, std::uint32_t mipExtent)
+{
+    if (!RuntimeAssets::TextureFormatIsBlockCompressed(format))
+    {
+        return mipExtent;
+    }
+
+    return std::max<std::uint32_t>(((mipExtent + 3u) / 4u) * 4u, 4u);
+}
+
+float imposterDrawDistanceSquared(const FoliageImposterRenderer::DrawMetadataGpu& draw)
+{
+    const float centerX = draw.pageOriginAndTerrainSize.x + (static_cast<float>(FoliageConfig::kPageSizeMeters) * 0.5f);
+    const float centerZ = draw.pageOriginAndTerrainSize.z + (static_cast<float>(FoliageConfig::kPageSizeMeters) * 0.5f);
+    return (centerX * centerX) + (centerZ * centerZ);
+}
 }
 
 void FoliageImposterRenderer::initialize(
@@ -254,6 +271,38 @@ void FoliageImposterRenderer::upload(SDL_GPUCopyPass* copyPass)
     {
         return;
     }
+
+    std::array<std::uint32_t, AppConfig::Foliage::kMarkerPageDrawCapacity> drawOrder{};
+    for (std::uint32_t drawIndex = 0; drawIndex < m_drawCount; ++drawIndex)
+    {
+        drawOrder[drawIndex] = drawIndex;
+    }
+    std::sort(
+        drawOrder.begin(),
+        drawOrder.begin() + m_drawCount,
+        [&](std::uint32_t lhs, std::uint32_t rhs) {
+            return imposterDrawDistanceSquared(m_drawMetadata[lhs]) < imposterDrawDistanceSquared(m_drawMetadata[rhs]);
+        });
+
+    std::array<DrawMetadataGpu, AppConfig::Foliage::kMarkerPageDrawCapacity> sortedMetadata{};
+    std::array<SDL_GPUIndexedIndirectDrawCommand, AppConfig::Foliage::kMarkerPageDrawCapacity> sortedCommands{};
+    std::array<std::uint8_t, AppConfig::Foliage::kMarkerPageDrawCapacity> sortedTerrainScalePows{};
+    m_pageDrawSlots.fill(UINT32_MAX);
+    for (std::uint32_t sortedIndex = 0; sortedIndex < m_drawCount; ++sortedIndex)
+    {
+        const std::uint32_t sourceIndex = drawOrder[sortedIndex];
+        sortedMetadata[sortedIndex] = m_drawMetadata[sourceIndex];
+        sortedCommands[sortedIndex] = m_drawCommands[sourceIndex];
+        sortedTerrainScalePows[sortedIndex] = m_drawTerrainScalePows[sourceIndex];
+        const std::uint32_t pageIndex = sortedMetadata[sortedIndex].seedData.y;
+        if (pageIndex < m_pageDrawSlots.size())
+        {
+            m_pageDrawSlots[pageIndex] = sortedIndex;
+        }
+    }
+    std::copy(sortedMetadata.begin(), sortedMetadata.begin() + m_drawCount, m_drawMetadata.begin());
+    std::copy(sortedCommands.begin(), sortedCommands.begin() + m_drawCount, m_drawCommands.begin());
+    std::copy(sortedTerrainScalePows.begin(), sortedTerrainScalePows.begin() + m_drawCount, m_drawTerrainScalePows.begin());
 
     void* mappedMetadata = SDL_MapGPUTransferBuffer(m_device, m_drawMetadataTransferBuffer, true);
     std::memcpy(mappedMetadata, m_drawMetadata.data(), sizeof(DrawMetadataGpu) * m_drawCount);
@@ -633,8 +682,8 @@ SDL_GPUTexture* FoliageImposterRenderer::createImposterTextureArray(
                 SDL_GPUTextureTransferInfo source{};
                 source.transfer_buffer = transferBuffer;
                 source.offset = static_cast<Uint32>(sourceOffset);
-                source.pixels_per_row = mipWidth;
-                source.rows_per_layer = mipHeight;
+                source.pixels_per_row = textureTransferStrideExtent(runtimeFormat, mipWidth);
+                source.rows_per_layer = textureTransferStrideExtent(runtimeFormat, mipHeight);
 
                 SDL_GPUTextureRegion destination{};
                 destination.texture = texture;

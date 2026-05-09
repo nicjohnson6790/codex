@@ -39,6 +39,13 @@ std::uint32_t decodedNearbyFlags(std::uint32_t packedMeta)
     return packedMeta >> kDecodedNearbyFlagsShift;
 }
 
+float nearbyInstanceDistanceSquared(const NearbyFoliageRenderer::DrawInstanceGpu& instance)
+{
+    const float instanceX = instance.pageOriginAndSlice.x + instance.localOffsetAndMesh.x;
+    const float instanceZ = instance.pageOriginAndSlice.z + instance.localOffsetAndMesh.y;
+    return (instanceX * instanceX) + (instanceZ * instanceZ);
+}
+
 bool containsInsensitive(std::string_view haystack, std::string_view needle)
 {
     auto lower = [](unsigned char c) {
@@ -484,6 +491,16 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
         return;
     }
 
+    std::sort(
+        m_drawInstances.begin(),
+        m_drawInstances.begin() + m_drawCount,
+        [](const DrawInstanceGpu& lhs, const DrawInstanceGpu& rhs) {
+            return nearbyInstanceDistanceSquared(lhs) < nearbyInstanceDistanceSquared(rhs);
+        });
+
+    std::array<float, kNearbyDrawGroupCount> groupNearestDistanceSquared{};
+    groupNearestDistanceSquared.fill(std::numeric_limits<float>::max());
+
     std::uint32_t writeIndex = 0u;
     for (std::uint32_t treeClass = 0; treeClass < m_activeTreeClassCount; ++treeClass)
     {
@@ -505,6 +522,9 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
                 }
 
                 m_groupedDrawInstances[writeIndex++] = m_drawInstances[drawIndex];
+                groupNearestDistanceSquared[groupIndex] = std::min(
+                    groupNearestDistanceSquared[groupIndex],
+                    nearbyInstanceDistanceSquared(m_drawInstances[drawIndex]));
             }
             m_groupInstanceCounts[groupIndex] = writeIndex - m_groupFirstInstances[groupIndex];
         }
@@ -522,35 +542,50 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
     SDL_UploadToGPUBuffer(copyPass, &instanceSource, &instanceDestination, true);
 
     m_activeDrawCommandCount = 0u;
-    for (std::uint32_t treeClass = 0; treeClass < m_activeTreeClassCount; ++treeClass)
+    std::array<std::uint32_t, kNearbyDrawGroupCount> groupOrder{};
+    for (std::uint32_t groupIndex = 0; groupIndex < groupOrder.size(); ++groupIndex)
     {
-        for (std::uint32_t lodIndex = 0; lodIndex < kNearbyLodCount; ++lodIndex)
-        {
-            const std::uint32_t groupIndex = (treeClass * kNearbyLodCount) + lodIndex;
-            if (m_groupInstanceCounts[groupIndex] == 0u)
-            {
-                continue;
-            }
+        groupOrder[groupIndex] = groupIndex;
+    }
+    std::sort(
+        groupOrder.begin(),
+        groupOrder.end(),
+        [&](std::uint32_t lhs, std::uint32_t rhs) {
+            return groupNearestDistanceSquared[lhs] < groupNearestDistanceSquared[rhs];
+        });
 
-            for (const LoadedDrawPart& drawPart : m_loadedClassLods[treeClass][lodIndex].drawParts)
-            {
-                m_drawMetadataGpu[m_activeDrawCommandCount].instanceOffsetAndMaterial = glm::uvec4(
-                    m_groupFirstInstances[groupIndex],
-                    drawPart.materialIndex,
-                    0u,
-                    0u);
-                m_drawMetadataGpu[m_activeDrawCommandCount].classCenterAndLodCenter = glm::vec4(
-                    drawPart.classCenterXz.x,
-                    drawPart.classCenterXz.y,
-                    drawPart.lodCenterXz.x,
-                    drawPart.lodCenterXz.y);
-                m_drawCommands[m_activeDrawCommandCount] = makeDrawCommand(
-                    drawPart.indexCount,
-                    m_groupInstanceCounts[groupIndex],
-                    drawPart.firstIndex,
-                    drawPart.vertexOffset);
-                ++m_activeDrawCommandCount;
-            }
+    for (const std::uint32_t groupIndex : groupOrder)
+    {
+        if (m_groupInstanceCounts[groupIndex] == 0u)
+        {
+            continue;
+        }
+
+        const std::uint32_t treeClass = groupIndex / kNearbyLodCount;
+        const std::uint32_t lodIndex = groupIndex % kNearbyLodCount;
+        if (treeClass >= m_activeTreeClassCount)
+        {
+            continue;
+        }
+
+        for (const LoadedDrawPart& drawPart : m_loadedClassLods[treeClass][lodIndex].drawParts)
+        {
+            m_drawMetadataGpu[m_activeDrawCommandCount].instanceOffsetAndMaterial = glm::uvec4(
+                m_groupFirstInstances[groupIndex],
+                drawPart.materialIndex,
+                0u,
+                0u);
+            m_drawMetadataGpu[m_activeDrawCommandCount].classCenterAndLodCenter = glm::vec4(
+                drawPart.classCenterXz.x,
+                drawPart.classCenterXz.y,
+                drawPart.lodCenterXz.x,
+                drawPart.lodCenterXz.y);
+            m_drawCommands[m_activeDrawCommandCount] = makeDrawCommand(
+                drawPart.indexCount,
+                m_groupInstanceCounts[groupIndex],
+                drawPart.firstIndex,
+                drawPart.vertexOffset);
+            ++m_activeDrawCommandCount;
         }
     }
 

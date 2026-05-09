@@ -573,11 +573,11 @@ bool WorldGridQuadtree::collectNodeFoliagePageIds(
 
 bool WorldGridQuadtree::collectNodeCanopyCellIds(
     const QuadtreeNode& node,
-    std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode>& canonicalLeafIds) const
+    std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode>& canonicalLeafIds,
+    std::uint32_t& canonicalLeafCount) const
 {
-    std::uint32_t canonicalLeafCount = 0;
     collectCanonicalFoliageLeafIds(node.nodeId, canonicalLeafIds, canonicalLeafCount);
-    return canonicalLeafCount == FoliageConfig::kCanopyCellCountPerNode;
+    return canonicalLeafCount > 0;
 }
 
 void WorldGridQuadtree::setWaterVisibilityBounds(float waterMinHeight, float waterMaxHeight, bool enabled)
@@ -703,7 +703,8 @@ void WorldGridQuadtree::emitCanopyDrawForNode(
     }
 
     std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canonicalLeafIds{};
-    if (!collectNodeCanopyCellIds(node, canonicalLeafIds))
+    std::uint32_t canonicalLeafCount = 0;
+    if (!collectNodeCanopyCellIds(node, canonicalLeafIds, canonicalLeafCount))
     {
         return;
     }
@@ -736,7 +737,7 @@ void WorldGridQuadtree::emitCanopyDrawForNode(
 
     std::uint32_t readyCellCount = 0;
     std::uint8_t youngestResidentFrameAge = std::numeric_limits<std::uint8_t>::max();
-    for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
+    for (std::uint32_t cellIndex = 0; cellIndex < canonicalLeafCount; ++cellIndex)
     {
         FoliageCanopyReadyCellInfo cellInfo{};
         const bool cellReady = canopyManager.getReadyCellInfo(canonicalLeafIds[cellIndex], cellInfo);
@@ -749,13 +750,16 @@ void WorldGridQuadtree::emitCanopyDrawForNode(
         }
     }
 
-    if (readyCellCount < FoliageConfig::kCanopyMinimumReadyCellCount)
+    const std::uint32_t minimumReadyCellCount = std::min<std::uint32_t>(
+        canonicalLeafCount,
+        FoliageConfig::kCanopyMinimumReadyCellCount);
+    if (readyCellCount < minimumReadyCellCount)
     {
         return;
     }
 
     drawReference.drawAgeFrames = std::min(youngestResidentFrameAge, FoliageConfig::kCanopyFadeInFrameCount);
-    for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
+    for (std::uint32_t cellIndex = 0; cellIndex < canonicalLeafCount; ++cellIndex)
     {
         if (drawReference.cellSlotIndices[cellIndex] != UINT16_MAX)
         {
@@ -1209,7 +1213,7 @@ bool WorldGridQuadtree::subtreeCanRenderFoliageWithoutCanopyFallback(std::uint16
     {
         return true;
     }
-    return nodeHasFlag(node, QuadtreeNode::CanRenderWithoutParentFallbackMask);
+    return node.canRenderFoliageWithoutCanopyFallback;
 }
 
 void WorldGridQuadtree::updateNodeFoliageState(QuadtreeNode& node, WorldGridFoliageManager* foliageManager)
@@ -1304,12 +1308,13 @@ void WorldGridQuadtree::updateNodeCanopyResidencyHints(const QuadtreeNode& node)
     }
 
     std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canonicalLeafIds{};
-    if (!collectNodeCanopyCellIds(node, canonicalLeafIds))
+    std::uint32_t canonicalLeafCount = 0;
+    if (!collectNodeCanopyCellIds(node, canonicalLeafIds, canonicalLeafCount))
     {
         return;
     }
 
-    for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
+    for (std::uint32_t cellIndex = 0; cellIndex < canonicalLeafCount; ++cellIndex)
     {
         (void)m_activeCanopyManager->makeResident(canonicalLeafIds[cellIndex], node.nodeId, terrainSliceIndex);
     }
@@ -1394,14 +1399,15 @@ bool WorldGridQuadtree::youngestCanopyResidentAgeForNode(std::uint16_t canopyNod
     }
 
     std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canopyLeafIds{};
-    if (!collectNodeCanopyCellIds(canopyNode, canopyLeafIds))
+    std::uint32_t canopyLeafCount = 0;
+    if (!collectNodeCanopyCellIds(canopyNode, canopyLeafIds, canopyLeafCount))
     {
         return false;
     }
 
     std::uint32_t readyCellCount = 0;
     std::uint8_t minResidentAge = std::numeric_limits<std::uint8_t>::max();
-    for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
+    for (std::uint32_t cellIndex = 0; cellIndex < canopyLeafCount; ++cellIndex)
     {
         FoliageCanopyReadyCellInfo cellInfo{};
         if (!m_activeCanopyManager->getReadyCellInfo(canopyLeafIds[cellIndex], cellInfo))
@@ -1413,7 +1419,10 @@ bool WorldGridQuadtree::youngestCanopyResidentAgeForNode(std::uint16_t canopyNod
         ++readyCellCount;
     }
 
-    if (readyCellCount < FoliageConfig::kCanopyMinimumReadyCellCount)
+    const std::uint32_t minimumReadyCellCount = std::min<std::uint32_t>(
+        canopyLeafCount,
+        FoliageConfig::kCanopyMinimumReadyCellCount);
+    if (readyCellCount < minimumReadyCellCount)
     {
         return false;
     }
@@ -1673,6 +1682,9 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     const bool nodeUsesCanonicalPages = nodeUsesCanonicalFoliagePages(node);
     const bool nodeIsCanopySize =
         std::abs(size - static_cast<double>(FoliageConfig::kCanopyNodeSizeMeters)) <= 0.001;
+    const bool nodeCanUseCanopyFallback =
+        size >= static_cast<double>(FoliageConfig::kPageSizeMeters * 2u) &&
+        size <= static_cast<double>(FoliageConfig::kCanopyNodeSizeMeters);
     double drawMinHeight = nodeHasFlag(node, QuadtreeNode::HasExtentsMask)
         ? static_cast<double>(node.minHeight)
         : -kVisibilityBoundsHalfHeight;
@@ -1702,7 +1714,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
     const bool maintainCanopyResidency =
         shouldDraw &&
-        nodeIsCanopySize &&
+        nodeCanUseCanopyFallback &&
         nodeIntersectsCanopyRange(node);
     setNodeFlag(node, QuadtreeNode::MaintainCanopyResidencyMask, maintainCanopyResidency);
 
@@ -1716,6 +1728,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         std::array<WorldGridQuadtreeLeafId, 16> foliageLeafIds{};
         bool canopyIdsComputed = false;
         bool hasCanopyLeafIds = false;
+        std::uint32_t canopyLeafCount = 0;
         std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canopyLeafIds{};
     } traversalCache;
 
@@ -1750,13 +1763,13 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         {
             traversalCache.canopyIdsComputed = true;
             traversalCache.hasCanopyLeafIds = false;
-            std::uint32_t canopyLeafCount = 0;
+            traversalCache.canopyLeafCount = 0;
             collectCanonicalFoliageLeafIds(
                 node.nodeId,
                 traversalCache.canopyLeafIds,
-                canopyLeafCount);
+                traversalCache.canopyLeafCount);
             traversalCache.hasCanopyLeafIds =
-                canopyLeafCount == FoliageConfig::kCanopyCellCountPerNode;
+                traversalCache.canopyLeafCount > 0;
         }
         return traversalCache.hasCanopyLeafIds;
     };
@@ -1767,6 +1780,11 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             node,
             QuadtreeNode::CanRenderWithoutParentFallbackMask,
             canRenderWithoutParentFallback);
+    };
+
+    const auto setCanRenderFoliageWithoutCanopyFallback = [&](bool canRenderFoliageWithoutCanopyFallback)
+    {
+        node.canRenderFoliageWithoutCanopyFallback = canRenderFoliageWithoutCanopyFallback;
     };
 
     const auto updateNodeFoliageStateForTraversal = [&]()
@@ -1832,7 +1850,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             if (getTerrainSliceIndex() && getCanopyLeafIds())
             {
                 canopyReady = true;
-                for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
+                for (std::uint32_t cellIndex = 0; cellIndex < traversalCache.canopyLeafCount; ++cellIndex)
                 {
                     canopyReady = m_activeCanopyManager->makeResident(
                         traversalCache.canopyLeafIds[cellIndex],
@@ -1842,10 +1860,8 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
 
                 if (canopyReady)
                 {
-                    canopyShouldDraw = nodeContributesTerrainDraw(node);
-                    if (!canopyShouldDraw &&
-                        !nodeHasFlag(node, QuadtreeNode::IsLeafMask) &&
-                        !subtreeCanRenderFoliageWithoutCanopyFallback(nodeIndex))
+                    canopyShouldDraw = nodeIsCanopySize && nodeContributesTerrainDraw(node);
+                    if (!canopyShouldDraw && !subtreeCanRenderFoliageWithoutCanopyFallback(nodeIndex))
                     {
                         canopyShouldDraw = true;
                     }
@@ -1871,14 +1887,14 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             !nodeHasFlag(node, QuadtreeNode::IsLeafMask) ||
             shouldDraw ||
             !nodeHasResidentTerrainSurface(node) ||
-            !nodeIsCanopySize ||
+            !nodeCanUseCanopyFallback ||
             !getTerrainSliceIndex() ||
             !getCanopyLeafIds())
         {
             return;
         }
 
-        for (std::uint32_t cellIndex = 0; cellIndex < FoliageConfig::kCanopyCellCountPerNode; ++cellIndex)
+        for (std::uint32_t cellIndex = 0; cellIndex < traversalCache.canopyLeafCount; ++cellIndex)
         {
             (void)m_activeCanopyManager->makeResident(
                 traversalCache.canopyLeafIds[cellIndex],
@@ -1891,6 +1907,15 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     {
         updateNodeFoliageStateForTraversal();
         updateNodeFoliageResidencyHintsForTraversal();
+        const bool nodeCanRenderOwnFoliage =
+            nodeUsesCanonicalPages &&
+            nodeHasResidentTerrainSurface(node) &&
+            (m_activeFoliageManager == nullptr ||
+                nodeHasFlag(node, QuadtreeNode::FoliageShouldDrawMask));
+        if (nodeHasFlag(node, QuadtreeNode::IsLeafMask) || nodeCanRenderOwnFoliage)
+        {
+            setCanRenderFoliageWithoutCanopyFallback(nodeCanRenderOwnFoliage);
+        }
         updateCanopyFlagsForTraversal();
         updateNodeCanopyResidencyHintsForTraversal();
         updateCanopyNeighborAgeHintsForNode(nodeIndex);
@@ -1923,17 +1948,21 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         }
 
         bool allChildrenReady = true;
+        bool allChildrenFoliageReady = true;
         for (const std::uint16_t childIndex : node.children)
         {
             if (childIndex == QuadtreeNode::NullNodeIndex)
             {
                 allChildrenReady = false;
+                allChildrenFoliageReady = false;
                 continue;
             }
 
             updateNode(childIndex, activeCamera, frameIndex);
             allChildrenReady = allChildrenReady &&
                 nodeHasFlag(m_nodes[childIndex], QuadtreeNode::CanRenderWithoutParentFallbackMask);
+            allChildrenFoliageReady = allChildrenFoliageReady &&
+                subtreeCanRenderFoliageWithoutCanopyFallback(childIndex);
         }
 
         if (!nodeIsParentOfLeaves(m_nodes, node))
@@ -1941,6 +1970,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
             clearTraversalTransitionFlags();
             setCanRenderWithoutParentFallback(allChildrenReady);
+            setCanRenderFoliageWithoutCanopyFallback(allChildrenFoliageReady);
             finalizeNodeTraversalState(false);
             return;
         }
@@ -1976,6 +2006,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         setNodeFlag(node, QuadtreeNode::CollapseHandoffMask, false);
         setCanRenderWithoutParentFallback(
             isSubdividing ? resident : allChildrenReady);
+        setCanRenderFoliageWithoutCanopyFallback(allChildrenFoliageReady);
         if (isSubdividing && !wasSubdividing)
         {
             ++treeData.subdivisionCountThisFrame;
@@ -1999,6 +2030,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
     }
 
     bool allChildrenReady = true;
+    bool allChildrenFoliageReady = true;
     for (const std::uint16_t childIndex : node.children)
     {
         if (childIndex != QuadtreeNode::NullNodeIndex)
@@ -2006,6 +2038,13 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
             updateNode(childIndex, activeCamera, frameIndex);
             allChildrenReady = allChildrenReady &&
                 nodeHasFlag(m_nodes[childIndex], QuadtreeNode::CanRenderWithoutParentFallbackMask);
+            allChildrenFoliageReady = allChildrenFoliageReady &&
+                subtreeCanRenderFoliageWithoutCanopyFallback(childIndex);
+        }
+        else
+        {
+            allChildrenReady = false;
+            allChildrenFoliageReady = false;
         }
     }
 
@@ -2014,6 +2053,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         setNodeFlag(node, QuadtreeNode::IsUploadingMask, false);
         clearTraversalTransitionFlags();
         setCanRenderWithoutParentFallback(allChildrenReady);
+        setCanRenderFoliageWithoutCanopyFallback(allChildrenFoliageReady);
         finalizeNodeTraversalState(false);
         return;
     }
@@ -2083,6 +2123,7 @@ void WorldGridQuadtree::updateNode(std::uint16_t nodeIndex, const CameraManager:
         ++treeData.collapseCountThisFrame;
     }
     setCanRenderWithoutParentFallback(allChildrenReady);
+    setCanRenderFoliageWithoutCanopyFallback(allChildrenFoliageReady);
     finalizeNodeTraversalState(false);
 }
 

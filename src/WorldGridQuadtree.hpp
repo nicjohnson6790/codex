@@ -41,6 +41,7 @@ struct QuadtreeNode
         std::uint8_t{255},
         std::uint8_t{255},
     };
+    bool canRenderFoliageWithoutCanopyFallback = false;
 
     static constexpr std::uint16_t NullNodeIndex = UINT16_MAX;
     static constexpr std::uint16_t IsLeafMask = 1;
@@ -134,7 +135,8 @@ private:
         std::uint32_t& canonicalLeafCount) const;
     [[nodiscard]] bool collectNodeCanopyCellIds(
         const QuadtreeNode& node,
-        std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode>& canonicalLeafIds) const;
+        std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode>& canonicalLeafIds,
+        std::uint32_t& canonicalLeafCount) const;
     [[nodiscard]] static bool nodeContributesTerrainDraw(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeHasResidentTerrainSurface(const QuadtreeNode& node);
     [[nodiscard]] static bool nodeShouldDrawFoliage(const QuadtreeNode& node);

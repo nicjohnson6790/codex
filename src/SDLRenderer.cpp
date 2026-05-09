@@ -355,14 +355,15 @@ void SDLRenderer::renderFrame(
                 quadtreeMeshRenderer.heightmapBuffer());
         }
         {
-            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderCanopy", ProfileScopeGroup::Renderer);
-            if constexpr (AppConfig::Foliage::kCanopyEnabled)
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderNearbyFoliage", ProfileScopeGroup::Renderer);
+            if constexpr (AppConfig::Foliage::kEnabled)
             {
-                canopyRenderer.render(
+                nearbyFoliageRenderer.render(
                     renderPass,
                     commandBuffer,
                     viewProjection,
                     lightingSystem,
+                    skyboxRenderer,
                     quadtreeMeshRenderer.heightmapBuffer());
             }
         }
@@ -379,15 +380,14 @@ void SDLRenderer::renderFrame(
             }
         }
         {
-            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderNearbyFoliage", ProfileScopeGroup::Renderer);
-            if constexpr (AppConfig::Foliage::kEnabled)
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderCanopy", ProfileScopeGroup::Renderer);
+            if constexpr (AppConfig::Foliage::kCanopyEnabled)
             {
-                nearbyFoliageRenderer.render(
+                canopyRenderer.render(
                     renderPass,
                     commandBuffer,
                     viewProjection,
                     lightingSystem,
-                    skyboxRenderer,
                     quadtreeMeshRenderer.heightmapBuffer());
             }
         }
