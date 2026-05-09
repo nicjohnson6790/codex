@@ -25,7 +25,7 @@ inline constexpr float kClusterDensity = 0.18f;
 inline constexpr std::uint16_t kNearbyDecodedPageLruCapacity = 16u;
 inline constexpr std::uint16_t kNearbyDecodeDispatchBudgetPerFrame = 16u;
 inline constexpr std::uint16_t kNearbyReadbackSlotCount = 16u;
-inline constexpr float kNearbyDefaultRadiusMeters = 100.0f;
+inline constexpr float kNearbyDefaultRadiusMeters = 105.0f;
 inline constexpr float kNearbyDecodeRangePaddingMeters = 4.0f;
 inline constexpr std::uint32_t kNearbyDecodedInstanceLayoutVersion = 2u;
 

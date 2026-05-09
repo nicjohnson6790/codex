@@ -20,6 +20,10 @@ layout(location = 7) in vec3 fragViewDirection;
 
 layout(location = 0) out vec4 outColor;
 
+const float kFoliageAmbientBoost = 3.35;
+const float kFoliageSkyFillStrength = 0.52;
+const float kFoliageLightingScale = 1.18;
+
 float saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
@@ -45,15 +49,18 @@ void main()
         (fragCaptureForward * encodedNormal.z));
 
     vec3 sunDirection = normalize(foliageMaterial.sunDirectionIntensity.xyz);
+    vec3 viewDirection = normalize(fragViewDirection);
     float nDotL = saturate(dot(worldNormal, sunDirection));
-    float nDotV = saturate(dot(worldNormal, normalize(fragViewDirection)));
-    float backScatter = pow(saturate(dot(-normalize(fragViewDirection), sunDirection)), 2.0) * saturate(dot(-worldNormal, sunDirection));
+    float nDotV = saturate(dot(worldNormal, viewDirection));
+    float backScatter = pow(saturate(dot(-viewDirection, sunDirection)), 2.0) * saturate(dot(-worldNormal, sunDirection));
+    float sunIntensity = foliageMaterial.sunDirectionIntensity.w;
+    vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * sunIntensity;
+    vec3 ambient = colorSample.rgb * foliageMaterial.sunColorAmbient.a * kFoliageAmbientBoost;
+    vec3 skyFill = colorSample.rgb * foliageMaterial.sunColorAmbient.a * kFoliageSkyFillStrength;
+    vec3 direct = colorSample.rgb * sunRadiance * (0.42 + (nDotL * 0.58));
+    vec3 transmission = colorSample.rgb * sunRadiance * (0.18 * backScatter);
+    vec3 fresnel = vec3(0.018) * pow(1.0 - nDotV, 5.0) * sunIntensity;
+    vec3 litColor = (ambient + skyFill + direct + transmission + fresnel) * kFoliageLightingScale;
 
-    float ambientScale = foliageMaterial.sunColorAmbient.a;
-    vec3 ambient = colorSample.rgb * ambientScale;
-    vec3 direct = colorSample.rgb * foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunDirectionIntensity.w * (0.18 + (nDotL * 0.82));
-    vec3 transmission = colorSample.rgb * foliageMaterial.sunColorAmbient.rgb * 0.12 * backScatter;
-    vec3 fresnel = vec3(0.04) * pow(1.0 - nDotV, 5.0) * foliageMaterial.sunDirectionIntensity.w;
-
-    outColor = vec4(ambient + direct + transmission + fresnel, colorSample.a);
+    outColor = vec4(litColor, colorSample.a);
 }

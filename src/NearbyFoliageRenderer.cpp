@@ -539,6 +539,11 @@ void NearbyFoliageRenderer::upload(SDL_GPUCopyPass* copyPass)
                     drawPart.materialIndex,
                     0u,
                     0u);
+                m_drawMetadataGpu[m_activeDrawCommandCount].classCenterAndLodCenter = glm::vec4(
+                    drawPart.classCenterXz.x,
+                    drawPart.classCenterXz.y,
+                    drawPart.lodCenterXz.x,
+                    drawPart.lodCenterXz.y);
                 m_drawCommands[m_activeDrawCommandCount] = makeDrawCommand(
                     drawPart.indexCount,
                     m_groupInstanceCounts[groupIndex],
@@ -1512,6 +1517,70 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
             lod.drawParts.clear();
         }
 
+        float classMinX = std::numeric_limits<float>::max();
+        float classMaxX = std::numeric_limits<float>::lowest();
+        float classMinZ = std::numeric_limits<float>::max();
+        float classMaxZ = std::numeric_limits<float>::lowest();
+        std::array<float, kNearbyLodCount> lodMinX{};
+        std::array<float, kNearbyLodCount> lodMaxX{};
+        std::array<float, kNearbyLodCount> lodMinZ{};
+        std::array<float, kNearbyLodCount> lodMaxZ{};
+        lodMinX.fill(std::numeric_limits<float>::max());
+        lodMaxX.fill(std::numeric_limits<float>::lowest());
+        lodMinZ.fill(std::numeric_limits<float>::max());
+        lodMaxZ.fill(std::numeric_limits<float>::lowest());
+
+        for (std::uint32_t meshRefOffset = 0; meshRefOffset < assetRecord.meshRefCount; ++meshRefOffset)
+        {
+            const RuntimeAssets::MeshRefRecord& meshRef = assetBin.meshRefs[assetRecord.firstMeshRef + meshRefOffset];
+            if (meshRef.lodIndex >= kNearbyLodCount || meshRef.meshIndex >= meshBin.meshes.size())
+            {
+                continue;
+            }
+
+            const RuntimeAssets::MeshRecord& mesh = meshBin.meshes[meshRef.meshIndex];
+            bool billboardMesh = false;
+            for (std::uint32_t submeshOffset = 0; submeshOffset < mesh.submeshCount; ++submeshOffset)
+            {
+                const RuntimeAssets::SubmeshRecord& submesh = meshBin.submeshes[mesh.firstSubmesh + submeshOffset];
+                if (submesh.materialIndex >= assetBin.materials.size())
+                {
+                    continue;
+                }
+
+                const RuntimeAssets::MaterialRecord& material = assetBin.materials[submesh.materialIndex];
+                const char* materialName = assetBin.stringAt(material.nameOffset);
+                if (containsInsensitive(materialName, "billboard"))
+                {
+                    billboardMesh = true;
+                    break;
+                }
+            }
+            if (billboardMesh)
+            {
+                continue;
+            }
+
+            classMinX = std::min(classMinX, mesh.boundsMin[0]);
+            classMaxX = std::max(classMaxX, mesh.boundsMax[0]);
+            classMinZ = std::min(classMinZ, mesh.boundsMin[2]);
+            classMaxZ = std::max(classMaxZ, mesh.boundsMax[2]);
+            lodMinX[meshRef.lodIndex] = std::min(lodMinX[meshRef.lodIndex], mesh.boundsMin[0]);
+            lodMaxX[meshRef.lodIndex] = std::max(lodMaxX[meshRef.lodIndex], mesh.boundsMax[0]);
+            lodMinZ[meshRef.lodIndex] = std::min(lodMinZ[meshRef.lodIndex], mesh.boundsMin[2]);
+            lodMaxZ[meshRef.lodIndex] = std::max(lodMaxZ[meshRef.lodIndex], mesh.boundsMax[2]);
+        }
+
+        if (classMinX > classMaxX || classMinZ > classMaxZ)
+        {
+            throw std::runtime_error(
+                std::string("Nearby foliage selected asset is missing drawable geometry bounds: ") + desiredAssetName);
+        }
+
+        const glm::vec2 classCenterXz(
+            (classMinX + classMaxX) * 0.5f,
+            (classMinZ + classMaxZ) * 0.5f);
+
         for (std::uint32_t meshRefOffset = 0; meshRefOffset < assetRecord.meshRefCount; ++meshRefOffset)
         {
             const RuntimeAssets::MeshRefRecord& meshRef = assetBin.meshRefs[assetRecord.firstMeshRef + meshRefOffset];
@@ -1526,6 +1595,9 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
 
             const RuntimeAssets::MeshRecord& mesh = meshBin.meshes[meshRef.meshIndex];
             LoadedLodAsset& lod = m_loadedClassLods[treeClass][meshRef.lodIndex];
+            const glm::vec2 lodCenterXz(
+                (lodMinX[meshRef.lodIndex] + lodMaxX[meshRef.lodIndex]) * 0.5f,
+                (lodMinZ[meshRef.lodIndex] + lodMaxZ[meshRef.lodIndex]) * 0.5f);
             for (std::uint32_t submeshOffset = 0; submeshOffset < mesh.submeshCount; ++submeshOffset)
             {
                 const RuntimeAssets::SubmeshRecord& submesh = meshBin.submeshes[mesh.firstSubmesh + submeshOffset];
@@ -1602,6 +1674,8 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
                     .firstIndex = submesh.firstIndex,
                     .vertexOffset = static_cast<std::int32_t>(submesh.firstVertex),
                     .materialIndex = submesh.materialIndex,
+                    .classCenterXz = classCenterXz,
+                    .lodCenterXz = lodCenterXz,
                 });
             }
         }

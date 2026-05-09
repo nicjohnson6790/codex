@@ -318,7 +318,50 @@ bool DecodeSdlImage(const std::filesystem::path& path, ImportedTexture* outTextu
     return true;
 }
 
+bool FinalizeImportedTexture(
+    const std::filesystem::path& texturePath,
+    bool forceSrgb,
+    ImportedTexture* outTexture,
+    std::string* error)
+{
+    const std::string extension = ToLower(texturePath.extension().string());
+    const bool decoded =
+        (extension == ".tga" && DecodeTga(texturePath, outTexture, error)) ||
+        (extension == ".png" && DecodeSdlImage(texturePath, outTexture, error));
+    if (!decoded)
+    {
+        return false;
+    }
+
+    outTexture->name = ToLower(texturePath.stem().string());
+    outTexture->normalizedBasename = ToLower(texturePath.filename().string());
+    outTexture->sourcePath = texturePath.generic_string();
+
+    if (forceSrgb || IsSrgbTexture(outTexture->name))
+    {
+        outTexture->format = RuntimeAssets::TextureFormat::RGBA8_SRGB;
+        outTexture->flags |= RuntimeAssets::TextureFlagSrgb;
+    }
+    else
+    {
+        outTexture->format = RuntimeAssets::TextureFormat::RGBA8_UNORM;
+        outTexture->flags &= ~RuntimeAssets::TextureFlagSrgb;
+    }
+
+    return true;
+}
+
 } // namespace
+
+bool ImportTextureFile(
+    const std::filesystem::path& texturePath,
+    bool forceSrgb,
+    ImportedTexture* outTexture,
+    std::string* error)
+{
+    *outTexture = {};
+    return FinalizeImportedTexture(texturePath, forceSrgb, outTexture, error);
+}
 
 bool ImportTextureFolder(
     const std::filesystem::path& textureRoot,
@@ -359,14 +402,7 @@ bool ImportTextureFolder(
         }
 
         ImportedTexture texture;
-        texture.name = ToLower(texturePath.stem().string());
-        texture.normalizedBasename = basename;
-        texture.sourcePath = texturePath.generic_string();
-        const std::string extension = ToLower(texturePath.extension().string());
-        const bool decoded =
-            (extension == ".tga" && DecodeTga(texturePath, &texture, error)) ||
-            (extension == ".png" && DecodeSdlImage(texturePath, &texture, error));
-        if (!decoded)
+        if (!FinalizeImportedTexture(texturePath, options.forceSrgb, &texture, error))
         {
             return false;
         }
@@ -383,16 +419,6 @@ bool ImportTextureFolder(
                 resizeSquare);
             texture.width = resizeSquare;
             texture.height = resizeSquare;
-        }
-
-        if (options.forceSrgb || IsSrgbTexture(texture.name))
-        {
-            texture.format = RuntimeAssets::TextureFormat::RGBA8_SRGB;
-            texture.flags |= RuntimeAssets::TextureFlagSrgb;
-        }
-        else
-        {
-            texture.format = RuntimeAssets::TextureFormat::RGBA8_UNORM;
         }
 
         const std::uint32_t textureIndex = static_cast<std::uint32_t>(outPack->textures.size());

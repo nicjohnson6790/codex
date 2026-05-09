@@ -12,7 +12,8 @@ This branch does not include the authored pine tree source assets needed to rebu
 - Quadtree terrain with GPU-generated heightmaps and async min/max extent readback
 - Reusable terrain patch meshes with equal-LOD and `2:1` crack stitching
 - GPU foliage generation into canonical `256m x 256m` resident pages
-- Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw
+- Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw plus a short dithered handoff band near the imposter range
+- Mid-distance foliage imposter path that renders BC-compressed pine imposter texture arrays with runtime lighting
 - Far-canopy path that renders procedural canopy mass from compact bitset coverage
 - Shared-cascade FFT water with bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
 - Skybox and water shading driven by the same cubemap and atmosphere model
@@ -72,7 +73,7 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 
 - `src/WorldGridFoliageManager.*`: canonical foliage page residency and GPU generation scheduling
 - `src/WorldGridFoliageCanopyManager.*`: canonical canopy cell residency and GPU generation scheduling
-- `src/FoliageImposterRenderer.*`: mid-distance foliage marker page pool and draw path
+- `src/FoliageImposterRenderer.*`: mid-distance foliage imposter page pool decode, runtime asset loading, and imposter rendering
 - `src/NearbyFoliageRenderer.*`: nearby decoded-page readback, CPU cache, runtime asset loading, and nearby tree mesh rendering
 - `src/FoliageCanopyRenderer.*`: far-canopy bitset generation and canopy rendering
 - `src/FoliageTypes.hpp`: shared foliage packing and runtime layout types
@@ -113,7 +114,7 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 - `shaders/quadtree_mesh_bridge.vert`: terrain bridge vertex shader
 - `shaders/heightmap_generate.comp`: terrain generation compute shader
 - `shaders/foliage_generate.comp`: foliage page generation compute shader
-- `shaders/foliage_imposter.*`: mid-distance foliage marker shaders
+- `shaders/foliage_imposter.*`: mid-distance foliage imposter shaders
 - `shaders/nearby_foliage_decode.comp`: nearby foliage decode compute shader
 - `shaders/nearby_foliage.*`: nearby tree mesh shaders
 - `shaders/foliage_canopy_generate.comp`: canopy coverage compute shader
@@ -176,6 +177,15 @@ Run:
 - `pinetreepack.assetbin`
 - `pinetreepack.meshbin`
 - `pinetreepack.texbin`
+
+Current pine runtime asset details:
+
+- imported source material textures are normalized to `1024x1024` for the runtime pack
+- imposter capture renders from the original source textures, not the resized runtime copies
+- each pine imposter texture set is generated as `8` yaw views x `4` pitch views
+- final imposter arrays are `512x512`, `32` layers, full mip chain
+- color/alpha imposters are stored as `BC3`
+- normal imposters are stored as `BC5`
 
 ## Assets
 

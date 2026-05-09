@@ -37,17 +37,26 @@ layout(location = 2) in vec3 fragTangent;
 layout(location = 3) in vec3 fragBitangent;
 layout(location = 4) in vec3 fragViewPosition;
 layout(location = 5) flat in uint fragMaterialIndex;
+layout(location = 6) flat in uint fragLodIndex;
 
 layout(location = 0) out vec4 outColor;
 
 const float kPi = 3.14159265359;
 const float kInvLog256 = 0.18033688011112042;
-const float kFoliageAmbientBoost = 1.85;
-const float kFoliageSkyFillStrength = 0.24;
+const float kFoliageAmbientBoost = 3.35;
+const float kFoliageSkyFillStrength = 0.52;
+const float kFoliageLightingScale = 1.18;
+const float kNearbyLod2FadeStartMeters = 105.0;
+const float kNearbyLod2FadeEndMeters = 100.0;
 
 float saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
+}
+
+float interleavedGradientNoise(vec2 pixelCoord)
+{
+    return fract(52.9829189 * fract(dot(pixelCoord, vec2(0.06711056, 0.00583715))));
 }
 
 float encodeLogDistance(float distanceThroughAtmosphere)
@@ -128,6 +137,22 @@ float geometrySmith(float nDotV, float nDotL, float roughness)
 
 void main()
 {
+    if (fragLodIndex == 2u)
+    {
+        float nearbyDistanceMeters = length(fragViewPosition.xz);
+        float lod2FadeAlpha = saturate(
+            (kNearbyLod2FadeStartMeters - nearbyDistanceMeters) /
+            max(kNearbyLod2FadeStartMeters - kNearbyLod2FadeEndMeters, 0.00001));
+        if (lod2FadeAlpha <= 0.0)
+        {
+            discard;
+        }
+        if (lod2FadeAlpha < 1.0 && interleavedGradientNoise(gl_FragCoord.xy) > lod2FadeAlpha)
+        {
+            discard;
+        }
+    }
+
     NearbyMaterialGpu material = materialBuffer.materials[fragMaterialIndex];
     float alphaCutoff = material.params.x;
     float baseColorLayer = float(material.layers0.x);
@@ -190,7 +215,10 @@ void main()
     vec3 transmission = subsurfaceColor * albedoSample.rgb * backScatter * transmissionStrength;
 
     vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunDirectionIntensity.w;
-    vec3 directLighting = diffuse * sunRadiance + (specular * sunRadiance * 0.16) + transmission * sunRadiance;
+    vec3 directLighting =
+        (diffuse * sunRadiance * 1.18) +
+        (specular * sunRadiance * 0.06) +
+        (transmission * sunRadiance * 1.28);
 
     vec3 reflectionDirection = reflect(-viewDirection, normal);
     vec3 reflectedSky = sampleSkyRadiance(reflectionDirection);
@@ -199,12 +227,12 @@ void main()
         fresnelSchlick(nDotV, f0) *
         mix(0.16, 0.05, roughness) *
         mix(0.35, 0.7, pow(1.0 - nDotV, 0.35));
-    environmentSpecular *= mix(0.8, 1.0, effectiveAo);
+    environmentSpecular *= mix(0.8, 1.0, effectiveAo) * 0.28;
 
     float ambientScale = foliageMaterial.sunColorAmbient.a;
     vec3 skyFill = sampleSkyRadiance(normal) * albedoSample.rgb * kFoliageSkyFillStrength;
-    vec3 ambient = albedoSample.rgb * ambientScale * mix(0.75, 1.0, effectiveAo) * kFoliageAmbientBoost;
-    vec3 litColor = ambient + skyFill + directLighting + environmentSpecular;
+    vec3 ambient = albedoSample.rgb * ambientScale * mix(0.92, 1.0, effectiveAo) * kFoliageAmbientBoost;
+    vec3 litColor = (ambient + skyFill + directLighting + environmentSpecular) * kFoliageLightingScale;
 
     outColor = vec4(litColor, albedoSample.a);
 }

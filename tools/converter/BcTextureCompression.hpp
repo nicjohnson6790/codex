@@ -20,5 +20,5 @@ bool ConverterCompressBc5Rg(
     std::vector<std::byte>* outCompressedBlocks,
     std::string* error);
 
-[[nodiscard]] bool ConverterHasCompressonatorSupport();
-[[nodiscard]] const char* ConverterCompressonatorUnavailableReason();
+[[nodiscard]] bool ConverterHasBcCompressionSupport();
+[[nodiscard]] const char* ConverterBcCompressionUnavailableReason();

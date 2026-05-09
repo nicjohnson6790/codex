@@ -7,12 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
-option(CONVERTER_ENABLE_COMPRESSONATOR "Enable AMD Compressonator BC compression support in the converter" ON)
-set(COMPRESSONATOR_SDK_ROOT "" CACHE PATH "Root directory of the AMD Compressonator SDK")
-
-if (NOT COMPRESSONATOR_SDK_ROOT AND DEFINED ENV{COMPRESSONATOR_SDK_ROOT})
-    set(COMPRESSONATOR_SDK_ROOT "$ENV{COMPRESSONATOR_SDK_ROOT}")
-endif()
+option(CONVERTER_ENABLE_DIRECTXTEX "Enable DirectXTex BC compression support in the converter" ON)
 
 include(FetchContent)
 
@@ -47,6 +42,13 @@ FetchContent_Declare(
     URL https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip
 )
 
+if (CONVERTER_ENABLE_DIRECTXTEX)
+    FetchContent_Declare(
+        DirectXTex
+        URL https://github.com/microsoft/DirectXTex/archive/refs/tags/oct2025.zip
+    )
+endif()
+
 set(SDL_SHARED ON CACHE BOOL "" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
@@ -79,8 +81,17 @@ set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
+set(BUILD_DX11 OFF CACHE BOOL "" FORCE)
+set(BUILD_DX12 OFF CACHE BOOL "" FORCE)
+set(BUILD_XBOX_EXTS OFF CACHE BOOL "" FORCE)
+set(ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(SDL3 SDL3_image assimp lz4)
+if (CONVERTER_ENABLE_DIRECTXTEX)
+    FetchContent_MakeAvailable(DirectXTex)
+endif()
 
 set(CONVERTER_SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${CONVERTER_SHADER_OUTPUT_DIR})
@@ -116,40 +127,13 @@ add_custom_target(converter_shaders ALL
         ${PINE_IMPOSTER_CAPTURE_NORMAL_FRAG_SPV}
 )
 
-if (CONVERTER_ENABLE_COMPRESSONATOR)
-    find_path(COMPRESSONATOR_INCLUDE_DIR
-        NAMES compressonator.h
-        HINTS ${COMPRESSONATOR_SDK_ROOT}
-        PATH_SUFFIXES include Include
-    )
-
-    find_library(COMPRESSONATOR_RELEASE_LIBRARY
-        NAMES Compressonator_MD Compressonator_MT
-        HINTS ${COMPRESSONATOR_SDK_ROOT}
-        PATH_SUFFIXES lib lib64 Lib lib/bin/x64 bin/x64
-    )
-
-    find_library(COMPRESSONATOR_DEBUG_LIBRARY
-        NAMES Compressonator_MDd Compressonator_MTd
-        HINTS ${COMPRESSONATOR_SDK_ROOT}
-        PATH_SUFFIXES lib lib64 Lib lib/bin/x64 bin/x64
-    )
-
-    if (COMPRESSONATOR_INCLUDE_DIR AND (COMPRESSONATOR_RELEASE_LIBRARY OR COMPRESSONATOR_DEBUG_LIBRARY))
-        add_library(compressonator_core INTERFACE)
-        target_include_directories(compressonator_core INTERFACE ${COMPRESSONATOR_INCLUDE_DIR})
-        if (COMPRESSONATOR_DEBUG_LIBRARY)
-            target_link_libraries(compressonator_core INTERFACE debug ${COMPRESSONATOR_DEBUG_LIBRARY})
-        endif()
-        if (COMPRESSONATOR_RELEASE_LIBRARY)
-            target_link_libraries(compressonator_core INTERFACE optimized ${COMPRESSONATOR_RELEASE_LIBRARY})
-        elseif (COMPRESSONATOR_DEBUG_LIBRARY)
-            target_link_libraries(compressonator_core INTERFACE optimized ${COMPRESSONATOR_DEBUG_LIBRARY})
-        endif()
+if (CONVERTER_ENABLE_DIRECTXTEX)
+    if (TARGET Microsoft::DirectXTex)
+        set(CONVERTER_DIRECTXTEX_TARGET Microsoft::DirectXTex)
+    elseif (TARGET DirectXTex)
+        set(CONVERTER_DIRECTXTEX_TARGET DirectXTex)
     else()
-        message(STATUS
-            "Compressonator SDK not found. Pine imposter BC output will fail clearly when requested. "
-            "Set COMPRESSONATOR_SDK_ROOT or the COMPRESSONATOR_SDK_ROOT environment variable to enable it.")
+        message(FATAL_ERROR "DirectXTex was fetched but no usable CMake target was exported.")
     endif()
 endif()
 
@@ -180,7 +164,7 @@ target_link_libraries(runtime_asset_reader
 
 add_executable(converter
     ConverterMain.cpp
-    CompressonatorBcCodec.cpp
+    BcTextureCompression.cpp
     PineTreePackConverter.cpp
     PineImposterGenerator.cpp
     FbxImport.cpp
@@ -218,7 +202,7 @@ target_link_libraries(converter
         ${ASSIMP_TARGET}
 )
 
-if (TARGET compressonator_core)
-    target_compile_definitions(converter PRIVATE CONVERTER_HAS_COMPRESSONATOR=1)
-    target_link_libraries(converter PRIVATE compressonator_core)
+if (DEFINED CONVERTER_DIRECTXTEX_TARGET)
+    target_compile_definitions(converter PRIVATE CONVERTER_HAS_DIRECTXTEX=1)
+    target_link_libraries(converter PRIVATE ${CONVERTER_DIRECTXTEX_TARGET})
 endif()

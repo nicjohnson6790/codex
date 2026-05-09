@@ -691,7 +691,7 @@ void FoliageImposterRenderer::createPipeline(const std::filesystem::path& shader
     vertexAttributes[1].offset = offsetof(Vertex, uv0);
 
     SDL_GPUColorTargetBlendState blendState{};
-    blendState.enable_blend = true;
+    blendState.enable_blend = false;
     blendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
     blendState.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     blendState.color_blend_op = SDL_GPU_BLENDOP_ADD;

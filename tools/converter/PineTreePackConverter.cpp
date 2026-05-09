@@ -147,7 +147,7 @@ bool ValidateCrossReferences(
             const RuntimeAssets::TextureRecord& normalTexture = texBin.textures[asset.imposterNormalTextureIndex];
             const std::uint32_t expectedMipCount = [&]() {
                 std::uint32_t mipCount = 1u;
-                std::uint32_t extent = 256u;
+                std::uint32_t extent = 512u;
                 while (extent > 1u)
                 {
                     extent = std::max(extent / 2u, 1u);
@@ -160,8 +160,8 @@ bool ValidateCrossReferences(
                                                 RuntimeAssets::TextureFormat expectedFormat,
                                                 const char* label) -> bool {
                 if (texture.dimension != static_cast<std::uint32_t>(RuntimeAssets::TextureDimension::Texture2DArray) ||
-                    texture.width != 256u ||
-                    texture.height != 256u ||
+                    texture.width != 512u ||
+                    texture.height != 512u ||
                     texture.layerCount != 32u ||
                     texture.mipCount != expectedMipCount ||
                     texture.format != static_cast<std::uint32_t>(expectedFormat))
@@ -216,7 +216,7 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     const TextureImportOptions textureOptions =
         config.packKind == ConverterConfig::PackKind::Skybox
         ? TextureImportOptions{ .allowTga = false, .allowPng = true, .forceSrgb = true, .resizeSquare = 0u }
-        : TextureImportOptions{ .allowTga = true, .allowPng = false, .forceSrgb = false, .resizeSquare = 512u };
+        : TextureImportOptions{ .allowTga = true, .allowPng = false, .forceSrgb = false, .resizeSquare = 1024u };
     if (!ImportTextureFolder(config.textureRoot, textureOptions, &pack, error))
     {
         return false;

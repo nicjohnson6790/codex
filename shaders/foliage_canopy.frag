@@ -38,6 +38,7 @@ const float kCellSizeMeters = 256.0;
 const float kCandidateCellSizeMeters = 4.0;
 const float kEdgeFadeWidthMeters = 384.0;
 const float kFadeInFrameCount = 12.0;
+const float kCanopyDarkeningScale = 0.24;
 const uint kCandidateGridResolution = 64u;
 const uint kCanopyBitsetWordCount = (kCandidateGridResolution * kCandidateGridResolution) / 32u;
 const vec3 kPalette[4] = vec3[](
@@ -145,7 +146,7 @@ void main()
     float diffuse = clamp(dot(bestNormal, lightDirection), 0.0, 1.0);
     float ambient = 0.42;
     float lighting = ambient + (diffuse * 0.58);
-    vec3 color = bestColor * lighting * canopy.sunDirectionIntensity.w;
+    vec3 color = bestColor * lighting * canopy.sunDirectionIntensity.w * kCanopyDarkeningScale;
 
     uint edgeFadeStrengths = draw.patchSeedData.y;
     float edgeFade = 1.0;

@@ -1,6 +1,7 @@
 #include "PineImposterGenerator.hpp"
 
-#include "CompressonatorBcCodec.hpp"
+#include "BcTextureCompression.hpp"
+#include "TextureImport.hpp"
 #include "../../src/assets/RuntimeAssetFormat.hpp"
 
 #include <SDL3/SDL.h>
@@ -25,11 +26,16 @@
 namespace
 {
 
-constexpr std::uint32_t kImposterResolution = 256u;
+constexpr std::uint32_t kImposterResolution = 512u;
+constexpr std::uint32_t kImposterSupersampleResolution = 1024u;
+constexpr std::uint32_t kImposterSupersampleFactor = kImposterSupersampleResolution / kImposterResolution;
 constexpr std::uint32_t kYawViewCount = 8u;
 constexpr std::uint32_t kPitchViewCount = 4u;
 constexpr std::uint32_t kLayerCount = kYawViewCount * kPitchViewCount;
 constexpr std::uint8_t kAlphaCoverageCutoffByte = 128u;
+static_assert(
+    kImposterSupersampleResolution % kImposterResolution == 0u,
+    "Imposter supersample resolution must divide evenly into the final resolution");
 constexpr std::array<float, kPitchViewCount> kPitchDegrees{
     -5.0f,
     10.0f,
@@ -122,6 +128,7 @@ public:
         const ImportedAsset& asset,
         std::vector<std::vector<std::byte>>* outColorLayers,
         std::vector<std::vector<std::byte>>* outNormalLayers,
+        std::vector<float>* outLayerCoverageTargets,
         std::string* error);
 
 private:
@@ -391,26 +398,6 @@ std::vector<std::byte> downsampleColorMip(
     return result;
 }
 
-float alphaCoverageForPixels(std::span<const std::byte> pixels)
-{
-    if (pixels.empty())
-    {
-        return 0.0f;
-    }
-
-    std::size_t coveredPixelCount = 0u;
-    const std::size_t pixelCount = pixels.size() / 4u;
-    for (std::size_t pixelIndex = 0; pixelIndex < pixelCount; ++pixelIndex)
-    {
-        if (std::to_integer<std::uint8_t>(pixels[(pixelIndex * 4u) + 3u]) >= kAlphaCoverageCutoffByte)
-        {
-            ++coveredPixelCount;
-        }
-    }
-
-    return static_cast<float>(coveredPixelCount) / static_cast<float>(pixelCount);
-}
-
 void scaleAlphaToMatchCoverage(
     std::vector<std::byte>* pixels,
     float targetCoverage)
@@ -461,6 +448,128 @@ void scaleAlphaToMatchCoverage(
     }
 }
 
+std::vector<std::byte> downsampleSupersampledColorLayer(
+    std::span<const std::byte> sourcePixels,
+    float* outCoverageTarget)
+{
+    std::vector<std::byte> result(
+        static_cast<std::size_t>(kImposterResolution) * kImposterResolution * 4u,
+        std::byte{});
+    std::size_t coveredSupersampleCount = 0u;
+
+    for (std::uint32_t y = 0; y < kImposterResolution; ++y)
+    {
+        for (std::uint32_t x = 0; x < kImposterResolution; ++x)
+        {
+            float weightedRgb[3]{};
+            float alphaSum = 0.0f;
+            std::uint32_t averageRgb[3]{};
+            std::uint32_t sampleCount = 0u;
+            std::uint32_t coveredSamples = 0u;
+
+            for (std::uint32_t sourceY = 0; sourceY < kImposterSupersampleFactor; ++sourceY)
+            {
+                for (std::uint32_t sourceX = 0; sourceX < kImposterSupersampleFactor; ++sourceX)
+                {
+                    const std::uint32_t sx = (x * kImposterSupersampleFactor) + sourceX;
+                    const std::uint32_t sy = (y * kImposterSupersampleFactor) + sourceY;
+                    const std::size_t sourceOffset = pixelOffset(kImposterSupersampleResolution, sx, sy);
+                    const float alpha =
+                        static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 3u])) / 255.0f;
+                    weightedRgb[0] +=
+                        static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 0u])) * alpha;
+                    weightedRgb[1] +=
+                        static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 1u])) * alpha;
+                    weightedRgb[2] +=
+                        static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 2u])) * alpha;
+                    alphaSum += alpha;
+                    averageRgb[0] += std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 0u]);
+                    averageRgb[1] += std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 1u]);
+                    averageRgb[2] += std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 2u]);
+                    coveredSamples +=
+                        std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 3u]) >= kAlphaCoverageCutoffByte ? 1u : 0u;
+                    ++sampleCount;
+                }
+            }
+
+            coveredSupersampleCount += coveredSamples;
+            const float averageAlpha = alphaSum / static_cast<float>(sampleCount);
+            const float coverageAlpha = static_cast<float>(coveredSamples) / static_cast<float>(sampleCount);
+            const float finalAlpha = std::max(averageAlpha, coverageAlpha);
+
+            float finalRgb[3]{};
+            if (alphaSum > 1.0e-6f)
+            {
+                finalRgb[0] = weightedRgb[0] / (alphaSum * 255.0f);
+                finalRgb[1] = weightedRgb[1] / (alphaSum * 255.0f);
+                finalRgb[2] = weightedRgb[2] / (alphaSum * 255.0f);
+            }
+            else
+            {
+                finalRgb[0] = static_cast<float>(averageRgb[0]) / (static_cast<float>(sampleCount) * 255.0f);
+                finalRgb[1] = static_cast<float>(averageRgb[1]) / (static_cast<float>(sampleCount) * 255.0f);
+                finalRgb[2] = static_cast<float>(averageRgb[2]) / (static_cast<float>(sampleCount) * 255.0f);
+            }
+
+            encodeRgba(&result, kImposterResolution, x, y, finalRgb[0], finalRgb[1], finalRgb[2], finalAlpha);
+        }
+    }
+
+    const std::size_t supersamplePixelCount =
+        static_cast<std::size_t>(kImposterSupersampleResolution) * kImposterSupersampleResolution;
+    *outCoverageTarget = static_cast<float>(coveredSupersampleCount) / static_cast<float>(supersamplePixelCount);
+    scaleAlphaToMatchCoverage(&result, *outCoverageTarget);
+    return result;
+}
+
+std::vector<std::byte> downsampleSupersampledNormalLayer(
+    std::span<const std::byte> sourcePixels,
+    float targetCoverage)
+{
+    std::vector<std::byte> result(
+        static_cast<std::size_t>(kImposterResolution) * kImposterResolution * 4u,
+        std::byte{});
+
+    for (std::uint32_t y = 0; y < kImposterResolution; ++y)
+    {
+        for (std::uint32_t x = 0; x < kImposterResolution; ++x)
+        {
+            Float3 accumulatedNormal{};
+            float alphaSum = 0.0f;
+
+            for (std::uint32_t sourceY = 0; sourceY < kImposterSupersampleFactor; ++sourceY)
+            {
+                for (std::uint32_t sourceX = 0; sourceX < kImposterSupersampleFactor; ++sourceX)
+                {
+                    const std::uint32_t sx = (x * kImposterSupersampleFactor) + sourceX;
+                    const std::uint32_t sy = (y * kImposterSupersampleFactor) + sourceY;
+                    const std::size_t sourceOffset = pixelOffset(kImposterSupersampleResolution, sx, sy);
+                    const float alpha =
+                        static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 3u])) / 255.0f;
+                    const Float3 normal = decodeNormal(sourcePixels.data() + sourceOffset);
+                    accumulatedNormal.x += normal.x * alpha;
+                    accumulatedNormal.y += normal.y * alpha;
+                    accumulatedNormal.z += normal.z * alpha;
+                    alphaSum += alpha;
+                }
+            }
+
+            const float averageAlpha = alphaSum /
+                static_cast<float>(kImposterSupersampleFactor * kImposterSupersampleFactor);
+            encodeNormal(
+                &result,
+                kImposterResolution,
+                x,
+                y,
+                alphaSum > 1.0e-6f ? accumulatedNormal : Float3{ 0.0f, 0.0f, 1.0f },
+                averageAlpha);
+        }
+    }
+
+    scaleAlphaToMatchCoverage(&result, targetCoverage);
+    return result;
+}
+
 std::vector<std::byte> downsampleNormalMip(
     std::span<const std::byte> sourcePixels,
     std::uint32_t sourceWidth,
@@ -504,12 +613,12 @@ std::vector<std::byte> downsampleNormalMip(
 }
 
 std::vector<std::vector<std::byte>> buildColorMipChain(
-    std::span<const std::byte> baseLayerPixels)
+    std::span<const std::byte> baseLayerPixels,
+    float targetCoverage)
 {
     std::vector<std::vector<std::byte>> mipChain;
     mipChain.reserve(fullMipCountForExtent(kImposterResolution, kImposterResolution));
     mipChain.emplace_back(baseLayerPixels.begin(), baseLayerPixels.end());
-    const float targetCoverage = alphaCoverageForPixels(baseLayerPixels);
 
     std::uint32_t sourceWidth = kImposterResolution;
     std::uint32_t sourceHeight = kImposterResolution;
@@ -533,12 +642,12 @@ std::vector<std::vector<std::byte>> buildColorMipChain(
 }
 
 std::vector<std::vector<std::byte>> buildNormalMipChain(
-    std::span<const std::byte> baseLayerPixels)
+    std::span<const std::byte> baseLayerPixels,
+    float targetCoverage)
 {
     std::vector<std::vector<std::byte>> mipChain;
     mipChain.reserve(fullMipCountForExtent(kImposterResolution, kImposterResolution));
     mipChain.emplace_back(baseLayerPixels.begin(), baseLayerPixels.end());
-    const float targetCoverage = alphaCoverageForPixels(baseLayerPixels);
 
     std::uint32_t sourceWidth = kImposterResolution;
     std::uint32_t sourceHeight = kImposterResolution;
@@ -827,6 +936,7 @@ ImportedTexture buildGeneratedTexture(
 bool buildCompressedTexturePayload(
     RuntimeAssets::TextureFormat format,
     const std::vector<std::vector<std::byte>>& layers,
+    const std::vector<float>& layerCoverageTargets,
     std::vector<std::byte>* outPayload,
     std::string* error)
 {
@@ -845,13 +955,20 @@ bool buildCompressedTexturePayload(
         *error = "imposter layer count does not match expected yaw/pitch view count";
         return false;
     }
-
-    for (const std::vector<std::byte>& layerPixels : layers)
+    if (layerCoverageTargets.size() != kLayerCount)
     {
+        *error = "imposter layer coverage target count does not match expected yaw/pitch view count";
+        return false;
+    }
+
+    for (std::size_t layerIndex = 0; layerIndex < layers.size(); ++layerIndex)
+    {
+        const std::vector<std::byte>& layerPixels = layers[layerIndex];
+        const float layerCoverageTarget = std::clamp(layerCoverageTargets[layerIndex], 0.0f, 1.0f);
         const std::vector<std::vector<std::byte>> mipChain =
             format == RuntimeAssets::TextureFormat::BC3_RGBA_UNORM
-                ? buildColorMipChain(layerPixels)
-                : buildNormalMipChain(layerPixels);
+                ? buildColorMipChain(layerPixels, layerCoverageTarget)
+                : buildNormalMipChain(layerPixels, layerCoverageTarget);
         std::uint32_t mipWidth = kImposterResolution;
         std::uint32_t mipHeight = kImposterResolution;
 
@@ -1009,8 +1126,8 @@ bool OffscreenImposterRenderer::createRenderTargets(std::string* error)
         textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
         textureInfo.format = format;
         textureInfo.usage = usage;
-        textureInfo.width = kImposterResolution;
-        textureInfo.height = kImposterResolution;
+        textureInfo.width = kImposterSupersampleResolution;
+        textureInfo.height = kImposterSupersampleResolution;
         textureInfo.layer_count_or_depth = 1;
         textureInfo.num_levels = 1;
         textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -1037,7 +1154,7 @@ bool OffscreenImposterRenderer::createRenderTargets(std::string* error)
 
     SDL_GPUTransferBufferCreateInfo readbackInfo{};
     readbackInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
-    readbackInfo.size = kImposterResolution * kImposterResolution * 4u;
+    readbackInfo.size = kImposterSupersampleResolution * kImposterSupersampleResolution * 4u;
     m_colorReadback = SDL_CreateGPUTransferBuffer(m_device, &readbackInfo);
     m_normalReadback = SDL_CreateGPUTransferBuffer(m_device, &readbackInfo);
     if (m_colorReadback == nullptr || m_normalReadback == nullptr)
@@ -1325,7 +1442,22 @@ bool OffscreenImposterRenderer::createMaterialTextureSet(
     }
 
     const ImportedTexture& importedTexture = pack.textures[textureIndex];
-    if (importedTexture.payload.size() != static_cast<std::size_t>(importedTexture.width) * importedTexture.height * 4u)
+    ImportedTexture uploadTexture = importedTexture;
+    if (!importedTexture.sourcePath.empty())
+    {
+        ImportedTexture sourceTexture;
+        if (!ImportTextureFile(
+                importedTexture.sourcePath,
+                (importedTexture.flags & RuntimeAssets::TextureFlagSrgb) != 0u,
+                &sourceTexture,
+                error))
+        {
+            return false;
+        }
+        uploadTexture = std::move(sourceTexture);
+    }
+
+    if (uploadTexture.payload.size() != static_cast<std::size_t>(uploadTexture.width) * uploadTexture.height * 4u)
     {
         *error = "imported source texture payload is not tightly packed RGBA8";
         return false;
@@ -1334,12 +1466,12 @@ bool OffscreenImposterRenderer::createMaterialTextureSet(
     SDL_GPUTextureCreateInfo textureInfo{};
     textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
     textureInfo.format =
-        importedTexture.format == RuntimeAssets::TextureFormat::RGBA8_SRGB
+        uploadTexture.format == RuntimeAssets::TextureFormat::RGBA8_SRGB
             ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
             : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    textureInfo.width = importedTexture.width;
-    textureInfo.height = importedTexture.height;
+    textureInfo.width = uploadTexture.width;
+    textureInfo.height = uploadTexture.height;
     textureInfo.layer_count_or_depth = 1;
     textureInfo.num_levels = 1;
     textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -1352,7 +1484,7 @@ bool OffscreenImposterRenderer::createMaterialTextureSet(
 
     SDL_GPUTransferBufferCreateInfo transferInfo{};
     transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    transferInfo.size = static_cast<Uint32>(importedTexture.payload.size());
+    transferInfo.size = static_cast<Uint32>(uploadTexture.payload.size());
     SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
     if (transferBuffer == nullptr)
     {
@@ -1362,7 +1494,7 @@ bool OffscreenImposterRenderer::createMaterialTextureSet(
     }
 
     void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
-    std::memcpy(mapped, importedTexture.payload.data(), importedTexture.payload.size());
+    std::memcpy(mapped, uploadTexture.payload.data(), uploadTexture.payload.size());
     SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
 
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
@@ -1381,13 +1513,13 @@ bool OffscreenImposterRenderer::createMaterialTextureSet(
 
     SDL_GPUTextureTransferInfo source{};
     source.transfer_buffer = transferBuffer;
-    source.pixels_per_row = importedTexture.width;
-    source.rows_per_layer = importedTexture.height;
+    source.pixels_per_row = uploadTexture.width;
+    source.rows_per_layer = uploadTexture.height;
 
     SDL_GPUTextureRegion destination{};
     destination.texture = texture;
-    destination.w = importedTexture.width;
-    destination.h = importedTexture.height;
+    destination.w = uploadTexture.width;
+    destination.h = uploadTexture.height;
     destination.d = 1u;
     SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
     SDL_EndGPUCopyPass(copyPass);
@@ -1709,7 +1841,9 @@ bool OffscreenImposterRenderer::downloadRenderTarget(
     std::vector<std::byte>* outPixels,
     std::string* error) const
 {
-    outPixels->assign(static_cast<std::size_t>(kImposterResolution) * kImposterResolution * 4u, std::byte{});
+    outPixels->assign(
+        static_cast<std::size_t>(kImposterSupersampleResolution) * kImposterSupersampleResolution * 4u,
+        std::byte{});
     void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
     if (mapped == nullptr)
     {
@@ -1743,14 +1877,14 @@ bool OffscreenImposterRenderer::renderLayer(
     const SDL_GPUBufferBinding indexBinding{ indexBuffer, 0 };
     const SDL_GPUViewport viewport{
         0.0f, 0.0f,
-        static_cast<float>(kImposterResolution),
-        static_cast<float>(kImposterResolution),
+        static_cast<float>(kImposterSupersampleResolution),
+        static_cast<float>(kImposterSupersampleResolution),
         0.0f, 1.0f
     };
     const SDL_Rect scissor{
         0, 0,
-        static_cast<int>(kImposterResolution),
-        static_cast<int>(kImposterResolution)
+        static_cast<int>(kImposterSupersampleResolution),
+        static_cast<int>(kImposterSupersampleResolution)
     };
 
     auto renderPassForTarget = [&](SDL_GPUTexture* colorTarget, SDL_GPUGraphicsPipeline* pipeline) -> bool {
@@ -1838,24 +1972,24 @@ bool OffscreenImposterRenderer::renderLayer(
 
     SDL_GPUTextureRegion colorSource{};
     colorSource.texture = m_colorTarget;
-    colorSource.w = kImposterResolution;
-    colorSource.h = kImposterResolution;
+    colorSource.w = kImposterSupersampleResolution;
+    colorSource.h = kImposterSupersampleResolution;
     colorSource.d = 1u;
     SDL_GPUTextureTransferInfo colorDestination{};
     colorDestination.transfer_buffer = m_colorReadback;
-    colorDestination.pixels_per_row = kImposterResolution;
-    colorDestination.rows_per_layer = kImposterResolution;
+    colorDestination.pixels_per_row = kImposterSupersampleResolution;
+    colorDestination.rows_per_layer = kImposterSupersampleResolution;
     SDL_DownloadFromGPUTexture(copyPass, &colorSource, &colorDestination);
 
     SDL_GPUTextureRegion normalSource{};
     normalSource.texture = m_normalTarget;
-    normalSource.w = kImposterResolution;
-    normalSource.h = kImposterResolution;
+    normalSource.w = kImposterSupersampleResolution;
+    normalSource.h = kImposterSupersampleResolution;
     normalSource.d = 1u;
     SDL_GPUTextureTransferInfo normalDestination{};
     normalDestination.transfer_buffer = m_normalReadback;
-    normalDestination.pixels_per_row = kImposterResolution;
-    normalDestination.rows_per_layer = kImposterResolution;
+    normalDestination.pixels_per_row = kImposterSupersampleResolution;
+    normalDestination.rows_per_layer = kImposterSupersampleResolution;
     SDL_DownloadFromGPUTexture(copyPass, &normalSource, &normalDestination);
     SDL_EndGPUCopyPass(copyPass);
 
@@ -1884,6 +2018,7 @@ bool OffscreenImposterRenderer::captureAsset(
     const ImportedAsset& asset,
     std::vector<std::vector<std::byte>>* outColorLayers,
     std::vector<std::vector<std::byte>>* outNormalLayers,
+    std::vector<float>* outLayerCoverageTargets,
     std::string* error)
 {
     AggregateAssetGeometry geometry;
@@ -1909,8 +2044,10 @@ bool OffscreenImposterRenderer::captureAsset(
 
     outColorLayers->clear();
     outNormalLayers->clear();
+    outLayerCoverageTargets->clear();
     outColorLayers->reserve(kLayerCount);
     outNormalLayers->reserve(kLayerCount);
+    outLayerCoverageTargets->reserve(kLayerCount);
 
     bool success = true;
     for (std::uint32_t pitchIndex = 0; pitchIndex < kPitchViewCount && success; ++pitchIndex)
@@ -1931,10 +2068,20 @@ bool OffscreenImposterRenderer::captureAsset(
                 error);
             if (success)
             {
-                dilateRgbAroundAlphaEdges(&colorPixels, kImposterResolution, kImposterResolution);
-                dilateRgbAroundAlphaEdges(&normalPixels, kImposterResolution, kImposterResolution);
-                outColorLayers->push_back(std::move(colorPixels));
-                outNormalLayers->push_back(std::move(normalPixels));
+                dilateRgbAroundAlphaEdges(
+                    &colorPixels,
+                    kImposterSupersampleResolution,
+                    kImposterSupersampleResolution);
+                dilateRgbAroundAlphaEdges(
+                    &normalPixels,
+                    kImposterSupersampleResolution,
+                    kImposterSupersampleResolution);
+                float coverageTarget = 0.0f;
+                outColorLayers->push_back(
+                    downsampleSupersampledColorLayer(colorPixels, &coverageTarget));
+                outNormalLayers->push_back(
+                    downsampleSupersampledNormalLayer(normalPixels, coverageTarget));
+                outLayerCoverageTargets->push_back(coverageTarget);
             }
         }
     }
@@ -1968,9 +2115,9 @@ bool GeneratePineImposters(
     ImportedPack* pack,
     std::string* error)
 {
-    if (!ConverterHasCompressonatorSupport())
+    if (!ConverterHasBcCompressionSupport())
     {
-        *error = ConverterCompressonatorUnavailableReason();
+        *error = ConverterBcCompressionUnavailableReason();
         return false;
     }
 
@@ -1986,7 +2133,14 @@ bool GeneratePineImposters(
     {
         std::vector<std::vector<std::byte>> colorLayers;
         std::vector<std::vector<std::byte>> normalLayers;
-        success = renderer.captureAsset(*pack, asset, &colorLayers, &normalLayers, error);
+        std::vector<float> layerCoverageTargets;
+        success = renderer.captureAsset(
+            *pack,
+            asset,
+            &colorLayers,
+            &normalLayers,
+            &layerCoverageTargets,
+            error);
         if (!success)
         {
             break;
@@ -1996,6 +2150,7 @@ bool GeneratePineImposters(
         success = buildCompressedTexturePayload(
             RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
             colorLayers,
+            layerCoverageTargets,
             &colorPayload,
             error);
         if (!success)
@@ -2007,6 +2162,7 @@ bool GeneratePineImposters(
         success = buildCompressedTexturePayload(
             RuntimeAssets::TextureFormat::BC5_RG_UNORM,
             normalLayers,
+            layerCoverageTargets,
             &normalPayload,
             error);
         if (!success)

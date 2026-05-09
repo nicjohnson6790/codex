@@ -26,6 +26,7 @@ layout(set=0, binding=1, std430) readonly buffer HeightmapBuffer
 struct NearbyDrawMetadata
 {
     uvec4 instanceOffsetAndMaterial;
+    vec4 classCenterAndLodCenter;
 };
 
 layout(set=0, binding=2, std430) readonly buffer NearbyDrawMetadataBuffer
@@ -44,6 +45,7 @@ layout(location = 2) out vec3 fragTangent;
 layout(location = 3) out vec3 fragBitangent;
 layout(location = 4) out vec3 fragViewPosition;
 layout(location = 5) flat out uint fragMaterialIndex;
+layout(location = 6) flat out uint fragLodIndex;
 
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
@@ -90,7 +92,9 @@ void main()
     mat2 rotationMatrix = mat2(
         rotationCosine, -rotationSine,
         rotationSine, rotationCosine);
-    vec2 rotatedPositionXz = rotationMatrix * inPosition.xz;
+    vec2 canonicalCenterXz = draw.classCenterAndLodCenter.xy;
+    vec2 lodCenterXz = draw.classCenterAndLodCenter.zw;
+    vec2 rotatedPositionXz = rotationMatrix * ((inPosition.xz - lodCenterXz) + canonicalCenterXz);
     vec2 rotatedNormalXz = rotationMatrix * inNormal.xz;
     vec2 rotatedTangentXz = rotationMatrix * inTangent.xz;
 
@@ -110,4 +114,5 @@ void main()
     fragBitangent = bitangent;
     fragViewPosition = worldPosition;
     fragMaterialIndex = draw.instanceOffsetAndMaterial.y;
+    fragLodIndex = uint(instance.localOffsetAndMesh.w + 0.5);
 }

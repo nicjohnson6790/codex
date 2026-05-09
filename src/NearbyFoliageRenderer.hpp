@@ -151,6 +151,7 @@ private:
     struct alignas(16) DrawMetadataGpu
     {
         glm::uvec4 instanceOffsetAndMaterial{ 0u };
+        glm::vec4 classCenterAndLodCenter{ 0.0f };
     };
 
     [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(
@@ -217,6 +218,8 @@ private:
         std::uint32_t firstIndex = 0u;
         std::int32_t vertexOffset = 0;
         std::uint32_t materialIndex = 0u;
+        glm::vec2 classCenterXz{ 0.0f };
+        glm::vec2 lodCenterXz{ 0.0f };
     };
 
     struct LoadedLodAsset
