@@ -136,6 +136,7 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 Requirements:
 
 - CMake 3.25+
+- Ninja
 - A C++20 compiler
 - Vulkan SDK with `glslc`
 - Internet access during configure time for `FetchContent`
