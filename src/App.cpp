@@ -394,7 +394,11 @@ void App::updateSceneForFrame()
         if constexpr (AppConfig::Foliage::kEnabled)
         {
             m_foliageRenderer.setActiveCamera(cameraPosition);
-            m_nearbyFoliageRenderer.setActiveCamera(cameraPosition);
+            m_nearbyFoliageRenderer.setActiveCamera(
+                cameraPosition,
+                m_cameraManager.activeCamera().forward,
+                m_cameraManager.activeCamera().up,
+                viewportExtent);
             m_foliageManager.setTerrainSettings(m_worldGridQuadtree.terrainSettings());
         }
         if constexpr (AppConfig::Water::kEnabled)

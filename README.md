@@ -1,6 +1,6 @@
 # SDL3 GPU + ImGui Terrain Sandbox
 
-![rendered screenshot](images/Screenshot%202026-05-07%20201916.png)
+![rendered screenshot](images/Screenshot%202026-05-09%20162818.png)
 
 An editor-style terrain sandbox built on SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage, nearby tree mesh rendering, procedural far-canopy coverage, and shared-cascade FFT water.
 
@@ -10,13 +10,13 @@ This branch does not include the authored pine tree source assets needed to rebu
 
 - SDL3 GPU renderer presented inside an ImGui docking UI
 - Quadtree terrain with GPU-generated heightmaps and async min/max extent readback
-- Reusable terrain patch meshes with equal-LOD and `2:1` crack stitching
+- Reusable terrain patch meshes with equal-LOD and `2:1` crack-stitch bridge meshes
 - Terrain PBR material blending from generated `pbr` runtime texture arrays
 - GPU foliage generation into canonical `256m x 256m` resident pages
-- Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw plus a short dithered handoff band near the imposter range
-- Mid-distance foliage imposter path that renders BC-compressed pine imposter texture arrays with runtime lighting
+- Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw, alpha-tested depth prepass, and a short dithered handoff band near the imposter range
+- Mid-distance foliage imposter path that renders BC-compressed pine imposter texture arrays with runtime lighting and an alpha-tested depth prepass
 - Far-canopy path that renders deterministic procedural canopy coverage until foliage pages are ready
-- Shared-cascade FFT water with bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
+- Shared-cascade FFT water with equal-LOD and `2:1` bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
 - Skybox and water shading driven by the same cubemap and atmosphere model
 - Offline asset converter that builds compressed runtime `meshbin`, `texbin`, and `assetbin` packs
 - Self-contained build outputs with shaders and runtime assets staged under `build/<Config>`
@@ -67,7 +67,7 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 - `src/WorldGridQuadtreeTypes.hpp`: quadtree ids, bounds, and helper types
 - `src/WorldGridQuadtreeDebugRenderer.*`: quadtree debug bounds rendering
 - `src/WorldGridQuadtreeHeightmapManager.*`: terrain slice residency, LRU replacement, and generation queueing
-- `src/QuadtreeMeshRenderer.*`: terrain mesh draw path, bridge meshes, compute generation, and extents readback
+- `src/QuadtreeMeshRenderer.*`: terrain mesh draw path, equal-LOD and `2:1` bridge meshes, compute generation, and extents readback
 - `src/HeightmapNoiseGenerator.*`: procedural terrain noise settings and sampling helpers
 
 ### Foliage
@@ -82,7 +82,7 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 ### Water and sky
 
 - `src/WorldGridQuadtreeWaterManager.*`: water leaf filtering and staging
-- `src/QuadtreeWaterMeshRenderer.*`: FFT water simulation resources, bridge meshes, and water rendering
+- `src/QuadtreeWaterMeshRenderer.*`: FFT water simulation resources, equal-LOD and `2:1` bridge meshes, and water rendering
 - `src/WaterSettings.hpp`: editable water tuning values
 - `src/WaterTypes.hpp`: shared water data layouts
 - `src/SkyboxRenderer.*`: skybox runtime asset loading and fullscreen sky rendering
@@ -117,8 +117,10 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 - `shaders/foliage_common.glsl`: shared deterministic foliage candidate helpers
 - `shaders/foliage_generate.comp`: foliage page generation compute shader
 - `shaders/foliage_imposter.*`: mid-distance foliage imposter shaders
+- `shaders/foliage_imposter_depth_prepass.frag`: mid-distance foliage imposter alpha-tested depth prepass shader
 - `shaders/nearby_foliage_decode.comp`: nearby foliage decode compute shader
 - `shaders/nearby_foliage.*`: nearby tree mesh shaders
+- `shaders/nearby_foliage_depth_prepass.frag`: nearby tree mesh alpha-tested depth prepass shader
 - `shaders/foliage_canopy_generate.comp`: canopy coverage compute shader
 - `shaders/foliage_canopy.*`: far-canopy shaders
 - `shaders/water_initialize_spectrum.comp`: one-time water spectrum initialization

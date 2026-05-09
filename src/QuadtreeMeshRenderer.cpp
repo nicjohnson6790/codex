@@ -1745,11 +1745,11 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
 
     coarseBridgeIndices.push_back(coarseOuterVertexIndices[0]);
     coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[0]);
 
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[0]);
     coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[2]);
+    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
 
     for (std::uint32_t coarseSegment = 1; coarseSegment < (kCoarseBridgeOuterVertexCount - 2); ++coarseSegment)
     {

@@ -16,6 +16,8 @@
 #include <span>
 #include <stdexcept>
 #include <unordered_map>
+#include <glm/common.hpp>
+#include <glm/geometric.hpp>
 
 namespace
 {
@@ -106,6 +108,7 @@ void NearbyFoliageRenderer::initialize(
     loadRuntimeAssets();
     createDrawBuffers();
     createPipeline(shaderDirectory);
+    createDepthPrepassPipeline(shaderDirectory);
     createDecodeComputePipeline(shaderDirectory);
     resetTransientState();
 }
@@ -116,6 +119,11 @@ void NearbyFoliageRenderer::shutdown()
     {
         SDL_ReleaseGPUGraphicsPipeline(m_device, m_pipeline);
         m_pipeline = nullptr;
+    }
+    if (m_depthPrepassPipeline != nullptr)
+    {
+        SDL_ReleaseGPUGraphicsPipeline(m_device, m_depthPrepassPipeline);
+        m_depthPrepassPipeline = nullptr;
     }
     if (m_decodeComputePipeline != nullptr)
     {
@@ -269,6 +277,43 @@ void NearbyFoliageRenderer::shutdown()
 void NearbyFoliageRenderer::setActiveCamera(const Position& cameraPosition)
 {
     setActiveCameraPosition(cameraPosition);
+}
+
+void NearbyFoliageRenderer::setActiveCamera(
+    const Position& cameraPosition,
+    const glm::dvec3& cameraForward,
+    const glm::dvec3& cameraUp,
+    Extent2D viewportExtent)
+{
+    setActiveCameraPosition(cameraPosition);
+
+    glm::dvec3 forward = glm::dvec3(cameraForward.x, 0.0, cameraForward.z);
+    if (glm::length(forward) <= 0.00001)
+    {
+        forward = glm::dvec3(AppConfig::Camera::kFallbackForward.x, 0.0, AppConfig::Camera::kFallbackForward.z);
+    }
+    forward = glm::normalize(forward);
+
+    glm::dvec3 right = glm::normalize(glm::cross(forward, AppConfig::Camera::kWorldUp));
+    if (glm::length(right) <= 0.00001)
+    {
+        right = { 1.0, 0.0, 0.0 };
+    }
+    (void)cameraUp;
+
+    m_cameraForward = glm::vec3(
+        static_cast<float>(forward.x),
+        static_cast<float>(forward.y),
+        static_cast<float>(forward.z));
+    m_cameraRight = glm::vec3(
+        static_cast<float>(right.x),
+        static_cast<float>(right.y),
+        static_cast<float>(right.z));
+
+    const float aspectRatio =
+        static_cast<float>(glm::max(viewportExtent.width, 1u)) /
+        static_cast<float>(glm::max(viewportExtent.height, 1u));
+    m_tanHalfHorizontalFov = std::tan(AppConfig::Camera::kVerticalFovRadians * 0.5f) * aspectRatio;
 }
 
 void NearbyFoliageRenderer::beginFrame(std::uint64_t frameIndex)
@@ -465,6 +510,23 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
             const std::uint32_t lodIndex =
                 distanceSquared <= (kNearbyLod0MaxDistanceMeters * kNearbyLod0MaxDistanceMeters) ? 0u :
                 (distanceSquared <= (kNearbyLod1MaxDistanceMeters * kNearbyLod1MaxDistanceMeters) ? 1u : 2u);
+            const LoadedLodAsset& lodAsset = m_loadedClassLods[meshClass][lodIndex];
+            const float rotationCosine = std::cos(instance.rotationRadians);
+            const float rotationSine = std::sin(instance.rotationRadians);
+            const glm::vec3 rotatedBoundsCenter{
+                (lodAsset.boundsCenter.x * rotationCosine) - (lodAsset.boundsCenter.z * rotationSine),
+                lodAsset.boundsCenter.y,
+                (lodAsset.boundsCenter.x * rotationSine) + (lodAsset.boundsCenter.z * rotationCosine),
+            };
+            const glm::vec3 instanceBoundsCenter{
+                localPageOrigin.x + instance.localX + rotatedBoundsCenter.x,
+                localPageOrigin.y + rotatedBoundsCenter.y,
+                localPageOrigin.z + instance.localZ + rotatedBoundsCenter.z,
+            };
+            if (!sphereMayIntersectView(instanceBoundsCenter, lodAsset.boundsRadius))
+            {
+                continue;
+            }
 
             m_drawInstances[m_drawCount++] = {
                 .pageOriginAndSlice = glm::vec4(
@@ -771,6 +833,8 @@ void NearbyFoliageRenderer::render(
         m_meshVertexBuffer == nullptr ||
         m_meshIndexBuffer == nullptr ||
         m_materialSampler == nullptr ||
+        m_depthPrepassPipeline == nullptr ||
+        m_pipeline == nullptr ||
         m_activeDrawCommandCount == 0u ||
         m_baseColorTextureArray == nullptr ||
         m_normalTextureArray == nullptr ||
@@ -792,8 +856,6 @@ void NearbyFoliageRenderer::render(
     vertexUniforms.viewProjection = viewProjection;
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &vertexUniforms, sizeof(vertexUniforms));
 
-    SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
-
     const SDL_GPUBufferBinding vertexBinding{ m_meshVertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
     const SDL_GPUBufferBinding indexBinding{ m_meshIndexBuffer, 0 };
@@ -805,6 +867,21 @@ void NearbyFoliageRenderer::render(
         m_drawMetadataBuffer,
     };
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, vertexStorageBuffers, 3);
+
+    SDL_GPUTextureSamplerBinding depthSamplerBindings[1]{
+        { m_baseColorTextureArray, m_materialSampler },
+    };
+    SDL_BindGPUFragmentSamplers(renderPass, 0, depthSamplerBindings, 1);
+
+    SDL_GPUBuffer* fragmentStorageBuffers[]{
+        m_materialBuffer,
+    };
+    SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
+
+    SDL_BindGPUGraphicsPipeline(renderPass, m_depthPrepassPipeline);
+    SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, m_activeDrawCommandCount);
+
+    SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
 
     SDL_GPUTextureSamplerBinding samplerBindings[8]{
         { m_baseColorTextureArray, m_materialSampler },
@@ -818,9 +895,6 @@ void NearbyFoliageRenderer::render(
     };
     SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 8);
 
-    SDL_GPUBuffer* fragmentStorageBuffers[]{
-        m_materialBuffer,
-    };
     SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
 
     const glm::vec3 sunDirection = lightingSystem.sunDirection();
@@ -949,8 +1023,8 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
     pipelineInfo.rasterizer_state.enable_depth_clip = true;
     pipelineInfo.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
     pipelineInfo.depth_stencil_state.enable_depth_test = true;
-    pipelineInfo.depth_stencil_state.enable_depth_write = true;
-    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
+    pipelineInfo.depth_stencil_state.enable_depth_write = false;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_EQUAL;
     pipelineInfo.target_info.num_color_targets = 1;
     pipelineInfo.target_info.color_target_descriptions = &colorTargetDescription;
     pipelineInfo.target_info.has_depth_stencil_target = true;
@@ -966,6 +1040,81 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
     if (m_pipeline == nullptr)
     {
         throwSdlError("Failed to create nearby foliage mesh pipeline.");
+    }
+}
+
+void NearbyFoliageRenderer::createDepthPrepassPipeline(const std::filesystem::path& shaderDirectory)
+{
+    SDL_GPUShader* vertexShader = createShader(
+        shaderDirectory / "nearby_foliage.vert.spv",
+        SDL_GPU_SHADERSTAGE_VERTEX,
+        1,
+        3);
+    SDL_GPUShader* fragmentShader = createShader(
+        shaderDirectory / "nearby_foliage_depth_prepass.frag.spv",
+        SDL_GPU_SHADERSTAGE_FRAGMENT,
+        0,
+        1,
+        1);
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = sizeof(Vertex);
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    SDL_GPUVertexAttribute vertexAttributes[4]{};
+    vertexAttributes[0].location = 0;
+    vertexAttributes[0].buffer_slot = 0;
+    vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    vertexAttributes[0].offset = offsetof(Vertex, position);
+    vertexAttributes[1].location = 1;
+    vertexAttributes[1].buffer_slot = 0;
+    vertexAttributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    vertexAttributes[1].offset = offsetof(Vertex, normal);
+    vertexAttributes[2].location = 2;
+    vertexAttributes[2].buffer_slot = 0;
+    vertexAttributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+    vertexAttributes[2].offset = offsetof(Vertex, tangent);
+    vertexAttributes[3].location = 3;
+    vertexAttributes[3].buffer_slot = 0;
+    vertexAttributes[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    vertexAttributes[3].offset = offsetof(Vertex, uv0);
+
+    SDL_GPUColorTargetBlendState blendState{};
+    blendState.enable_blend = false;
+    blendState.color_write_mask = 0;
+
+    SDL_GPUColorTargetDescription colorTargetDescription{};
+    colorTargetDescription.format = m_colorFormat;
+    colorTargetDescription.blend_state = blendState;
+
+    SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.vertex_shader = vertexShader;
+    pipelineInfo.fragment_shader = fragmentShader;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+    pipelineInfo.rasterizer_state.enable_depth_clip = true;
+    pipelineInfo.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    pipelineInfo.depth_stencil_state.enable_depth_test = true;
+    pipelineInfo.depth_stencil_state.enable_depth_write = true;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
+    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.color_target_descriptions = &colorTargetDescription;
+    pipelineInfo.target_info.has_depth_stencil_target = true;
+    pipelineInfo.target_info.depth_stencil_format = m_depthFormat;
+    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
+    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = &vertexBufferDescription;
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 4;
+    pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
+
+    m_depthPrepassPipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
+    SDL_ReleaseGPUShader(m_device, fragmentShader);
+    SDL_ReleaseGPUShader(m_device, vertexShader);
+    if (m_depthPrepassPipeline == nullptr)
+    {
+        throwSdlError("Failed to create nearby foliage depth prepass pipeline.");
     }
 }
 
@@ -1200,6 +1349,21 @@ std::vector<std::byte> NearbyFoliageRenderer::resampleTextureRgba(
         }
     }
     return result;
+}
+
+bool NearbyFoliageRenderer::sphereMayIntersectView(
+    const glm::vec3& center,
+    float radius) const
+{
+    const float forwardDistance = glm::dot(center, m_cameraForward);
+    if (forwardDistance < -radius)
+    {
+        return false;
+    }
+
+    const float rightDistance = glm::dot(center, m_cameraRight);
+    const float horizontalLimit = (std::max(forwardDistance, 0.0f) * m_tanHalfHorizontalFov) + radius;
+    return std::abs(rightDistance) <= horizontalLimit;
 }
 
 void NearbyFoliageRenderer::createMaterialResources(
@@ -1560,10 +1724,14 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
         float classMaxZ = std::numeric_limits<float>::lowest();
         std::array<float, kNearbyLodCount> lodMinX{};
         std::array<float, kNearbyLodCount> lodMaxX{};
+        std::array<float, kNearbyLodCount> lodMinY{};
+        std::array<float, kNearbyLodCount> lodMaxY{};
         std::array<float, kNearbyLodCount> lodMinZ{};
         std::array<float, kNearbyLodCount> lodMaxZ{};
         lodMinX.fill(std::numeric_limits<float>::max());
         lodMaxX.fill(std::numeric_limits<float>::lowest());
+        lodMinY.fill(std::numeric_limits<float>::max());
+        lodMaxY.fill(std::numeric_limits<float>::lowest());
         lodMinZ.fill(std::numeric_limits<float>::max());
         lodMaxZ.fill(std::numeric_limits<float>::lowest());
 
@@ -1604,6 +1772,8 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
             classMaxZ = std::max(classMaxZ, mesh.boundsMax[2]);
             lodMinX[meshRef.lodIndex] = std::min(lodMinX[meshRef.lodIndex], mesh.boundsMin[0]);
             lodMaxX[meshRef.lodIndex] = std::max(lodMaxX[meshRef.lodIndex], mesh.boundsMax[0]);
+            lodMinY[meshRef.lodIndex] = std::min(lodMinY[meshRef.lodIndex], mesh.boundsMin[1]);
+            lodMaxY[meshRef.lodIndex] = std::max(lodMaxY[meshRef.lodIndex], mesh.boundsMax[1]);
             lodMinZ[meshRef.lodIndex] = std::min(lodMinZ[meshRef.lodIndex], mesh.boundsMin[2]);
             lodMaxZ[meshRef.lodIndex] = std::max(lodMaxZ[meshRef.lodIndex], mesh.boundsMax[2]);
         }
@@ -1719,12 +1889,25 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
 
         for (std::uint32_t lodIndex = 0; lodIndex < kNearbyLodCount; ++lodIndex)
         {
-            if (m_loadedClassLods[treeClass][lodIndex].drawParts.empty())
+            LoadedLodAsset& lod = m_loadedClassLods[treeClass][lodIndex];
+            if (lod.drawParts.empty())
             {
                 throw std::runtime_error(
                     std::string("Nearby foliage selected asset is missing drawable LOD") +
                     std::to_string(lodIndex) + ": " + desiredAssetName);
             }
+
+            const glm::vec3 halfExtents{
+                (lodMaxX[lodIndex] - lodMinX[lodIndex]) * 0.5f,
+                (lodMaxY[lodIndex] - lodMinY[lodIndex]) * 0.5f,
+                (lodMaxZ[lodIndex] - lodMinZ[lodIndex]) * 0.5f,
+            };
+            lod.boundsCenter = {
+                classCenterXz.x,
+                (lodMinY[lodIndex] + lodMaxY[lodIndex]) * 0.5f,
+                classCenterXz.y,
+            };
+            lod.boundsRadius = glm::length(halfExtents);
         }
     }
 

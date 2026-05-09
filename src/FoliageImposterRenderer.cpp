@@ -112,6 +112,7 @@ void FoliageImposterRenderer::initialize(
     loadRuntimeAssets();
     createClassMetadataBuffer();
     createPipeline(shaderDirectory);
+    createDepthPrepassPipeline(shaderDirectory);
 }
 
 void FoliageImposterRenderer::shutdown()
@@ -120,6 +121,11 @@ void FoliageImposterRenderer::shutdown()
     {
         SDL_ReleaseGPUGraphicsPipeline(m_device, m_pipeline);
         m_pipeline = nullptr;
+    }
+    if (m_depthPrepassPipeline != nullptr)
+    {
+        SDL_ReleaseGPUGraphicsPipeline(m_device, m_depthPrepassPipeline);
+        m_depthPrepassPipeline = nullptr;
     }
     if (m_materialSampler != nullptr)
     {
@@ -345,6 +351,8 @@ void FoliageImposterRenderer::render(
         m_imposterColorTextureArray == nullptr ||
         m_imposterNormalTextureArray == nullptr ||
         m_treeClassBuffer == nullptr ||
+        m_depthPrepassPipeline == nullptr ||
+        m_pipeline == nullptr ||
         m_activeTreeClassCount == 0u)
     {
         return;
@@ -363,8 +371,6 @@ void FoliageImposterRenderer::render(
     fragmentUniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     fragmentUniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
 
-    SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
-
     const SDL_GPUBufferBinding vertexBinding{ m_quadVertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
     const SDL_GPUBufferBinding indexBinding{ m_quadIndexBuffer, 0 };
@@ -378,13 +384,23 @@ void FoliageImposterRenderer::render(
     };
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, vertexStorageBuffers, 4);
 
+    SDL_GPUTextureSamplerBinding depthSamplerBindings[1]{
+        { m_imposterColorTextureArray, m_materialSampler },
+    };
+    SDL_BindGPUFragmentSamplers(renderPass, 0, depthSamplerBindings, 1);
+
+    SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+    SDL_BindGPUGraphicsPipeline(renderPass, m_depthPrepassPipeline);
+    SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, m_drawCount);
+
+    SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
+
     SDL_GPUTextureSamplerBinding samplerBindings[2]{
         { m_imposterColorTextureArray, m_materialSampler },
         { m_imposterNormalTextureArray, m_materialSampler },
     };
     SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 2);
 
-    SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &fragmentUniforms, sizeof(fragmentUniforms));
     SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, m_drawCount);
 }
@@ -769,8 +785,8 @@ void FoliageImposterRenderer::createPipeline(const std::filesystem::path& shader
     pipelineInfo.rasterizer_state.enable_depth_clip = true;
     pipelineInfo.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
     pipelineInfo.depth_stencil_state.enable_depth_test = true;
-    pipelineInfo.depth_stencil_state.enable_depth_write = true;
-    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
+    pipelineInfo.depth_stencil_state.enable_depth_write = false;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_EQUAL;
     pipelineInfo.target_info.num_color_targets = 1;
     pipelineInfo.target_info.color_target_descriptions = &colorTargetDescription;
     pipelineInfo.target_info.has_depth_stencil_target = true;
@@ -786,6 +802,73 @@ void FoliageImposterRenderer::createPipeline(const std::filesystem::path& shader
     if (m_pipeline == nullptr)
     {
         throwSdlError("Failed to create foliage impostor pipeline.");
+    }
+}
+
+void FoliageImposterRenderer::createDepthPrepassPipeline(const std::filesystem::path& shaderDirectory)
+{
+    SDL_GPUShader* vertexShader = createShader(
+        shaderDirectory / "foliage_imposter.vert.spv",
+        SDL_GPU_SHADERSTAGE_VERTEX,
+        1,
+        4);
+    SDL_GPUShader* fragmentShader = createShader(
+        shaderDirectory / "foliage_imposter_depth_prepass.frag.spv",
+        SDL_GPU_SHADERSTAGE_FRAGMENT,
+        0,
+        0,
+        1);
+
+    SDL_GPUVertexBufferDescription vertexBufferDescriptions[1]{};
+    vertexBufferDescriptions[0].slot = 0;
+    vertexBufferDescriptions[0].pitch = sizeof(Vertex);
+    vertexBufferDescriptions[0].input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    SDL_GPUVertexAttribute vertexAttributes[2]{};
+    vertexAttributes[0].location = 0;
+    vertexAttributes[0].buffer_slot = 0;
+    vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    vertexAttributes[0].offset = offsetof(Vertex, corner);
+    vertexAttributes[1].location = 1;
+    vertexAttributes[1].buffer_slot = 0;
+    vertexAttributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    vertexAttributes[1].offset = offsetof(Vertex, uv0);
+
+    SDL_GPUColorTargetBlendState blendState{};
+    blendState.enable_blend = false;
+    blendState.color_write_mask = 0;
+
+    SDL_GPUColorTargetDescription colorTargetDescription{};
+    colorTargetDescription.format = m_colorFormat;
+    colorTargetDescription.blend_state = blendState;
+
+    SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.vertex_shader = vertexShader;
+    pipelineInfo.fragment_shader = fragmentShader;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+    pipelineInfo.rasterizer_state.enable_depth_clip = true;
+    pipelineInfo.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    pipelineInfo.depth_stencil_state.enable_depth_test = true;
+    pipelineInfo.depth_stencil_state.enable_depth_write = true;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
+    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.color_target_descriptions = &colorTargetDescription;
+    pipelineInfo.target_info.has_depth_stencil_target = true;
+    pipelineInfo.target_info.depth_stencil_format = m_depthFormat;
+    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
+    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = vertexBufferDescriptions;
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 2;
+    pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
+
+    m_depthPrepassPipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
+    SDL_ReleaseGPUShader(m_device, fragmentShader);
+    SDL_ReleaseGPUShader(m_device, vertexShader);
+    if (m_depthPrepassPipeline == nullptr)
+    {
+        throwSdlError("Failed to create foliage impostor depth prepass pipeline.");
     }
 }
 

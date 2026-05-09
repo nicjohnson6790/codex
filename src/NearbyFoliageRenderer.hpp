@@ -2,6 +2,7 @@
 
 #include "EngineRendererBase.hpp"
 #include "FoliageTypes.hpp"
+#include "RenderTypes.hpp"
 #include "SubmittedGpuFence.hpp"
 #include "assets/RuntimeAssetReader.hpp"
 
@@ -70,6 +71,11 @@ public:
     void shutdown();
 
     void setActiveCamera(const Position& cameraPosition);
+    void setActiveCamera(
+        const Position& cameraPosition,
+        const glm::dvec3& cameraForward,
+        const glm::dvec3& cameraUp,
+        Extent2D viewportExtent);
     void beginFrame(std::uint64_t frameIndex);
     void collectCompletedDecodedPages();
 
@@ -160,6 +166,7 @@ private:
         std::uint32_t firstIndex,
         std::int32_t vertexOffset);
     void createPipeline(const std::filesystem::path& shaderDirectory);
+    void createDepthPrepassPipeline(const std::filesystem::path& shaderDirectory);
     void createDecodeComputePipeline(const std::filesystem::path& shaderDirectory);
     void createDecodeBuffers();
     void createDrawBuffers();
@@ -199,6 +206,9 @@ private:
         std::uint32_t sourceHeight,
         std::uint32_t targetWidth,
         std::uint32_t targetHeight) const;
+    [[nodiscard]] bool sphereMayIntersectView(
+        const glm::vec3& center,
+        float radius) const;
 
     struct LoadedMaterialGpu
     {
@@ -226,6 +236,8 @@ private:
     {
         std::string name;
         std::vector<LoadedDrawPart> drawParts;
+        glm::vec3 boundsCenter{ 0.0f };
+        float boundsRadius = 0.0f;
     };
 
     static constexpr std::uint32_t kNearbyTreeClassCount = 16u;
@@ -233,6 +245,7 @@ private:
     static constexpr std::uint32_t kNearbyDrawGroupCount = kNearbyTreeClassCount * kNearbyLodCount;
 
     SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
+    SDL_GPUGraphicsPipeline* m_depthPrepassPipeline = nullptr;
     SDL_GPUComputePipeline* m_decodeComputePipeline = nullptr;
     SDL_GPUBuffer* m_meshVertexBuffer = nullptr;
     SDL_GPUTransferBuffer* m_meshVertexTransferBuffer = nullptr;
@@ -282,5 +295,8 @@ private:
     std::uint16_t m_topologyHintCount = 0u;
     std::uint32_t m_drawCount = 0u;
     std::uint64_t m_frameIndex = 0u;
+    glm::vec3 m_cameraForward{ 0.0f, 0.0f, -1.0f };
+    glm::vec3 m_cameraRight{ 1.0f, 0.0f, 0.0f };
+    float m_tanHalfHorizontalFov = 1.0f;
     bool m_runtimeAssetsLoaded = false;
 };

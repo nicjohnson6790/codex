@@ -112,8 +112,10 @@ set(FOLIAGE_CANOPY_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/foliage_canopy_generat
 set(SKYBOX_VERT_SPV ${SHADER_OUTPUT_DIR}/skybox.vert.spv)
 set(SKYBOX_FRAG_SPV ${SHADER_OUTPUT_DIR}/skybox.frag.spv)
 set(FOLIAGE_IMPOSTER_VERT_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter.vert.spv)
+set(FOLIAGE_IMPOSTER_DEPTH_PREPASS_FRAG_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter_depth_prepass.frag.spv)
 set(FOLIAGE_IMPOSTER_FRAG_SPV ${SHADER_OUTPUT_DIR}/foliage_imposter.frag.spv)
 set(NEARBY_FOLIAGE_VERT_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage.vert.spv)
+set(NEARBY_FOLIAGE_DEPTH_PREPASS_FRAG_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage_depth_prepass.frag.spv)
 set(NEARBY_FOLIAGE_FRAG_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage.frag.spv)
 set(NEARBY_FOLIAGE_DECODE_COMP_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage_decode.comp.spv)
 set(WATER_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh.vert.spv)
@@ -151,8 +153,10 @@ compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.vert
     ${FOLIAGE_IMPOSTER_VERT_SPV}
     ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter_depth_prepass.frag ${FOLIAGE_IMPOSTER_DEPTH_PREPASS_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.frag ${FOLIAGE_IMPOSTER_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.vert ${NEARBY_FOLIAGE_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage_depth_prepass.frag ${NEARBY_FOLIAGE_DEPTH_PREPASS_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.frag ${NEARBY_FOLIAGE_FRAG_SPV})
 compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/nearby_foliage_decode.comp
@@ -183,8 +187,10 @@ add_custom_target(shaders ALL
         ${SKYBOX_VERT_SPV}
         ${SKYBOX_FRAG_SPV}
         ${FOLIAGE_IMPOSTER_VERT_SPV}
+        ${FOLIAGE_IMPOSTER_DEPTH_PREPASS_FRAG_SPV}
         ${FOLIAGE_IMPOSTER_FRAG_SPV}
         ${NEARBY_FOLIAGE_VERT_SPV}
+        ${NEARBY_FOLIAGE_DEPTH_PREPASS_FRAG_SPV}
         ${NEARBY_FOLIAGE_FRAG_SPV}
         ${NEARBY_FOLIAGE_DECODE_COMP_SPV}
         ${WATER_MESH_VERT_SPV}

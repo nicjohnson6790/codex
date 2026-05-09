@@ -88,6 +88,7 @@ private:
         std::int32_t vertexOffset,
         std::uint32_t firstInstance);
     void createPipeline(const std::filesystem::path& shaderDirectory);
+    void createDepthPrepassPipeline(const std::filesystem::path& shaderDirectory);
     void loadRuntimeAssets();
     void createPagePoolBuffers();
     void createIndirectAndDrawMetadataBuffers();
@@ -102,6 +103,7 @@ private:
     static SDL_GPUTextureFormat textureFormatFromRuntimeFormat(RuntimeAssets::TextureFormat format);
 
     SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
+    SDL_GPUGraphicsPipeline* m_depthPrepassPipeline = nullptr;
     SDL_GPUSampler* m_materialSampler = nullptr;
     SDL_GPUTexture* m_imposterColorTextureArray = nullptr;
     SDL_GPUTexture* m_imposterNormalTextureArray = nullptr;

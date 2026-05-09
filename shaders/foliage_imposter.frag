@@ -1,5 +1,7 @@
 #version 450
 
+layout(early_fragment_tests) in;
+
 layout(set=3, binding=0) uniform FoliageImposterMaterialUniforms
 {
     vec4 sunDirectionIntensity;
