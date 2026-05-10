@@ -7,6 +7,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <vector>
 
 class QuadtreeMeshRenderer;
 
@@ -23,6 +25,13 @@ struct ResidentMapEntry
     std::uint8_t age = 0;
 };
 
+struct CpuResidentHeightmapView
+{
+    WorldGridQuadtreeLeafId leafId{};
+    std::uint16_t sliceIndex = 0;
+    std::span<const float> samples{};
+};
+
 class WorldGridQuadtreeHeightmapManager
 {
 public:
@@ -32,8 +41,10 @@ public:
 
     void ageMap();
     bool makeResident(const WorldGridQuadtreeLeafId& leafId);
+    bool makeCpuResident(const WorldGridQuadtreeLeafId& leafId, QuadtreeMeshRenderer& meshRenderer);
     void requestLeaf(const WorldGridQuadtreeLeafId& leafId, QuadtreeMeshRenderer& meshRenderer);
     void scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer);
+    void collectCompletedCpuReadbacks(QuadtreeMeshRenderer& meshRenderer);
     void applyGeneratedExtents(
         const WorldGridQuadtreeLeafId& leafId,
         std::uint16_t sliceIndex,
@@ -41,6 +52,9 @@ public:
     void clearCache();
     [[nodiscard]] bool getExtents(const WorldGridQuadtreeLeafId& leafId, HeightmapExtents& extents) const;
     [[nodiscard]] bool getResidentSliceIndex(const WorldGridQuadtreeLeafId& leafId, std::uint16_t& sliceIndex) const;
+    [[nodiscard]] bool tryGetCpuResidentHeightmap(
+        const WorldGridQuadtreeLeafId& leafId,
+        CpuResidentHeightmapView& view) const;
     [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_noiseGenerator.settings(); }
     [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_noiseGenerator.settings(); }
     [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_computeDispatchBudget; }
@@ -91,6 +105,10 @@ private:
 
     std::array<HeightmapExtents, kCapacity> m_knownExtents{};
     std::array<bool, kCapacity> m_knownExtentsValid{};
+    std::array<std::vector<float>, kCapacity> m_cpuHeightmapSamples{};
+    std::array<WorldGridQuadtreeLeafId, kCapacity> m_cpuHeightmapLeafIds{};
+    std::array<bool, kCapacity> m_cpuHeightmapValid{};
+    std::array<bool, kCapacity> m_cpuHeightmapPending{};
     std::array<std::uint16_t, kCapacity> m_freeSlots{};
     std::uint16_t m_freeSlotCount = 0;
     std::uint16_t m_computeDispatchBudget = 4;

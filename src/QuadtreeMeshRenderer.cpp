@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace
@@ -435,6 +436,18 @@ void QuadtreeMeshRenderer::initialize(
         }
     }
 
+    SDL_GPUTransferBufferCreateInfo heightmapSliceDownloadInfo{};
+    heightmapSliceDownloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+    heightmapSliceDownloadInfo.size = static_cast<Uint32>(sizeof(float) * kHeightmapSliceFloatCount);
+    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    {
+        readback.transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &heightmapSliceDownloadInfo);
+        if (readback.transferBuffer == nullptr)
+        {
+            throwSdlError("Failed to create quadtree mesh heightmap-slice download transfer buffer.");
+        }
+    }
+
     SDL_GPUBufferCreateInfo foliageInstanceGenerationInfo{};
     foliageInstanceGenerationInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
     foliageInstanceGenerationInfo.size = static_cast<Uint32>(
@@ -504,6 +517,20 @@ void QuadtreeMeshRenderer::shutdown()
             readback.transferBuffer = nullptr;
         }
         readback.count = 0;
+    }
+    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    {
+        if (readback.fence != nullptr)
+        {
+            readback.fence.reset();
+        }
+        if (readback.transferBuffer != nullptr)
+        {
+            SDL_ReleaseGPUTransferBuffer(m_device, readback.transferBuffer);
+            readback.transferBuffer = nullptr;
+        }
+        readback.requested = false;
+        readback.queued = false;
     }
     destroyCausticsSampler();
     destroyPbrSampler();
@@ -1112,6 +1139,70 @@ void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPa
     }
 }
 
+bool QuadtreeMeshRenderer::requestHeightmapSliceDownload(
+    const WorldGridQuadtreeLeafId& leafId,
+    std::uint16_t sliceIndex)
+{
+    for (const PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    {
+        if ((readback.requested || readback.queued || readback.fence != nullptr) &&
+            readback.leafId == leafId &&
+            readback.sliceIndex == sliceIndex)
+        {
+            return true;
+        }
+    }
+
+    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    {
+        if (readback.requested || readback.queued || readback.fence != nullptr)
+        {
+            continue;
+        }
+
+        readback.leafId = leafId;
+        readback.sliceIndex = sliceIndex;
+        readback.requested = true;
+        readback.queued = false;
+        return true;
+    }
+
+    return false;
+}
+
+void QuadtreeMeshRenderer::queueHeightmapSliceDownloads(SDL_GPUCopyPass* copyPass)
+{
+    HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::QueueHeightmapSliceDownloads");
+
+    m_pendingHeightmapSliceFenceSlotCount = 0;
+
+    for (std::uint16_t slotIndex = 0; slotIndex < m_pendingHeightmapSliceReadbacks.size(); ++slotIndex)
+    {
+        PendingHeightmapSliceReadback& readback = m_pendingHeightmapSliceReadbacks[slotIndex];
+        if (!readback.requested || readback.queued || readback.fence != nullptr)
+        {
+            continue;
+        }
+
+        SDL_GPUBufferRegion source{};
+        source.buffer = m_heightmapBuffer;
+        source.offset = static_cast<Uint32>(sizeof(float) * kHeightmapSliceFloatCount * readback.sliceIndex);
+        source.size = static_cast<Uint32>(sizeof(float) * kHeightmapSliceFloatCount);
+
+        SDL_GPUTransferBufferLocation destination{};
+        destination.transfer_buffer = readback.transferBuffer;
+        destination.offset = 0;
+        SDL_DownloadFromGPUBuffer(copyPass, &source, &destination);
+
+        readback.requested = false;
+        readback.queued = true;
+        if (m_pendingHeightmapSliceFenceSlotCount < m_pendingHeightmapSliceFenceSlots.size())
+        {
+            m_pendingHeightmapSliceFenceSlots[m_pendingHeightmapSliceFenceSlotCount++] = slotIndex;
+        }
+    }
+}
+
 bool QuadtreeMeshRenderer::queueFoliagePageGeneration(
     const WorldGridQuadtreeLeafId& foliageLeafId,
     const WorldGridQuadtreeLeafId& terrainLeafId,
@@ -1288,7 +1379,8 @@ void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedG
 {
     if (m_pendingFenceReadbackSlot == UINT16_MAX)
     {
-        if (m_pendingFoliageLiveCountFenceReadbackSlot == UINT16_MAX)
+        if (m_pendingFoliageLiveCountFenceReadbackSlot == UINT16_MAX &&
+            m_pendingHeightmapSliceFenceSlotCount == 0)
         {
             return;
         }
@@ -1300,6 +1392,14 @@ void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedG
         readback.fence = fence;
         m_pendingFenceReadbackSlot = UINT16_MAX;
     }
+
+    for (std::uint16_t pendingIndex = 0; pendingIndex < m_pendingHeightmapSliceFenceSlotCount; ++pendingIndex)
+    {
+        PendingHeightmapSliceReadback& readback =
+            m_pendingHeightmapSliceReadbacks[m_pendingHeightmapSliceFenceSlots[pendingIndex]];
+        readback.fence = fence;
+    }
+    m_pendingHeightmapSliceFenceSlotCount = 0;
 
     if (m_pendingFoliageLiveCountFenceReadbackSlot != UINT16_MAX)
     {
@@ -1339,6 +1439,37 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<Generate
         SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
         readback.fence.reset();
         readback.count = 0;
+    }
+}
+
+void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(
+    std::vector<CompletedHeightmapSliceReadback>& completedReadbacks)
+{
+    HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::CollectCompletedHeightmapSliceReadbacks");
+
+    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    {
+        if (!readback.fence || !readback.fence->isSignaled())
+        {
+            continue;
+        }
+
+        CompletedHeightmapSliceReadback completed{};
+        completed.leafId = readback.leafId;
+        completed.sliceIndex = readback.sliceIndex;
+
+        const float* mappedSamples = static_cast<const float*>(
+            SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
+        std::memcpy(completed.samples.data(), mappedSamples, sizeof(float) * completed.samples.size());
+        SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
+
+        completedReadbacks.push_back(std::move(completed));
+
+        readback.fence.reset();
+        readback.leafId = {};
+        readback.sliceIndex = 0;
+        readback.requested = false;
+        readback.queued = false;
     }
 }
 

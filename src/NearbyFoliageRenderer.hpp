@@ -57,6 +57,14 @@ public:
         glm::vec4 rotationAndReserved{ 0.0f };
     };
 
+    struct CpuResidentPageView
+    {
+        WorldGridQuadtreeLeafId pageKey{};
+        std::uint16_t liveCount = 0u;
+        std::uint32_t contentVersion = 0u;
+        std::span<const DecodedNearbyFoliageInstance> instances{};
+    };
+
     NearbyFoliageRenderer() = default;
     ~NearbyFoliageRenderer() = default;
 
@@ -106,6 +114,9 @@ public:
     [[nodiscard]] std::uint32_t emittedInstanceCount() const { return m_drawCount; }
     [[nodiscard]] std::uint32_t decodedResidentCount() const;
     [[nodiscard]] std::uint32_t decodedPendingCount() const;
+    [[nodiscard]] bool tryGetCpuResidentPage(
+        const WorldGridQuadtreeLeafId& pageKey,
+        CpuResidentPageView& view) const;
 
 private:
     struct alignas(16) DecodeRequestGpu

@@ -6,6 +6,7 @@
 #include "FoliageImposterRenderer.hpp"
 #include "FreeFlightCameraController.hpp"
 #include "GamepadInput.hpp"
+#include "Gameplay.hpp"
 #include "LineRenderer.hpp"
 #include "LightingSystem.hpp"
 #include "NearbyFoliageRenderer.hpp"
@@ -67,6 +68,12 @@ private:
     GamepadInput m_gamepadInput;
     CameraManager m_cameraManager;
     FreeFlightCameraController m_cameraController;
+    PlayerPawn m_playerPawn;
+    PlayerController m_playerController;
+    CharacterMotor m_characterMotor;
+    FollowCameraController m_followCameraController;
+    CollisionManager m_collisionManager;
+    PlayerMoveIntent m_playerMoveIntent;
     AppPanels m_panels;
     WorldGridQuadtree m_worldGridQuadtree;
     WorldGridFoliageCanopyManager m_foliageCanopyManager;
@@ -81,8 +88,12 @@ private:
 
     std::vector<std::string> m_gpuDrivers;
     Options m_options{};
+    std::size_t m_freeCameraIndex = 0;
+    std::size_t m_playerCameraIndex = 0;
+    bool m_playerFollowCameraEnabled = false;
     bool m_firstFramePresented = false;
     std::uint64_t m_lastFrameTsc = 0;
     std::uint64_t m_frameIndex = 0;
+    float m_deltaTimeSeconds = 1.0f / 60.0f;
     float m_elapsedTimeSeconds = 0.0f;
 };

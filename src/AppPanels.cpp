@@ -191,6 +191,26 @@ void AppPanels::drawControlsTab(Context& context)
         ImGui::BulletText("Press right stick: align camera up to world up");
     }
 
+    if (ImGui::CollapsingHeader("Player", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Use player follow camera", &context.playerFollowCameraEnabled);
+        const glm::dvec3 playerWorld = context.playerPawn.position.worldPosition();
+        ImGui::Text(
+            "Player world: (%.2f, %.2f, %.2f)",
+            playerWorld.x,
+            playerWorld.y,
+            playerWorld.z);
+        ImGui::Text("Grounded: %s", context.playerPawn.grounded ? "yes" : "no");
+        ImGui::Text("Collision tiles ready: %u / 16", context.collisionManager.readyTileCount());
+        ImGui::SeparatorText("Keyboard");
+        ImGui::BulletText("WASD: move");
+        ImGui::BulletText("Shift: sprint");
+        ImGui::SeparatorText("Gamepad");
+        ImGui::BulletText("Left stick: move");
+        ImGui::BulletText("Right stick: orbit camera");
+        ImGui::BulletText("RB: sprint");
+    }
+
     if (ImGui::CollapsingHeader("Triangle Instances", ImGuiTreeNodeFlags_DefaultOpen))
     {
         if (ImGui::Button("Add Triangle"))

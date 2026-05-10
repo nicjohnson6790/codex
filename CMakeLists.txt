@@ -214,6 +214,7 @@ add_executable(terrain_sandbox
     src/FoliageImposterRenderer.cpp
     src/FreeFlightCameraController.cpp
     src/GamepadInput.cpp
+    src/Gameplay.cpp
     src/HeightmapNoiseGenerator.cpp
     src/LineRenderer.cpp
     src/LightingSystem.cpp

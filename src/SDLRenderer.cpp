@@ -276,6 +276,7 @@ void SDLRenderer::renderFrame(
             throwSdlError("Failed to begin SDL GPU extents download copy pass.");
         }
         quadtreeMeshRenderer.queueHeightmapExtentsDownload(copyPass);
+        quadtreeMeshRenderer.queueHeightmapSliceDownloads(copyPass);
         quadtreeMeshRenderer.queueFoliageInstanceLiveCountDownloads(copyPass);
         nearbyFoliageRenderer.queueDecodedPageDownloads(copyPass);
         SDL_EndGPUCopyPass(copyPass);

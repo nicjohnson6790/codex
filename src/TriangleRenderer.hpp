@@ -21,6 +21,7 @@ public:
     struct InstanceData
     {
         float offset[3];
+        float yawRadians = 0.0f;
     };
 
     TriangleRenderer() = default;
@@ -39,7 +40,7 @@ public:
 
     void clear();
     void setActiveCamera(const Position& cameraPosition);
-    void addTriangle(const Position& position);
+    void addTriangle(const Position& position, float yawRadians = 0.0f);
     void upload(SDL_GPUCopyPass* copyPass);
     void render(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* commandBuffer, const glm::mat4& viewProjection) const;
 

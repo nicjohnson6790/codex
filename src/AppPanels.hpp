@@ -2,6 +2,7 @@
 
 #include "CameraManager.hpp"
 #include "FoliageCanopyRenderer.hpp"
+#include "Gameplay.hpp"
 #include "LightingSystem.hpp"
 #include "NearbyFoliageRenderer.hpp"
 #include "PerfPanel.hpp"
@@ -32,6 +33,9 @@ public:
         CameraManager& cameraManager;
         SDLRenderer& renderer;
         std::vector<TriangleInstance>& instances;
+        PlayerPawn& playerPawn;
+        CollisionManager& collisionManager;
+        bool& playerFollowCameraEnabled;
         const std::vector<std::string>& gpuDrivers;
         std::string_view gamepadName;
         LightingSystem& lightingSystem;

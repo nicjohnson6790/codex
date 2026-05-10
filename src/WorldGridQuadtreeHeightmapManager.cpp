@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <bit>
 #include <limits>
+#include <vector>
 
 WorldGridQuadtreeHeightmapManager::WorldGridQuadtreeHeightmapManager()
 {
@@ -39,6 +40,10 @@ void WorldGridQuadtreeHeightmapManager::clearCache()
         m_residentMap[slot] = {};
         m_knownExtents[slot] = {};
         m_knownExtentsValid[slot] = false;
+        m_cpuHeightmapSamples[slot].clear();
+        m_cpuHeightmapLeafIds[slot] = {};
+        m_cpuHeightmapValid[slot] = false;
+        m_cpuHeightmapPending[slot] = false;
         m_freeSlots[slot] = static_cast<std::uint16_t>(kCapacity - 1 - slot);
     }
 
@@ -66,6 +71,34 @@ bool WorldGridQuadtreeHeightmapManager::makeResident(const WorldGridQuadtreeLeaf
     }
 
     enqueueLeaf(leafId);
+    return false;
+}
+
+bool WorldGridQuadtreeHeightmapManager::makeCpuResident(
+    const WorldGridQuadtreeLeafId& leafId,
+    QuadtreeMeshRenderer& meshRenderer)
+{
+    if (!makeResident(leafId))
+    {
+        return false;
+    }
+
+    std::uint16_t sliceIndex = 0;
+    if (!getResidentSliceIndex(leafId, sliceIndex))
+    {
+        return false;
+    }
+
+    if (m_cpuHeightmapValid[sliceIndex] && m_cpuHeightmapLeafIds[sliceIndex] == leafId)
+    {
+        return true;
+    }
+
+    if (!m_cpuHeightmapPending[sliceIndex])
+    {
+        m_cpuHeightmapPending[sliceIndex] = meshRenderer.requestHeightmapSliceDownload(leafId, sliceIndex);
+    }
+
     return false;
 }
 
@@ -112,6 +145,52 @@ bool WorldGridQuadtreeHeightmapManager::getResidentSliceIndex(
 
     sliceIndex = m_residentMap[residentIndex].lruSlice;
     return true;
+}
+
+bool WorldGridQuadtreeHeightmapManager::tryGetCpuResidentHeightmap(
+    const WorldGridQuadtreeLeafId& leafId,
+    CpuResidentHeightmapView& view) const
+{
+    std::uint16_t sliceIndex = 0;
+    if (!getResidentSliceIndex(leafId, sliceIndex))
+    {
+        return false;
+    }
+
+    if (!m_cpuHeightmapValid[sliceIndex] ||
+        m_cpuHeightmapLeafIds[sliceIndex] != leafId ||
+        m_cpuHeightmapSamples[sliceIndex].empty())
+    {
+        return false;
+    }
+
+    view = {
+        .leafId = leafId,
+        .sliceIndex = sliceIndex,
+        .samples = std::span<const float>(m_cpuHeightmapSamples[sliceIndex].data(), m_cpuHeightmapSamples[sliceIndex].size()),
+    };
+    return true;
+}
+
+void WorldGridQuadtreeHeightmapManager::collectCompletedCpuReadbacks(QuadtreeMeshRenderer& meshRenderer)
+{
+    std::vector<QuadtreeMeshRenderer::CompletedHeightmapSliceReadback> completedReadbacks;
+    meshRenderer.collectCompletedHeightmapSliceReadbacks(completedReadbacks);
+    for (const QuadtreeMeshRenderer::CompletedHeightmapSliceReadback& completed : completedReadbacks)
+    {
+        const std::uint16_t residentIndex = findResidentIndex(completed.leafId);
+        if (residentIndex == kCapacity ||
+            m_residentMap[residentIndex].lruSlice != completed.sliceIndex)
+        {
+            continue;
+        }
+
+        std::vector<float>& samples = m_cpuHeightmapSamples[completed.sliceIndex];
+        samples.assign(completed.samples.begin(), completed.samples.end());
+        m_cpuHeightmapLeafIds[completed.sliceIndex] = completed.leafId;
+        m_cpuHeightmapValid[completed.sliceIndex] = true;
+        m_cpuHeightmapPending[completed.sliceIndex] = false;
+    }
 }
 
 void WorldGridQuadtreeHeightmapManager::applyGeneratedExtents(
@@ -186,6 +265,9 @@ void WorldGridQuadtreeHeightmapManager::scheduleQueuedGenerations(QuadtreeMeshRe
         }
 
         m_knownExtentsValid[slice] = false;
+        m_cpuHeightmapValid[slice] = false;
+        m_cpuHeightmapPending[slice] = false;
+        m_cpuHeightmapLeafIds[slice] = {};
         m_residentMap[residentIndex] = {
             .leafId = leafId,
             .lruSlice = slice,

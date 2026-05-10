@@ -67,6 +67,7 @@ void App::run()
         const float deltaTimeSeconds = m_lastFrameTsc == 0
             ? (1.0f / 60.0f)
             : (performanceCapture.cyclesToMilliseconds(frameStartTsc - m_lastFrameTsc) / 1000.0f);
+        m_deltaTimeSeconds = deltaTimeSeconds;
         m_lastFrameTsc = frameStartTsc;
 
         performanceCapture.setPaused(m_panels.viewportPaused());
@@ -75,10 +76,17 @@ void App::run()
         pollEvents();
 
         const GamepadState gamepadState = m_gamepadInput.pollState();
+        m_playerMoveIntent = m_playerController.poll(gamepadState);
+        if (!m_playerFollowCameraEnabled &&
+            m_cameraManager.hasActiveCamera() &&
+            m_cameraManager.activeCameraIndex() == m_playerCameraIndex)
+        {
+            m_cameraManager.setActiveCamera(m_freeCameraIndex);
+        }
 
         {
             HELLO_PROFILE_SCOPE("App::UpdateCamera");
-            if (!m_panels.viewportPaused() && m_cameraManager.hasActiveCamera())
+            if (!m_panels.viewportPaused() && m_cameraManager.hasActiveCamera() && !m_playerFollowCameraEnabled)
             {
                 m_cameraController.update(m_cameraManager.activeCamera(), gamepadState, deltaTimeSeconds);
             }
@@ -175,10 +183,17 @@ void App::initialize()
     PerformanceCapture::instance().initialize(AppConfig::Perf::kHistorySeconds);
     logStartup("performance capture initialized");
     logStartup("create default camera");
-    m_cameraManager.createCamera(
+    m_freeCameraIndex = m_cameraManager.createCamera(
         "Camera 1",
         Position(0, 0, { 0.0, 300.0, 2.8 })
     );
+    m_playerCameraIndex = m_cameraManager.createCamera(
+        "Player Follow",
+        Position(0, 0, { 0.0, 308.0, 8.0 }),
+        { 0.0, -0.35, -1.0 },
+        AppConfig::Camera::kWorldUp
+    );
+    m_cameraManager.setActiveCamera(m_freeCameraIndex);
     logStartup("default camera created");
 
     logStartup("init SDL GPU renderer");
@@ -342,6 +357,9 @@ void App::buildUi()
         .cameraManager = m_cameraManager,
         .renderer = m_renderer,
         .instances = m_instances,
+        .playerPawn = m_playerPawn,
+        .collisionManager = m_collisionManager,
+        .playerFollowCameraEnabled = m_playerFollowCameraEnabled,
         .gpuDrivers = m_gpuDrivers,
         .gamepadName = m_gamepadInput.gamepadName(),
         .lightingSystem = m_lightingSystem,
@@ -442,6 +460,83 @@ void App::updateSceneForFrame()
     }
 
     {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BeginHeightmapUpdate");
+        m_worldGridQuadtree.beginHeightmapUpdate(m_quadtreeMeshRenderer);
+    }
+
+    if constexpr (AppConfig::Foliage::kEnabled)
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::CollectFoliageReadbacks");
+        m_nearbyFoliageRenderer.collectCompletedDecodedPages();
+        m_nearbyFoliageRenderer.beginFrame(m_frameIndex);
+        std::vector<QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount> completedLiveCounts;
+        m_quadtreeMeshRenderer.collectCompletedFoliagePageLiveCounts(completedLiveCounts);
+        std::vector<std::pair<WorldGridQuadtreeLeafId, std::uint16_t>> generatedLiveCounts;
+        generatedLiveCounts.reserve(completedLiveCounts.size());
+        for (const QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount& generated : completedLiveCounts)
+        {
+            generatedLiveCounts.emplace_back(generated.leafId, generated.liveCount);
+        }
+        m_foliageManager.applyGeneratedPageLiveCounts(generatedLiveCounts);
+    }
+
+    if (m_playerFollowCameraEnabled)
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::UpdateGameplay");
+        m_cameraManager.setActiveCamera(m_playerCameraIndex);
+        m_collisionManager.updateAroundPlayer(
+            m_playerPawn.position,
+            m_frameIndex,
+            m_worldGridQuadtree.heightmapManager(),
+            m_foliageManager,
+            m_nearbyFoliageRenderer,
+            m_quadtreeMeshRenderer);
+        m_characterMotor.update(
+            m_playerPawn,
+            m_playerMoveIntent,
+            m_cameraManager.activeCamera(),
+            m_collisionManager,
+            m_deltaTimeSeconds);
+        m_followCameraController.update(
+            m_cameraManager.activeCamera(),
+            m_playerPawn,
+            m_playerMoveIntent,
+            m_deltaTimeSeconds);
+    }
+
+    if (m_playerFollowCameraEnabled)
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncFollowCameraRenderState");
+        const Position& cameraPosition = m_cameraManager.activeCameraPosition();
+        m_renderer.setActiveCamera(
+            cameraPosition,
+            m_triangleRenderer,
+            m_quadtreeMeshRenderer,
+            m_foliageCanopyRenderer,
+            m_foliageRenderer,
+            m_nearbyFoliageRenderer,
+            m_waterMeshRenderer,
+            m_lineRenderer);
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            m_foliageCanopyRenderer.setActiveCamera(cameraPosition);
+        }
+        if constexpr (AppConfig::Foliage::kEnabled)
+        {
+            m_foliageRenderer.setActiveCamera(cameraPosition);
+            m_nearbyFoliageRenderer.setActiveCamera(
+                cameraPosition,
+                m_cameraManager.activeCamera().forward,
+                m_cameraManager.activeCamera().up,
+                viewportExtent);
+        }
+        if constexpr (AppConfig::Water::kEnabled)
+        {
+            m_waterManager.setActiveCamera(cameraPosition);
+        }
+    }
+
+    {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BuildTriangles");
         m_triangleRenderer.clear();
         m_quadtreeMeshRenderer.clear();
@@ -452,21 +547,16 @@ void App::updateSceneForFrame()
         if constexpr (AppConfig::Foliage::kEnabled)
         {
             m_foliageRenderer.clear();
-            m_nearbyFoliageRenderer.collectCompletedDecodedPages();
-            m_nearbyFoliageRenderer.beginFrame(m_frameIndex);
-            std::vector<QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount> completedLiveCounts;
-            m_quadtreeMeshRenderer.collectCompletedFoliagePageLiveCounts(completedLiveCounts);
-            std::vector<std::pair<WorldGridQuadtreeLeafId, std::uint16_t>> generatedLiveCounts;
-            generatedLiveCounts.reserve(completedLiveCounts.size());
-            for (const QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount& generated : completedLiveCounts)
-            {
-                generatedLiveCounts.emplace_back(generated.leafId, generated.liveCount);
-            }
-            m_foliageManager.applyGeneratedPageLiveCounts(generatedLiveCounts);
         }
         for (const TriangleInstance& instance : m_instances)
         {
             m_triangleRenderer.addTriangle(instance.position);
+        }
+        if (m_playerFollowCameraEnabled)
+        {
+            m_triangleRenderer.addTriangle(
+                m_playerPawn.position.translated({ 0.0, 1.0, 0.0 }),
+                static_cast<float>(m_playerPawn.yawRadians));
         }
     }
 
@@ -480,11 +570,6 @@ void App::updateSceneForFrame()
         m_lineRenderer.addLine(origin, axisX, glm::vec3(1.0f, 0.25f, 0.25f));
         m_lineRenderer.addLine(origin, axisY, glm::vec3(0.25f, 1.0f, 0.25f));
         m_lineRenderer.addLine(origin, axisZ, glm::vec3(0.35f, 0.6f, 1.0f));
-    }
-
-    {
-        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BeginHeightmapUpdate");
-        m_worldGridQuadtree.beginHeightmapUpdate(m_quadtreeMeshRenderer);
     }
 
     {

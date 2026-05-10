@@ -24,11 +24,22 @@
 class QuadtreeMeshRenderer : private EngineRendererBase
 {
 public:
+    static constexpr std::size_t kHeightmapSliceSampleCount =
+        static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) *
+        static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
+
     struct GeneratedHeightmapExtents
     {
         WorldGridQuadtreeLeafId leafId{};
         std::uint16_t sliceIndex = 0;
         HeightmapExtents extents{};
+    };
+
+    struct CompletedHeightmapSliceReadback
+    {
+        WorldGridQuadtreeLeafId leafId{};
+        std::uint16_t sliceIndex = 0;
+        std::array<float, kHeightmapSliceSampleCount> samples{};
     };
 
     struct GeneratedFoliagePageLiveCount
@@ -92,6 +103,10 @@ public:
     // Dispatches any queued heightmap compute jobs into the heightmap storage buffer.
     void dispatchHeightmapGenerations(SDL_GPUCommandBuffer* commandBuffer);
     void queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPass);
+    [[nodiscard]] bool requestHeightmapSliceDownload(
+        const WorldGridQuadtreeLeafId& leafId,
+        std::uint16_t sliceIndex);
+    void queueHeightmapSliceDownloads(SDL_GPUCopyPass* copyPass);
     [[nodiscard]] bool queueFoliagePageGeneration(
         const WorldGridQuadtreeLeafId& foliageLeafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
@@ -102,6 +117,8 @@ public:
     void queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass* copyPass);
     void attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence>& fence);
     void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents);
+    void collectCompletedHeightmapSliceReadbacks(
+        std::vector<CompletedHeightmapSliceReadback>& completedReadbacks);
     void collectCompletedFoliagePageLiveCounts(std::vector<GeneratedFoliagePageLiveCount>& completedLiveCounts);
 
     // Issues the terrain draws for all queued leaf instances.
@@ -175,6 +192,16 @@ private:
         std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> leafIds{};
         std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> sliceIndices{};
         std::uint16_t count = 0;
+    };
+
+    struct PendingHeightmapSliceReadback
+    {
+        SDL_GPUTransferBuffer* transferBuffer = nullptr;
+        std::shared_ptr<SubmittedGpuFence> fence{};
+        WorldGridQuadtreeLeafId leafId{};
+        std::uint16_t sliceIndex = 0;
+        bool requested = false;
+        bool queued = false;
     };
 
     struct alignas(16) FoliageInstanceGenerationUniforms
@@ -288,6 +315,7 @@ private:
     std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> m_lastDispatchedFoliageInstanceLeafIds{};
     static constexpr std::size_t kHeightmapReadbackSlotCount = 8;
     std::array<PendingExtentsReadback, kHeightmapReadbackSlotCount> m_pendingExtentsReadbacks{};
+    std::array<PendingHeightmapSliceReadback, kHeightmapReadbackSlotCount> m_pendingHeightmapSliceReadbacks{};
     std::array<PendingFoliageLiveCountReadback, kHeightmapReadbackSlotCount> m_pendingFoliageLiveCountReadbacks{};
     std::uint16_t m_instanceCount = 0;
     std::uint16_t m_bridgeInstanceCount = 0;
@@ -298,6 +326,8 @@ private:
     std::uint16_t m_pendingFoliageInstanceGenerationCount = 0;
     std::uint16_t m_lastDispatchedFoliageInstanceGenerationCount = 0;
     std::uint16_t m_pendingFenceReadbackSlot = UINT16_MAX;
+    std::array<std::uint16_t, kHeightmapReadbackSlotCount> m_pendingHeightmapSliceFenceSlots{};
+    std::uint16_t m_pendingHeightmapSliceFenceSlotCount = 0;
     std::uint16_t m_pendingFoliageLiveCountFenceReadbackSlot = UINT16_MAX;
     std::uint16_t m_nextReadbackSlot = 0;
     std::uint16_t m_nextFoliageLiveCountReadbackSlot = 0;

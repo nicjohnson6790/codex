@@ -943,6 +943,31 @@ std::uint32_t NearbyFoliageRenderer::decodedPendingCount() const
     return count;
 }
 
+bool NearbyFoliageRenderer::tryGetCpuResidentPage(
+    const WorldGridQuadtreeLeafId& pageKey,
+    CpuResidentPageView& view) const
+{
+    const std::uint16_t entryIndex = findEntryIndex(pageKey);
+    if (entryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity)
+    {
+        return false;
+    }
+
+    const DecodedPageEntry& entry = m_decodedPages[entryIndex];
+    if (!entry.valid || entry.readbackPending)
+    {
+        return false;
+    }
+
+    view = {
+        .pageKey = pageKey,
+        .liveCount = entry.liveCount,
+        .contentVersion = entry.contentVersion,
+        .instances = std::span<const DecodedNearbyFoliageInstance>(entry.instances.data(), entry.instances.size()),
+    };
+    return true;
+}
+
 SDL_GPUIndexedIndirectDrawCommand NearbyFoliageRenderer::makeDrawCommand(
     std::uint32_t indexCount,
     std::uint32_t instanceCount,

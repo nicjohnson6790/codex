@@ -376,6 +376,8 @@ void WorldGridQuadtree::beginHeightmapUpdate(QuadtreeMeshRenderer& meshRenderer)
 {
     HELLO_PROFILE_SCOPE("WorldGridQuadtree::BeginHeightmapUpdate");
 
+    m_heightmapManager.collectCompletedCpuReadbacks(meshRenderer);
+
     std::vector<QuadtreeMeshRenderer::GeneratedHeightmapExtents> completedExtents;
     meshRenderer.collectCompletedHeightmapExtents(completedExtents);
     for (const QuadtreeMeshRenderer::GeneratedHeightmapExtents& generatedExtents : completedExtents)
