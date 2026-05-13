@@ -18,12 +18,14 @@ public:
     struct Vertex
     {
         float uv[2]{};
+        float shellY = 0.0f;
     };
 
     struct Uniforms
     {
         glm::mat4 viewProjection{ 1.0f };
         glm::vec4 sunDirectionIntensity{ 0.0f, 1.0f, 0.0f, 1.0f };
+        glm::vec4 canopyShellParams{ 4.0f, 0.0f, 0.0f, 0.0f };
     };
 
     struct alignas(16) DrawMetadataGpu

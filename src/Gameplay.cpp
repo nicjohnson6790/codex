@@ -447,19 +447,39 @@ void CharacterMotor::update(
     }
 }
 
+void FollowCameraController::snapToCamera(const CameraManager::Camera& sourceCamera, PlayerPawn& pawn)
+{
+    const glm::dvec3 cameraWorld = sourceCamera.position.worldPosition();
+    const glm::dvec3 forward = normalizedOrFallback(sourceCamera.forward, AppConfig::Camera::kFallbackForward);
+    const glm::dvec3 target = cameraWorld + (forward * m_distance);
+    pawn.position = Position(0, 0, target - glm::dvec3(0.0, m_heightOffset, 0.0));
+
+    const glm::dvec3 back = forward;
+    m_orbitPitchRadians = std::clamp(-std::asin(std::clamp(back.y, -1.0, 1.0)), -1.05, 1.05);
+    m_orbitYawRadians = std::atan2(back.x, back.z);
+
+    const glm::dvec3 horizontalForward = normalizedOrFallback(
+        glm::dvec3(forward.x, 0.0, forward.z),
+        glm::dvec3(0.0, 0.0, -1.0));
+    pawn.yawRadians = std::atan2(horizontalForward.x, horizontalForward.z);
+    pawn.velocity = glm::dvec3(0.0);
+}
+
 void FollowCameraController::update(
     CameraManager::Camera& camera,
     const PlayerPawn& pawn,
+    const CollisionManager& collisionManager,
     const PlayerMoveIntent& intent,
     float deltaTimeSeconds)
 {
     constexpr double kLookSpeed = 2.6;
     constexpr double kPitchLimit = 1.05;
     constexpr double kBehindPlayerDecayRate = 3.0;
+    constexpr double kGroundClearance = 0.35;
 
     m_orbitYawRadians -= intent.look.x * kLookSpeed * static_cast<double>(deltaTimeSeconds);
     m_orbitPitchRadians = std::clamp(
-        m_orbitPitchRadians - (intent.look.y * kLookSpeed * static_cast<double>(deltaTimeSeconds)),
+        m_orbitPitchRadians + (intent.look.y * kLookSpeed * static_cast<double>(deltaTimeSeconds)),
         -kPitchLimit,
         kPitchLimit);
 
@@ -477,7 +497,13 @@ void FollowCameraController::update(
         std::cos(m_orbitYawRadians) * cosPitch,
     };
 
-    const glm::dvec3 cameraWorld = target - (back * m_distance);
+    glm::dvec3 cameraWorld = target - (back * m_distance);
+    const CollisionManager::GroundSample cameraGround = collisionManager.sampleGround(Position(0, 0, cameraWorld));
+    if (cameraGround.valid)
+    {
+        cameraWorld.y = std::max(cameraWorld.y, cameraGround.height + kGroundClearance);
+    }
+
     const glm::dvec3 forward = normalizedOrFallback(target - cameraWorld, glm::dvec3(0.0, 0.0, -1.0));
     const glm::dvec3 right = normalizedOrFallback(glm::cross(forward, AppConfig::Camera::kWorldUp), glm::dvec3(1.0, 0.0, 0.0));
 

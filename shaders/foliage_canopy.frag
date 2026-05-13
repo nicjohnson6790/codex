@@ -6,6 +6,7 @@ layout(set=3, binding=0) uniform FoliageCanopyUniforms
 {
     mat4 viewProjection;
     vec4 sunDirectionIntensity;
+    vec4 canopyShellParams;
 } canopy;
 
 struct CanopyDrawData
@@ -31,6 +32,7 @@ layout(set=2, binding=1, std430) readonly buffer CanopyBitsetPoolBuffer
 layout(location = 0) in vec2 fragPatchMeters;
 layout(location = 1) in vec2 fragWorldXZ;
 layout(location = 2) flat in uint fragDrawIndex;
+layout(location = 3) flat in float fragShellY;
 
 layout(location = 0) out vec4 outColor;
 
@@ -39,6 +41,8 @@ const float kCandidateCellSizeMeters = 4.0;
 const float kEdgeFadeWidthMeters = 384.0;
 const float kFadeInFrameCount = 12.0;
 const float kCanopyDarkeningScale = 0.24;
+const vec3 kShellRadiusMultipliers = vec3(1.20, 1.10, 1.00);
+const vec3 kShellShadeMultipliers = vec3(0.86, 0.94, 1.00);
 const uint kCandidateGridResolution = 64u;
 const uint kCanopyBitsetWordCount = (kCandidateGridResolution * kCandidateGridResolution) / 32u;
 const vec3 kPalette[4] = vec3[](
@@ -98,6 +102,9 @@ void main()
     uint packedCellLane = flatCellIndex & 3u;
     uint cellSlotIndex = draw.cellSlots[packedCellIndex][packedCellLane];
     uint cellSeed = draw.cellSeeds[packedCellIndex][packedCellLane];
+    uint shellIndex = uint(clamp(int(round(fragShellY)) - 1, 0, 2));
+    float shellRadiusMultiplier = kShellRadiusMultipliers[shellIndex];
+    float shellShadeMultiplier = kShellShadeMultipliers[shellIndex];
 
     vec2 localCellMeters = clampedPatchMeters - (vec2(cellIndex) * kCellSizeMeters);
     vec2 candidateCoord = clamp((localCellMeters / kCandidateCellSizeMeters) - vec2(0.5), vec2(0.0), vec2(63.0));
@@ -129,7 +136,7 @@ void main()
             vec2(candidateGrid) * kCandidateCellSizeMeters +
             vec2(kCandidateCellSizeMeters * 0.5) +
             foliageJitterOffset(slotSeed);
-        float radius = mix(5.5, 11.5, foliageHash01(slotSeed ^ 0x31f123bbu));
+        float radius = mix(5.5, 11.5, foliageHash01(slotSeed ^ 0x31f123bbu)) * shellRadiusMultiplier;
         vec2 delta = localCellMeters - crownCenter;
         float normalizedDistance = length(delta) / radius;
         if (normalizedDistance > 1.0)
@@ -159,7 +166,7 @@ void main()
     float ambient = mix(0.08, 0.42, daylightVisibility(lightDirection.y));
     float diffuse = clamp(dot(bestNormal, lightDirection), 0.0, 1.0);
     float lighting = ambient + (diffuse * 0.58 * directVisibility);
-    vec3 color = bestColor * lighting * canopy.sunDirectionIntensity.w * kCanopyDarkeningScale;
+    vec3 color = bestColor * lighting * canopy.sunDirectionIntensity.w * kCanopyDarkeningScale * shellShadeMultiplier;
 
     uint edgeFadeStrengths = draw.patchSeedData.y;
     float edgeFade = 1.0;

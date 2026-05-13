@@ -1,6 +1,6 @@
 # Runtime Asset Converter
 
-This folder contains the standalone offline converter that turns source art into the runtime `meshbin`, `texbin`, and `assetbin` files used by the main app.
+This folder contains the standalone offline converter that turns source art into the runtime `meshbin`, `texbin`, and `assetbin` files used by the main app. Runtime camera, canopy shell, and gameplay changes do not require regenerating these packs.
 
 The converter is separate on purpose:
 

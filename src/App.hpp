@@ -49,6 +49,7 @@ private:
 
     void pollEvents();
     void buildUi();
+    void syncCameraModeTransition();
     void updateSceneForFrame();
 
     [[nodiscard]] std::vector<std::string> querySdlGpuDrivers() const;
@@ -91,6 +92,7 @@ private:
     std::size_t m_freeCameraIndex = 0;
     std::size_t m_playerCameraIndex = 0;
     bool m_playerFollowCameraEnabled = false;
+    bool m_previousPlayerFollowCameraEnabled = false;
     bool m_firstFramePresented = false;
     std::uint64_t m_lastFrameTsc = 0;
     std::uint64_t m_frameIndex = 0;

@@ -13,6 +13,7 @@ namespace
 {
 constexpr std::uint32_t kCanopyMeshQuadResolution = 16u;
 constexpr std::uint32_t kCanopyMeshVertexResolution = kCanopyMeshQuadResolution + 1u;
+constexpr std::array<float, 3> kCanopyMeshShellYValues{ 1.0f, 2.0f, 3.0f };
 constexpr std::uint32_t kCanopyComputeThreadCountX = 64u;
 constexpr std::uint32_t kCanopyComputeThreadCountY = 1u;
 constexpr std::uint32_t kCanopyComputeThreadCountZ = 1u;
@@ -322,6 +323,7 @@ void FoliageCanopyRenderer::render(
     Uniforms uniforms{};
     uniforms.viewProjection = viewProjection;
     uniforms.sunDirectionIntensity = glm::vec4(lightingSystem.sunDirection(), lightingSystem.sun().intensity);
+    uniforms.canopyShellParams = glm::vec4(AppConfig::Foliage::kCanopyShellHeightOffsetMeters, 0.0f, 0.0f, 0.0f);
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
@@ -409,11 +411,15 @@ void FoliageCanopyRenderer::createPipeline(const std::filesystem::path& shaderDi
     vertexBufferDescription.pitch = sizeof(Vertex);
     vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
-    SDL_GPUVertexAttribute vertexAttributes[1]{};
+    SDL_GPUVertexAttribute vertexAttributes[2]{};
     vertexAttributes[0].location = 0;
     vertexAttributes[0].buffer_slot = 0;
     vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
     vertexAttributes[0].offset = offsetof(Vertex, uv);
+    vertexAttributes[1].location = 1;
+    vertexAttributes[1].buffer_slot = 0;
+    vertexAttributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT;
+    vertexAttributes[1].offset = offsetof(Vertex, shellY);
 
     SDL_GPUColorTargetBlendState blendState{};
     blendState.color_write_mask =
@@ -444,7 +450,7 @@ void FoliageCanopyRenderer::createPipeline(const std::filesystem::path& shaderDi
     pipelineInfo.target_info.depth_stencil_format = m_depthFormat;
     pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
     pipelineInfo.vertex_input_state.vertex_buffer_descriptions = &vertexBufferDescription;
-    pipelineInfo.vertex_input_state.num_vertex_attributes = 1;
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 2;
     pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
     m_pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
@@ -557,38 +563,47 @@ void FoliageCanopyRenderer::createDrawBuffers()
 void FoliageCanopyRenderer::createMeshResources()
 {
     std::vector<Vertex> vertices;
-    vertices.reserve(kCanopyMeshVertexResolution * kCanopyMeshVertexResolution);
-    for (std::uint32_t z = 0; z < kCanopyMeshVertexResolution; ++z)
+    vertices.reserve(kCanopyMeshShellYValues.size() * kCanopyMeshVertexResolution * kCanopyMeshVertexResolution);
+    for (float shellY : kCanopyMeshShellYValues)
     {
-        for (std::uint32_t x = 0; x < kCanopyMeshVertexResolution; ++x)
+        for (std::uint32_t z = 0; z < kCanopyMeshVertexResolution; ++z)
         {
-            vertices.push_back(Vertex{
-                {
-                    static_cast<float>(x) / static_cast<float>(kCanopyMeshQuadResolution),
-                    static_cast<float>(z) / static_cast<float>(kCanopyMeshQuadResolution),
-                }
-            });
+            for (std::uint32_t x = 0; x < kCanopyMeshVertexResolution; ++x)
+            {
+                vertices.push_back(Vertex{
+                    {
+                        static_cast<float>(x) / static_cast<float>(kCanopyMeshQuadResolution),
+                        static_cast<float>(z) / static_cast<float>(kCanopyMeshQuadResolution),
+                    },
+                    shellY,
+                });
+            }
         }
     }
 
     std::vector<std::uint32_t> indices;
-    indices.reserve(kCanopyMeshQuadResolution * kCanopyMeshQuadResolution * 6u);
-    for (std::uint32_t z = 0; z < kCanopyMeshQuadResolution; ++z)
+    indices.reserve(kCanopyMeshShellYValues.size() * kCanopyMeshQuadResolution * kCanopyMeshQuadResolution * 6u);
+    for (std::uint32_t shellIndex = 0; shellIndex < kCanopyMeshShellYValues.size(); ++shellIndex)
     {
-        for (std::uint32_t x = 0; x < kCanopyMeshQuadResolution; ++x)
+        const std::uint32_t shellVertexOffset =
+            shellIndex * kCanopyMeshVertexResolution * kCanopyMeshVertexResolution;
+        for (std::uint32_t z = 0; z < kCanopyMeshQuadResolution; ++z)
         {
-            const std::uint32_t topLeft = (z * kCanopyMeshVertexResolution) + x;
-            const std::uint32_t topRight = topLeft + 1u;
-            const std::uint32_t bottomLeft = topLeft + kCanopyMeshVertexResolution;
-            const std::uint32_t bottomRight = bottomLeft + 1u;
+            for (std::uint32_t x = 0; x < kCanopyMeshQuadResolution; ++x)
+            {
+                const std::uint32_t topLeft = shellVertexOffset + (z * kCanopyMeshVertexResolution) + x;
+                const std::uint32_t topRight = topLeft + 1u;
+                const std::uint32_t bottomLeft = topLeft + kCanopyMeshVertexResolution;
+                const std::uint32_t bottomRight = bottomLeft + 1u;
 
-            indices.push_back(topLeft);
-            indices.push_back(bottomLeft);
-            indices.push_back(topRight);
+                indices.push_back(topLeft);
+                indices.push_back(bottomLeft);
+                indices.push_back(topRight);
 
-            indices.push_back(topRight);
-            indices.push_back(bottomLeft);
-            indices.push_back(bottomRight);
+                indices.push_back(topRight);
+                indices.push_back(bottomLeft);
+                indices.push_back(bottomRight);
+            }
         }
     }
     m_indexCount = static_cast<std::uint32_t>(indices.size());

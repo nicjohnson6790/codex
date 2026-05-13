@@ -31,6 +31,8 @@ public:
     [[nodiscard]] std::size_t cameraCount() const { return m_cameras.size(); }
     [[nodiscard]] bool hasActiveCamera() const { return !m_cameras.empty(); }
     [[nodiscard]] std::size_t activeCameraIndex() const { return m_activeCameraIndex; }
+    [[nodiscard]] const Camera& camera(std::size_t index) const;
+    [[nodiscard]] Camera& camera(std::size_t index);
     [[nodiscard]] const Camera& activeCamera() const;
     [[nodiscard]] Camera& activeCamera();
     [[nodiscard]] const Position& activeCameraPosition() const;

@@ -211,48 +211,6 @@ void AppPanels::drawControlsTab(Context& context)
         ImGui::BulletText("RB: sprint");
     }
 
-    if (ImGui::CollapsingHeader("Triangle Instances", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        if (ImGui::Button("Add Triangle"))
-        {
-            context.instances.push_back({ .position = Position(0, 0, { 0.0, 0.0, 0.0 }) });
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Reset Layout"))
-        {
-            context.instances = {
-                { .position = Position(-1, 0, { static_cast<double>(Position::kCellSize) - 0.25, 0.0, 0.0 }) },
-                { .position = Position(0, 0, { 0.25, 0.0, 0.0 }) },
-            };
-        }
-
-        for (std::size_t index = 0; index < context.instances.size(); ++index)
-        {
-            TriangleInstance& instance = context.instances[index];
-            ImGui::PushID(static_cast<int>(index));
-            ImGui::SeparatorText(("Triangle " + std::to_string(index)).c_str());
-            long long gridX = static_cast<long long>(instance.position.gridX());
-            long long gridY = static_cast<long long>(instance.position.gridY());
-            glm::dvec3 localPosition = instance.position.localPosition();
-            ImGui::InputScalar("Grid X", ImGuiDataType_S64, &gridX);
-            ImGui::InputScalar("Grid Y", ImGuiDataType_S64, &gridY);
-            ImGui::InputDouble("Local X", &localPosition.x, 0.1, 1.0, "%.3f");
-            ImGui::InputDouble("Local Y", &localPosition.y, 0.1, 1.0, "%.3f");
-            ImGui::InputDouble("Local Z", &localPosition.z, 0.1, 1.0, "%.3f");
-            instance.position.setGridX(static_cast<std::int64_t>(gridX));
-            instance.position.setGridY(static_cast<std::int64_t>(gridY));
-            instance.position.setLocalPosition(localPosition);
-            if (ImGui::Button("Remove") && context.instances.size() > 1)
-            {
-                context.instances.erase(context.instances.begin() + static_cast<std::ptrdiff_t>(index));
-                ImGui::PopID();
-                break;
-            }
-            ImGui::PopID();
-        }
-    }
-
     if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen))
     {
         LightingSystem::SunLight& sun = context.lightingSystem.sun();

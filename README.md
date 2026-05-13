@@ -2,7 +2,7 @@
 
 ![rendered screenshot](images/Screenshot%202026-05-09%20162818.png)
 
-An editor-style terrain sandbox built on SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage, nearby tree mesh rendering, procedural far-canopy coverage, and shared-cascade FFT water.
+An editor-style terrain sandbox built on SDL3 GPU, Dear ImGui docking, quadtree terrain rendering, GPU-generated foliage, player follow controls, procedural far-canopy coverage, and shared-cascade FFT water.
 
 This branch does not include the authored pine tree source assets needed to rebuild or fully run the nearby tree mesh path. See `Assets` below.
 
@@ -15,8 +15,9 @@ This branch does not include the authored pine tree source assets needed to rebu
 - GPU foliage generation into canonical `256m x 256m` resident pages
 - Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw, alpha-tested depth prepass, and a short dithered handoff band near the imposter range
 - Mid-distance foliage imposter path that renders BC-compressed pine imposter texture arrays with runtime lighting and an alpha-tested depth prepass
-- Far-canopy path that renders deterministic procedural canopy coverage until foliage pages are ready
+- Far-canopy path that renders deterministic procedural coverage as 3 terrain-following canopy shells
 - Shared-cascade FFT water with equal-LOD and `2:1` bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
+- Free-flight and third-person follow cameras with position-preserving handoff and terrain-aware follow-camera clamping
 - Skybox and water shading driven by the same cubemap and atmosphere model
 - Offline asset converter that builds compressed runtime `meshbin`, `texbin`, and `assetbin` packs
 - Self-contained build outputs with shaders and runtime assets staged under `build/<Config>`
@@ -31,7 +32,7 @@ Each frame is split into a few predictable phases:
 - Walk the quadtree again to emit terrain draws, foliage draws, nearby foliage draws, canopy draws, water draws, and debug draws.
 - Upload per-frame draw data, dispatch terrain generation, dispatch foliage generation, dispatch canopy generation, dispatch nearby decode work, and run the water simulation passes.
 - Queue the next async terrain extent readback.
-- Render terrain, foliage, nearby foliage, canopy, water, skybox, debug overlays, and ImGui into the offscreen viewport.
+- Render terrain, foliage, nearby foliage, canopy shells, water, skybox, debug overlays, and ImGui into the offscreen viewport.
 
 ## Architecture
 
@@ -76,7 +77,7 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 - `src/WorldGridFoliageCanopyManager.*`: canonical canopy cell residency and GPU generation scheduling
 - `src/FoliageImposterRenderer.*`: mid-distance foliage imposter page pool decode, runtime asset loading, and imposter rendering
 - `src/NearbyFoliageRenderer.*`: nearby decoded-page readback, CPU cache, runtime asset loading, and nearby tree mesh rendering
-- `src/FoliageCanopyRenderer.*`: far-canopy bitset generation and canopy rendering
+- `src/FoliageCanopyRenderer.*`: far-canopy bitset generation and 3-shell canopy rendering
 - `src/FoliageTypes.hpp`: shared foliage packing and runtime layout types
 
 ### Water and sky
@@ -91,9 +92,10 @@ That split keeps the quadtree responsible for scene decisions, managers responsi
 
 - `src/CameraManager.*`: camera storage and projection setup
 - `src/FreeFlightCameraController.*`: free-flight camera movement
+- `src/Gameplay.*`: player movement, collision cache, and third-person follow camera
 - `src/GamepadInput.*`: gamepad state and input helpers
 - `src/LightingSystem.*`: sun direction, intensity, and time-of-day control
-- `src/TriangleRenderer.*`: simple triangle instance rendering
+- `src/TriangleRenderer.*`: simple upright triangle marker rendering
 - `src/LineRenderer.*`: debug line rendering
 - `src/PerformanceCapture.*`: frame timing capture
 - `src/PerfPanel.*`: timing and flame graph UI

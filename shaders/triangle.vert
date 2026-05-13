@@ -17,9 +17,9 @@ void main()
     float c = cos(inInstanceYaw);
     float s = sin(inInstanceYaw);
     vec3 rotated = vec3(
-        (inPosition.x * c) - (inPosition.z * s),
+        (inPosition.x * c) + (inPosition.z * s),
         inPosition.y,
-        (inPosition.x * s) + (inPosition.z * c));
+        (-inPosition.x * s) + (inPosition.z * c));
     vec3 position = rotated + inInstanceOffset;
     gl_Position = camera.viewProjection * vec4(position, 1.0);
     fragColor = inColor;

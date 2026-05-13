@@ -107,9 +107,12 @@ private:
 class FollowCameraController
 {
 public:
+    void snapToCamera(const CameraManager::Camera& sourceCamera, PlayerPawn& pawn);
+
     void update(
         CameraManager::Camera& camera,
         const PlayerPawn& pawn,
+        const CollisionManager& collisionManager,
         const PlayerMoveIntent& intent,
         float deltaTimeSeconds);
 

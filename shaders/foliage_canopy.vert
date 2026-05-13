@@ -4,6 +4,7 @@ layout(set=1, binding=0) uniform FoliageCanopyUniforms
 {
     mat4 viewProjection;
     vec4 sunDirectionIntensity;
+    vec4 canopyShellParams;
 } canopy;
 
 struct CanopyDrawData
@@ -32,14 +33,15 @@ layout(set=0, binding=2, std430) readonly buffer HeightmapBuffer
 } heightmapBuffer;
 
 layout(location = 0) in vec2 inUv;
+layout(location = 1) in float inShellY;
 
 layout(location = 0) out vec2 fragPatchMeters;
 layout(location = 1) out vec2 fragWorldXZ;
 layout(location = 2) flat out uint fragDrawIndex;
+layout(location = 3) flat out float fragShellY;
 
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
-const float kCanopyBaseHeightMeters = 12.0;
 
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {
@@ -76,11 +78,12 @@ void main()
     float terrainHeight = sampleHeightBilinear(uint(draw.terrainSliceData.x + 0.5), normalizedTerrainCoord);
     vec3 worldPosition = vec3(
         draw.patchOriginAndSize.x + patchMeters.x,
-        draw.patchOriginAndSize.y + terrainHeight + kCanopyBaseHeightMeters,
+        draw.patchOriginAndSize.y + terrainHeight + (inShellY * canopy.canopyShellParams.x),
         draw.patchOriginAndSize.z + patchMeters.y);
 
     fragPatchMeters = patchMeters;
     fragWorldXZ = worldPosition.xz;
     fragDrawIndex = uint(gl_InstanceIndex);
+    fragShellY = inShellY;
     gl_Position = canopy.viewProjection * vec4(worldPosition, 1.0);
 }

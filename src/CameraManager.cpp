@@ -25,6 +25,26 @@ std::size_t CameraManager::createCamera(
     return m_cameras.size() - 1;
 }
 
+const CameraManager::Camera& CameraManager::camera(std::size_t index) const
+{
+    if (index >= m_cameras.size())
+    {
+        throw std::runtime_error("Camera index is out of range.");
+    }
+
+    return m_cameras[index];
+}
+
+CameraManager::Camera& CameraManager::camera(std::size_t index)
+{
+    if (index >= m_cameras.size())
+    {
+        throw std::runtime_error("Camera index is out of range.");
+    }
+
+    return m_cameras[index];
+}
+
 const CameraManager::Camera& CameraManager::activeCamera() const
 {
     if (m_cameras.empty())

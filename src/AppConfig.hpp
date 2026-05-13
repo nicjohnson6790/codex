@@ -304,6 +304,7 @@ inline constexpr std::uint32_t kMarkerPageDrawCapacity = 1024u;
 inline constexpr std::uint32_t kNearbyMarkerInstanceCapacity = 1024u;
 inline constexpr bool kCanopyEnabled = true;
 inline constexpr std::uint32_t kCanopyDrawCapacity = 256u;
+inline constexpr float kCanopyShellHeightOffsetMeters = 10.0f;
 }
 
 namespace Light

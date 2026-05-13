@@ -32,7 +32,6 @@ public:
     {
         CameraManager& cameraManager;
         SDLRenderer& renderer;
-        std::vector<TriangleInstance>& instances;
         PlayerPawn& playerPawn;
         CollisionManager& collisionManager;
         bool& playerFollowCameraEnabled;

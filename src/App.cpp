@@ -105,6 +105,7 @@ void App::run()
         {
             HELLO_PROFILE_SCOPE("App::BuildUi");
             buildUi();
+            syncCameraModeTransition();
         }
 
         {
@@ -356,7 +357,6 @@ void App::buildUi()
     AppPanels::Context context{
         .cameraManager = m_cameraManager,
         .renderer = m_renderer,
-        .instances = m_instances,
         .playerPawn = m_playerPawn,
         .collisionManager = m_collisionManager,
         .playerFollowCameraEnabled = m_playerFollowCameraEnabled,
@@ -375,6 +375,30 @@ void App::buildUi()
         .viewportTextureId = m_renderer.viewportTextureId(),
     };
     m_panels.draw(context);
+}
+
+void App::syncCameraModeTransition()
+{
+    if (m_playerFollowCameraEnabled == m_previousPlayerFollowCameraEnabled ||
+        !m_cameraManager.hasActiveCamera())
+    {
+        return;
+    }
+
+    if (m_playerFollowCameraEnabled)
+    {
+        const CameraManager::Camera& freeCamera = m_cameraManager.camera(m_freeCameraIndex);
+        m_followCameraController.snapToCamera(freeCamera, m_playerPawn);
+        m_cameraManager.camera(m_playerCameraIndex) = freeCamera;
+        m_cameraManager.setActiveCamera(m_playerCameraIndex);
+    }
+    else
+    {
+        m_cameraManager.camera(m_freeCameraIndex) = m_cameraManager.camera(m_playerCameraIndex);
+        m_cameraManager.setActiveCamera(m_freeCameraIndex);
+    }
+
+    m_previousPlayerFollowCameraEnabled = m_playerFollowCameraEnabled;
 }
 
 void App::updateSceneForFrame()
@@ -500,6 +524,7 @@ void App::updateSceneForFrame()
         m_followCameraController.update(
             m_cameraManager.activeCamera(),
             m_playerPawn,
+            m_collisionManager,
             m_playerMoveIntent,
             m_deltaTimeSeconds);
     }
