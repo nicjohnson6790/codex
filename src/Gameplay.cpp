@@ -135,7 +135,7 @@ void CollisionManager::updateAroundPlayer(
                 {
                     FoliageReadyPageInfo pageInfo{};
                     if (foliageManager.getReadyPageInfo(key, pageInfo) &&
-                        nearbyFoliageRenderer.makeResident(key, pageInfo, frameIndex))
+                        nearbyFoliageRenderer.makeResident(key, pageInfo))
                     {
                         NearbyFoliageRenderer::CpuResidentPageView foliageView{};
                         if (nearbyFoliageRenderer.tryGetCpuResidentPage(key, foliageView) &&

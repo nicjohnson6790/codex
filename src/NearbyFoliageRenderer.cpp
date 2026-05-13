@@ -316,9 +316,16 @@ void NearbyFoliageRenderer::setActiveCamera(
     m_tanHalfHorizontalFov = std::tan(AppConfig::Camera::kVerticalFovRadians * 0.5f) * aspectRatio;
 }
 
-void NearbyFoliageRenderer::beginFrame(std::uint64_t frameIndex)
+void NearbyFoliageRenderer::clear()
 {
-    m_frameIndex = frameIndex;
+    for (DecodedPageEntry& entry : m_decodedPages)
+    {
+        if (entry.valid || entry.readbackPending)
+        {
+            entry.lruAge = static_cast<std::uint8_t>(std::min<std::uint32_t>(entry.lruAge + 1u, 255u));
+        }
+    }
+
     resetTransientState();
 }
 
@@ -364,8 +371,7 @@ void NearbyFoliageRenderer::collectCompletedDecodedPages()
 
 bool NearbyFoliageRenderer::makeResident(
     const WorldGridQuadtreeLeafId& pageKey,
-    const FoliageReadyPageInfo& sourcePageInfo,
-    std::uint64_t frameIndex)
+    const FoliageReadyPageInfo& sourcePageInfo)
 {
     addTopologyHint(pageKey);
 
@@ -373,7 +379,7 @@ bool NearbyFoliageRenderer::makeResident(
     if (entryIndex != FoliageConfig::kNearbyDecodedPageLruCapacity)
     {
         DecodedPageEntry& entry = m_decodedPages[entryIndex];
-        entry.lastUsedFrame = frameIndex;
+        entry.lruAge = 0u;
         if (entryMatchesSource(entry, pageKey, sourcePageInfo))
         {
             return entry.valid && !entry.readbackPending;
@@ -392,7 +398,7 @@ bool NearbyFoliageRenderer::makeResident(
             .layoutVersion = FoliageConfig::kNearbyDecodedInstanceLayoutVersion,
             .valid = false,
             .readbackPending = true,
-            .lastUsedFrame = frameIndex,
+            .lruAge = 0u,
         };
         m_pendingDecodeRequests[m_pendingDecodeCount++] = {
             .entryIndex = entryIndex,
@@ -421,7 +427,7 @@ bool NearbyFoliageRenderer::makeResident(
         .layoutVersion = FoliageConfig::kNearbyDecodedInstanceLayoutVersion,
         .valid = false,
         .readbackPending = true,
-        .lastUsedFrame = frameIndex,
+        .lruAge = 0u,
     };
     m_pendingDecodeRequests[m_pendingDecodeCount++] = {
         .entryIndex = entryIndex,
@@ -2138,11 +2144,10 @@ void NearbyFoliageRenderer::addTopologyHint(const WorldGridQuadtreeLeafId& pageK
 
 std::uint16_t NearbyFoliageRenderer::findReusableEntryIndex() const
 {
-    std::uint16_t invalidEntryIndex = FoliageConfig::kNearbyDecodedPageLruCapacity;
     std::uint16_t oldestNonHintedEntryIndex = FoliageConfig::kNearbyDecodedPageLruCapacity;
     std::uint16_t oldestEntryIndex = FoliageConfig::kNearbyDecodedPageLruCapacity;
-    std::uint64_t oldestNonHintedFrame = 0u;
-    std::uint64_t oldestFrame = 0u;
+    std::uint8_t oldestNonHintedAge = 0u;
+    std::uint8_t oldestAge = 0u;
 
     for (std::uint16_t entryIndex = 0; entryIndex < m_decodedPages.size(); ++entryIndex)
     {
@@ -2159,21 +2164,16 @@ std::uint16_t NearbyFoliageRenderer::findReusableEntryIndex() const
 
         if (!entryIsHintedThisFrame(entry.key) &&
             (oldestNonHintedEntryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity ||
-             entry.lastUsedFrame < oldestNonHintedFrame))
+             entry.lruAge > oldestNonHintedAge))
         {
             oldestNonHintedEntryIndex = entryIndex;
-            oldestNonHintedFrame = entry.lastUsedFrame;
+            oldestNonHintedAge = entry.lruAge;
         }
 
-        if (oldestEntryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity || entry.lastUsedFrame < oldestFrame)
+        if (oldestEntryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity || entry.lruAge > oldestAge)
         {
             oldestEntryIndex = entryIndex;
-            oldestFrame = entry.lastUsedFrame;
-        }
-
-        if (invalidEntryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity && !entry.valid)
-        {
-            invalidEntryIndex = entryIndex;
+            oldestAge = entry.lruAge;
         }
     }
 
@@ -2187,5 +2187,5 @@ std::uint16_t NearbyFoliageRenderer::findReusableEntryIndex() const
         return oldestEntryIndex;
     }
 
-    return invalidEntryIndex;
+    return FoliageConfig::kNearbyDecodedPageLruCapacity;
 }

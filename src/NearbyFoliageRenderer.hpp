@@ -84,13 +84,12 @@ public:
         const glm::dvec3& cameraForward,
         const glm::dvec3& cameraUp,
         Extent2D viewportExtent);
-    void beginFrame(std::uint64_t frameIndex);
+    void clear();
     void collectCompletedDecodedPages();
 
     [[nodiscard]] bool makeResident(
         const WorldGridQuadtreeLeafId& pageKey,
-        const FoliageReadyPageInfo& sourcePageInfo,
-        std::uint64_t frameIndex);
+        const FoliageReadyPageInfo& sourcePageInfo);
     void addNearbyInstancesForPage(
         const WorldGridQuadtreeLeafId& pageKey,
         std::uint16_t terrainSliceIndex,
@@ -134,7 +133,7 @@ private:
         std::array<DecodedNearbyFoliageInstance, FoliageConfig::kCandidateSlotCount> instances{};
         bool valid = false;
         bool readbackPending = false;
-        std::uint64_t lastUsedFrame = 0u;
+        std::uint8_t lruAge = 255u;
     };
 
     struct PendingDecodeRequest
@@ -305,7 +304,6 @@ private:
     std::uint16_t m_pendingFenceReadbackCount = 0u;
     std::uint16_t m_topologyHintCount = 0u;
     std::uint32_t m_drawCount = 0u;
-    std::uint64_t m_frameIndex = 0u;
     glm::vec3 m_cameraForward{ 0.0f, 0.0f, -1.0f };
     glm::vec3 m_cameraRight{ 1.0f, 0.0f, 0.0f };
     float m_tanHalfHorizontalFov = 1.0f;

@@ -483,16 +483,23 @@ void App::updateSceneForFrame()
         }
     }
 
+    if constexpr (AppConfig::Foliage::kEnabled)
     {
-        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BeginHeightmapUpdate");
-        m_worldGridQuadtree.beginHeightmapUpdate(m_quadtreeMeshRenderer);
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::AgeFoliageResidency");
+        m_foliageManager.ageMap();
+    }
+
+    if constexpr (AppConfig::Foliage::kCanopyEnabled)
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::AgeCanopyResidency");
+        m_foliageCanopyManager.ageMap();
     }
 
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::CollectFoliageReadbacks");
         m_nearbyFoliageRenderer.collectCompletedDecodedPages();
-        m_nearbyFoliageRenderer.beginFrame(m_frameIndex);
+        m_nearbyFoliageRenderer.clear();
         std::vector<QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount> completedLiveCounts;
         m_quadtreeMeshRenderer.collectCompletedFoliagePageLiveCounts(completedLiveCounts);
         std::vector<std::pair<WorldGridQuadtreeLeafId, std::uint16_t>> generatedLiveCounts;
@@ -602,23 +609,8 @@ void App::updateSceneForFrame()
         m_worldGridQuadtree.updateTree(
             m_cameraManager.activeCamera(),
             viewportExtent,
-            AppConfig::Foliage::kEnabled ? &m_foliageManager : nullptr,
-            AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyManager : nullptr,
-            AppConfig::Foliage::kEnabled ? &m_nearbyFoliageRenderer : nullptr,
+            m_quadtreeMeshRenderer,
             m_frameIndex);
-    }
-
-    {
-        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::EndHeightmapUpdate");
-        m_worldGridQuadtree.endHeightmapUpdate(m_quadtreeMeshRenderer);
-        if constexpr (AppConfig::Foliage::kCanopyEnabled)
-        {
-            m_foliageCanopyManager.scheduleQueuedGenerations(m_foliageCanopyRenderer);
-        }
-        if constexpr (AppConfig::Foliage::kEnabled)
-        {
-            m_foliageManager.scheduleQueuedGenerations(m_quadtreeMeshRenderer);
-        }
     }
 
     RenderEngines renderEngines{
@@ -640,6 +632,18 @@ void App::updateSceneForFrame()
         if constexpr (AppConfig::Water::kEnabled)
         {
             m_waterManager.flushToRenderer(m_waterMeshRenderer);
+        }
+    }
+
+    {
+        HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::ScheduleFoliageGenerations");
+        if constexpr (AppConfig::Foliage::kCanopyEnabled)
+        {
+            m_foliageCanopyManager.scheduleQueuedGenerations(m_foliageCanopyRenderer);
+        }
+        if constexpr (AppConfig::Foliage::kEnabled)
+        {
+            m_foliageManager.scheduleQueuedGenerations(m_quadtreeMeshRenderer);
         }
     }
 

@@ -15,7 +15,7 @@ This branch does not include the authored pine tree source assets needed to rebu
 - GPU foliage generation into canonical `256m x 256m` resident pages
 - Nearby foliage path that decodes local foliage pages and renders real pine meshes with deterministic yaw, alpha-tested depth prepass, and a short dithered handoff band near the imposter range
 - Mid-distance foliage imposter path that renders BC-compressed pine imposter texture arrays with runtime lighting and an alpha-tested depth prepass
-- Far-canopy path that renders deterministic procedural coverage as 3 terrain-following canopy shells
+- Far-canopy path that renders deterministic procedural coverage as 3 terrain-following shells, with 1024m fallback and 2048m state-driven fade
 - Shared-cascade FFT water with equal-LOD and `2:1` bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
 - Free-flight and third-person follow cameras with position-preserving handoff and terrain-aware follow-camera clamping
 - Skybox and water shading driven by the same cubemap and atmosphere model
@@ -26,12 +26,11 @@ This branch does not include the authored pine tree source assets needed to rebu
 
 Each frame is split into a few predictable phases:
 
-- Collect completed terrain extent readbacks and fold them back into the heightmap manager and live quadtree nodes.
-- Traverse the quadtree to decide visibility, subdivision, collapse, and per-node residency requests for terrain, foliage, canopy, nearby foliage, and water.
-- Flush queued residency work to the managers so terrain slices, foliage pages, canopy cells, and nearby decoded pages can be scheduled.
-- Walk the quadtree again to emit terrain draws, foliage draws, nearby foliage draws, canopy draws, water draws, and debug draws.
+- Collect completed terrain readbacks into the heightmap manager.
+- Update the quadtree structure and terrain residency. Parents stay leaves until children are resident; children stay active until a collapsing parent is resident.
+- Emit from a linear scan of the fixed node list. Terrain draws use resident heightmaps; foliage, canopy, nearby foliage, and water request their own residency as they emit.
+- Schedule queued terrain, foliage, canopy, and nearby decode work.
 - Upload per-frame draw data, dispatch terrain generation, dispatch foliage generation, dispatch canopy generation, dispatch nearby decode work, and run the water simulation passes.
-- Queue the next async terrain extent readback.
 - Render terrain, foliage, nearby foliage, canopy shells, water, skybox, debug overlays, and ImGui into the offscreen viewport.
 
 ## Architecture
@@ -41,7 +40,7 @@ The runtime is split into four main layers:
 - `SDLRenderer` owns the SDL GPU device, swapchain, render targets, and top-level frame submission order.
 - Renderer classes own concrete draw and compute paths such as terrain, foliage, nearby foliage, canopy, water, skybox, triangles, and debug lines.
 - Manager classes own residency, LRU replacement, and queued generation work for terrain slices, foliage pages, canopy cells, and water leaf selection.
-- `WorldGridQuadtree` is the high-level scene structure that decides what should exist, what should be resident, and what should be drawn each frame.
+- `WorldGridQuadtree` owns the fixed-slot tree structure, LOD decisions, terrain residency update, and linear draw/cache emission.
 
 That split keeps the quadtree responsible for scene decisions, managers responsible for lifetime and queues, and renderers responsible for GPU work.
 
