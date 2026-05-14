@@ -1,0 +1,198 @@
+"controller_mappings"
+{
+	"version"		"3"
+	"revision"		"1"
+	"title"		"#title"
+	"description"		"#description"
+	"controller_type"		"controller_xboxone"
+	"major_revision"		"0"
+	"minor_revision"		"0"
+	"actions"
+	{
+		"terrain_controls"
+		{
+			"title"		"#TerrainControls"
+			"legacy_set"		"0"
+			"StickPadGyro"
+			{
+				"move"
+				{
+					"title"		"#Move"
+					"input_mode"		"joystick_move"
+				}
+				"look"
+				{
+					"title"		"#Look"
+					"input_mode"		"joystick_move"
+				}
+			}
+			"Button"
+			{
+				"ascend"		"#Ascend"
+				"descend"		"#Descend"
+				"roll_left"		"#RollLeft"
+				"roll_right"		"#RollRight"
+				"sprint"		"#Sprint"
+				"align_up"		"#AlignUp"
+			}
+		}
+	}
+	"localization"
+	{
+		"english"
+		{
+			"title"		"Terrain Sandbox"
+			"description"		"Terrain Sandbox default controller configuration"
+			"TerrainControls"		"Terrain Controls"
+			"Move"		"Move"
+			"Look"		"Look"
+			"Ascend"		"Ascend"
+			"Descend"		"Descend"
+			"RollLeft"		"Roll Left"
+			"RollRight"		"Roll Right"
+			"Sprint"		"Sprint"
+			"AlignUp"		"Align Up"
+		}
+	}
+	"group"
+	{
+		"id"		"0"
+		"mode"		"joystick_move"
+		"inputs"
+		{
+		}
+		"settings"
+		{
+			"virtual_mode"		"1"
+			"edge_binding_radius"		"24999"
+			"sensitivity"		"99"
+		}
+		"gameactions"
+		{
+			"terrain_controls"		"move"
+		}
+	}
+	"group"
+	{
+		"id"		"1"
+		"mode"		"joystick_move"
+		"inputs"
+		{
+			"click"
+			{
+				"activators"
+				{
+					"Full_Press"
+					{
+						"bindings"
+						{
+							"binding"		"game_action terrain_controls align_up"
+						}
+					}
+				}
+			}
+		}
+		"settings"
+		{
+			"virtual_mode"		"1"
+			"edge_binding_radius"		"24999"
+			"sensitivity"		"99"
+		}
+		"gameactions"
+		{
+			"terrain_controls"		"look"
+		}
+	}
+	"group"
+	{
+		"id"		"2"
+		"mode"		"trigger"
+		"inputs"
+		{
+			"edge"
+			{
+				"activators"
+				{
+					"Full_Press"
+					{
+						"bindings"
+						{
+							"binding"		"game_action terrain_controls descend"
+						}
+					}
+				}
+			}
+		}
+	}
+	"group"
+	{
+		"id"		"3"
+		"mode"		"trigger"
+		"inputs"
+		{
+			"edge"
+			{
+				"activators"
+				{
+					"Full_Press"
+					{
+						"bindings"
+						{
+							"binding"		"game_action terrain_controls ascend"
+						}
+					}
+				}
+			}
+		}
+	}
+	"group"
+	{
+		"id"		"4"
+		"mode"		"switches"
+		"inputs"
+		{
+			"left_bumper"
+			{
+				"activators"
+				{
+					"Full_Press"
+					{
+						"bindings"
+						{
+							"binding"		"game_action terrain_controls roll_left"
+						}
+					}
+				}
+			}
+			"right_bumper"
+			{
+				"activators"
+				{
+					"Full_Press"
+					{
+						"bindings"
+						{
+							"binding"		"game_action terrain_controls roll_right"
+						}
+					}
+				}
+			}
+		}
+	}
+	"preset"
+	{
+		"id"		"0"
+		"name"		"terrain_controls"
+		"group_source_bindings"
+		{
+			"0"		"joystick active"
+			"1"		"right_joystick active"
+			"2"		"left_trigger active"
+			"3"		"right_trigger active"
+			"4"		"switch active"
+		}
+	}
+	"settings"
+	{
+	}
+}

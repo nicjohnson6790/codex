@@ -39,6 +39,7 @@ The runtime is split into four main layers:
 
 - `SDLRenderer` owns the SDL GPU device, swapchain, render targets, and top-level frame submission order.
 - `App` owns lifecycle and frame sequencing, with windowing, input, UI, simulation, scene emission, and rendering kept as named phases.
+- `SteamService` owns optional Steamworks initialization, Steam Input fallback, callback pumping, status, and shutdown.
 - Renderer classes own concrete draw and compute paths such as terrain, foliage, nearby foliage, canopy, water, skybox, triangles, and debug lines.
 - Manager classes own residency, LRU replacement, and queued generation work for terrain slices, foliage pages, canopy cells, and water leaf selection.
 - `WorldGridQuadtree` owns the fixed-slot tree structure, LOD decisions, terrain residency update, and linear draw/cache emission.
@@ -53,6 +54,8 @@ That split keeps app flow explicit, the quadtree responsible for scene decisions
 - `src/App.*`: application lifetime, per-frame phase sequencing, and system wiring
 - `src/AppPanels.*`: ImGui layout and editor panels
 - `src/AppConfig.hpp`: shared runtime constants and defaults
+- `src/platform/SteamService.*`: optional Steamworks lifecycle wrapper
+- `steam_input/*`: local Steam Input action manifest and default controller config
 
 ### Core rendering
 
@@ -143,6 +146,7 @@ Requirements:
 - Ninja
 - A C++20 compiler
 - Vulkan SDK with `glslc`
+- Optional: Steamworks SDK 1.64 at `../deps/steamworks_sdk_164/sdk`, or pass `-DSTEAMWORKS_SDK_DIR=...`
 - Internet access during configure time for `FetchContent`
 
 Common commands from the repo root:
@@ -176,6 +180,12 @@ Run:
 ```powershell
 .\build\Debug\terrain_sandbox.exe --verbose-startup --quit-after-first-frame
 ```
+
+```powershell
+.\build\Debug\terrain_sandbox.exe --disable-steam
+```
+
+Steam builds stage `steam_api64.dll`, a local `steam_appid.txt`, and `steam_input/*` into the build output. `--disable-steam` keeps SDL gamepad input available for troubleshooting.
 
 `tools\build.cmd Assets` builds the standalone converter in `build\Assets` and regenerates:
 

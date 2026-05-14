@@ -6,6 +6,7 @@
 #include "LightingSystem.hpp"
 #include "NearbyFoliageRenderer.hpp"
 #include "PerfPanel.hpp"
+#include "platform/SteamService.hpp"
 #include "RenderTypes.hpp"
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
@@ -32,6 +33,7 @@ public:
     {
         CameraManager& cameraManager;
         SDLRenderer& renderer;
+        const SteamService& steamService;
         PlayerPawn& playerPawn;
         CollisionManager& collisionManager;
         bool& playerFollowCameraEnabled;
@@ -61,6 +63,7 @@ private:
     void applyDockLayout();
     void drawInfoPane(Context& context);
     void drawControlsTab(Context& context);
+    void drawSteamTab(Context& context);
     void drawTerrainTab(Context& context);
     void drawWaterTab(Context& context);
     void drawDebugTab(Context& context);

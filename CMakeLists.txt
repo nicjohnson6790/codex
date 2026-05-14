@@ -10,6 +10,17 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
 include(FetchContent)
 
+set(DEFAULT_STEAMWORKS_SDK_DIR "${CMAKE_SOURCE_DIR}/../../deps/steamworks_sdk_164/sdk")
+if (EXISTS "${DEFAULT_STEAMWORKS_SDK_DIR}/public/steam/steam_api.h")
+    set(DEFAULT_ENABLE_STEAM ON)
+else()
+    set(DEFAULT_ENABLE_STEAM OFF)
+endif()
+
+option(TERRAIN_SANDBOX_ENABLE_STEAM "Enable Steamworks SDK integration" ${DEFAULT_ENABLE_STEAM})
+set(STEAMWORKS_SDK_DIR "${DEFAULT_STEAMWORKS_SDK_DIR}" CACHE PATH "Path to the Steamworks SDK sdk directory")
+set(STEAMWORKS_APP_ID "480" CACHE STRING "Steam AppID for generated local steam_appid.txt. Leave empty to skip.")
+
 find_program(VULKAN_GLSLC_EXECUTABLE
     NAMES glslc
     HINTS
@@ -52,6 +63,33 @@ set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL3 imgui glm lz4)
 
+if (TERRAIN_SANDBOX_ENABLE_STEAM)
+    if (NOT WIN32)
+        message(FATAL_ERROR "Steamworks integration is currently wired for Windows only.")
+    endif()
+
+    get_filename_component(STEAMWORKS_SDK_DIR "${STEAMWORKS_SDK_DIR}" ABSOLUTE)
+    set(STEAMWORKS_INCLUDE_DIR "${STEAMWORKS_SDK_DIR}/public")
+    set(STEAMWORKS_LIBRARY "${STEAMWORKS_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
+    set(STEAMWORKS_RUNTIME_DLL "${STEAMWORKS_SDK_DIR}/redistributable_bin/win64/steam_api64.dll")
+
+    if (NOT EXISTS "${STEAMWORKS_INCLUDE_DIR}/steam/steam_api.h")
+        message(FATAL_ERROR "Steamworks header not found: ${STEAMWORKS_INCLUDE_DIR}/steam/steam_api.h")
+    endif()
+    if (NOT EXISTS "${STEAMWORKS_LIBRARY}")
+        message(FATAL_ERROR "Steamworks import library not found: ${STEAMWORKS_LIBRARY}")
+    endif()
+    if (NOT EXISTS "${STEAMWORKS_RUNTIME_DLL}")
+        message(FATAL_ERROR "Steamworks runtime DLL not found: ${STEAMWORKS_RUNTIME_DLL}")
+    endif()
+
+    add_library(Steamworks::Steamworks UNKNOWN IMPORTED)
+    set_target_properties(Steamworks::Steamworks PROPERTIES
+        IMPORTED_LOCATION "${STEAMWORKS_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${STEAMWORKS_INCLUDE_DIR}"
+    )
+endif()
+
 add_library(lz4_local STATIC
     ${lz4_SOURCE_DIR}/lib/lz4.c
 )
@@ -85,6 +123,8 @@ target_link_libraries(imgui_backend
 set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
 set(RUNTIME_ASSET_SOURCE_DIR ${CMAKE_SOURCE_DIR}/assets/runtime)
 set(RUNTIME_ASSET_OUTPUT_DIR ${CMAKE_BINARY_DIR}/assets/runtime)
+set(STEAM_INPUT_SOURCE_DIR ${CMAKE_SOURCE_DIR}/steam_input)
+set(STEAM_INPUT_OUTPUT_DIR ${CMAKE_BINARY_DIR}/steam_input)
 file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
 
 function(compile_shader SOURCE_FILE OUTPUT_FILE)
@@ -206,6 +246,7 @@ add_executable(terrain_sandbox
     src/main.cpp
     src/App.cpp
     src/AppPanels.cpp
+    src/platform/SteamService.cpp
     src/assets/RuntimeAssetCompression.cpp
     src/assets/RuntimeAssetReader.cpp
     src/CameraManager.cpp
@@ -266,9 +307,25 @@ add_custom_target(stage_runtime_assets ALL
 
 add_dependencies(terrain_sandbox stage_runtime_assets)
 
+add_custom_target(stage_steam_input ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${STEAM_INPUT_SOURCE_DIR}
+        ${STEAM_INPUT_OUTPUT_DIR}
+    VERBATIM
+)
+
+add_dependencies(terrain_sandbox stage_steam_input)
+
 add_custom_command(TARGET terrain_sandbox POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy -t $<TARGET_FILE_DIR:terrain_sandbox> $<TARGET_RUNTIME_DLLS:terrain_sandbox>
     COMMAND_EXPAND_LISTS
+)
+
+add_custom_command(TARGET terrain_sandbox POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${STEAM_INPUT_SOURCE_DIR}
+        $<TARGET_FILE_DIR:terrain_sandbox>/steam_input
+    VERBATIM
 )
 
 target_include_directories(terrain_sandbox
@@ -290,6 +347,38 @@ target_link_libraries(terrain_sandbox
         lz4_local
         SDL3::SDL3
 )
+
+if (TERRAIN_SANDBOX_ENABLE_STEAM)
+    target_compile_definitions(terrain_sandbox
+        PRIVATE
+            TERRAIN_SANDBOX_ENABLE_STEAM
+    )
+
+    target_link_libraries(terrain_sandbox
+        PRIVATE
+            Steamworks::Steamworks
+    )
+
+    add_custom_command(TARGET terrain_sandbox POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${STEAMWORKS_RUNTIME_DLL}"
+            $<TARGET_FILE_DIR:terrain_sandbox>
+        VERBATIM
+    )
+
+    if (NOT "${STEAMWORKS_APP_ID}" STREQUAL "")
+        file(GENERATE
+            OUTPUT ${CMAKE_BINARY_DIR}/steam_appid.txt
+            CONTENT "${STEAMWORKS_APP_ID}\n"
+        )
+        add_custom_command(TARGET terrain_sandbox POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_BINARY_DIR}/steam_appid.txt"
+                $<TARGET_FILE_DIR:terrain_sandbox>
+            VERBATIM
+        )
+    endif()
+endif()
 
 if (MSVC)
     target_compile_options(imgui_backend

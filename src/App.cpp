@@ -66,6 +66,7 @@ void App::run()
         PerformanceCapture::instance().beginFrame();
 
         pollEvents();
+        tickPlatformServices();
 
         const GamepadState gamepadState = updateInputState();
         updateFreeCamera(gamepadState);
@@ -95,6 +96,7 @@ void App::run()
 void App::initialize()
 {
     initializeWindowing();
+    initializePlatformServices();
     initializeGameplayState();
 
     const std::filesystem::path shaderDirectory = executableRelativePath(TERRAIN_SANDBOX_SHADER_DIR);
@@ -135,6 +137,22 @@ void App::initializeWindowing()
     logStartup("init performance capture");
     PerformanceCapture::instance().initialize(AppConfig::Perf::kHistorySeconds);
     logStartup("performance capture initialized");
+}
+
+void App::initializePlatformServices()
+{
+    logStartup("init Steam service");
+    m_steamService.initialize(
+        m_options.enableSteam,
+        executableRelativePath("steam_input/steam_input_manifest.vdf"));
+    if (!m_options.enableSteam)
+    {
+        logStartup("Steam service disabled by launch option");
+    }
+    else
+    {
+        logStartup(m_steamService.initialized() ? "Steam service initialized" : "Steam service unavailable");
+    }
 }
 
 void App::initializeGameplayState()
@@ -260,6 +278,7 @@ void App::shutdown()
 
     shutdownImGui();
     shutdownRenderers();
+    shutdownPlatformServices();
     shutdownWindowing();
 }
 
@@ -294,6 +313,12 @@ void App::shutdownRenderers()
     m_lineRenderer.shutdown();
     m_triangleRenderer.shutdown();
     m_renderer.shutdown();
+}
+
+void App::shutdownPlatformServices()
+{
+    logStartup("shutdown platform services");
+    m_steamService.shutdown();
 }
 
 void App::shutdownWindowing()
@@ -333,9 +358,19 @@ void App::pollEvents()
     }
 }
 
+void App::tickPlatformServices()
+{
+    HELLO_PROFILE_SCOPE("App::TickPlatformServices");
+    m_steamService.pumpCallbacks();
+}
+
 GamepadState App::updateInputState()
 {
-    const GamepadState gamepadState = m_gamepadInput.pollState();
+    GamepadState gamepadState = m_steamService.pollGamepadState();
+    if (!gamepadState.hasGamepad)
+    {
+        gamepadState = m_gamepadInput.pollState();
+    }
     m_playerMoveIntent = m_playerController.poll(gamepadState);
     if (!m_playerFollowCameraEnabled &&
         m_cameraManager.hasActiveCamera() &&
@@ -377,6 +412,7 @@ void App::buildUi()
     AppPanels::Context context{
         .cameraManager = m_cameraManager,
         .renderer = m_renderer,
+        .steamService = m_steamService,
         .playerPawn = m_playerPawn,
         .collisionManager = m_collisionManager,
         .playerFollowCameraEnabled = m_playerFollowCameraEnabled,

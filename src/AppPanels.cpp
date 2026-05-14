@@ -107,6 +107,12 @@ void AppPanels::drawInfoPane(Context& context)
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("Steam"))
+        {
+            drawSteamTab(context);
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Terrain"))
         {
             drawTerrainTab(context);
@@ -302,6 +308,41 @@ void AppPanels::drawControlsTab(Context& context)
             context.skyboxRenderer.regenerateAtmosphereLut();
         }
     }
+}
+
+void AppPanels::drawSteamTab(Context& context)
+{
+    HELLO_PROFILE_SCOPE("AppPanels::DrawSteamTab");
+
+    ImGui::SeparatorText("Runtime");
+    ImGui::Text("SDK build: %s", context.steamService.compiledIn() ? "enabled" : "disabled");
+    ImGui::Text("Launch request: %s", context.steamService.requested() ? "enabled" : "disabled");
+    ImGui::Text("API status: %s", context.steamService.initialized() ? "initialized" : "unavailable");
+    ImGui::Text("Steam Input: %s", context.steamService.steamInputInitialized() ? "initialized" : "unavailable");
+    ImGui::Text("Input manifest: %s", context.steamService.steamInputManifestLoaded() ? "loaded" : "unavailable");
+    ImGui::Text("Action handles: %s", context.steamService.steamInputActionsReady() ? "ready" : "missing");
+    ImGui::Text("Input controllers: %d", context.steamService.steamInputControllerCount());
+    ImGui::Text("Active input handle: %llu", static_cast<unsigned long long>(context.steamService.activeInputHandle()));
+    ImGui::Text("Action data: %s", context.steamService.lastSteamInputStateActive() ? "active" : "inactive");
+    ImGui::Text(
+        "Move: %.3f, %.3f",
+        context.steamService.lastMoveX(),
+        context.steamService.lastMoveY());
+    ImGui::Text(
+        "Look: %.3f, %.3f",
+        context.steamService.lastLookX(),
+        context.steamService.lastLookY());
+
+    if (!context.steamService.initialized())
+    {
+        ImGui::TextWrapped("Steam API is optional for local runs. It initializes when Steam is available and the local AppID/runtime setup is valid.");
+        return;
+    }
+
+    ImGui::SeparatorText("Identity");
+    ImGui::Text("AppID: %u", context.steamService.appId());
+    ImGui::Text("User ID: %llu", static_cast<unsigned long long>(context.steamService.userId()));
+    ImGui::Text("Persona: %s", context.steamService.personaName().c_str());
 }
 
 void AppPanels::drawTerrainTab(Context& context)

@@ -11,6 +11,7 @@
 #include "LightingSystem.hpp"
 #include "NearbyFoliageRenderer.hpp"
 #include "PerformanceCapture.hpp"
+#include "platform/SteamService.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
 #include "RenderEngines.hpp"
@@ -38,6 +39,7 @@ public:
     {
         bool verboseStartupLogging = false;
         bool quitAfterFirstFrame = false;
+        bool enableSteam = true;
     };
 
     explicit App(const Options& options = {});
@@ -50,16 +52,19 @@ private:
     void shutdown();
 
     void initializeWindowing();
+    void initializePlatformServices();
     void initializeGameplayState();
     void initializeRenderers(const std::filesystem::path& shaderDirectory);
     void initializeImGui();
 
     void shutdownImGui();
     void shutdownRenderers();
+    void shutdownPlatformServices();
     void shutdownWindowing();
 
     void updateFrameTiming();
     void pollEvents();
+    void tickPlatformServices();
     GamepadState updateInputState();
     void updateFreeCamera(const GamepadState& gamepadState);
     void updateSimulationTime();
@@ -95,6 +100,7 @@ private:
     QuadtreeWaterMeshRenderer m_waterMeshRenderer;
     SkyboxRenderer m_skyboxRenderer;
     GamepadInput m_gamepadInput;
+    SteamService m_steamService;
     CameraManager m_cameraManager;
     FreeFlightCameraController m_cameraController;
     PlayerPawn m_playerPawn;

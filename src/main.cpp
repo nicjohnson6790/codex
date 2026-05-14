@@ -33,6 +33,10 @@ int main(int argc, char** argv)
             {
                 options.quitAfterFirstFrame = true;
             }
+            else if (std::strcmp(argv[index], "--disable-steam") == 0)
+            {
+                options.enableSteam = false;
+            }
             else
             {
                 std::cerr << "Unknown argument: " << argv[index] << '\n';
