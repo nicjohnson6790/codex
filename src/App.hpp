@@ -26,7 +26,9 @@
 #include <SDL3/SDL.h>
 
 #include <cstddef>
+#include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 class App
@@ -47,10 +49,36 @@ private:
     void initialize();
     void shutdown();
 
+    void initializeWindowing();
+    void initializeGameplayState();
+    void initializeRenderers(const std::filesystem::path& shaderDirectory);
+    void initializeImGui();
+
+    void shutdownImGui();
+    void shutdownRenderers();
+    void shutdownWindowing();
+
+    void updateFrameTiming();
     void pollEvents();
+    GamepadState updateInputState();
+    void updateFreeCamera(const GamepadState& gamepadState);
+    void updateSimulationTime();
+    void beginImGuiFrame();
     void buildUi();
     void syncCameraModeTransition();
     void updateSceneForFrame();
+    void renderCurrentFrame();
+    void finishFrame();
+
+    void syncRenderStateForActiveCamera(Extent2D viewportExtent);
+    void syncWaterStateForFrame();
+    void collectFoliageReadbacks();
+    void updateGameplayForFrame();
+    void syncFollowCameraRenderState(Extent2D viewportExtent);
+    void buildPrimitiveDraws();
+    void buildDebugAxes();
+    void emitWorldDraws();
+    void scheduleGenerationWork();
 
     [[nodiscard]] std::vector<std::string> querySdlGpuDrivers() const;
 

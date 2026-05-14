@@ -38,18 +38,19 @@ Each frame is split into a few predictable phases:
 The runtime is split into four main layers:
 
 - `SDLRenderer` owns the SDL GPU device, swapchain, render targets, and top-level frame submission order.
+- `App` owns lifecycle and frame sequencing, with windowing, input, UI, simulation, scene emission, and rendering kept as named phases.
 - Renderer classes own concrete draw and compute paths such as terrain, foliage, nearby foliage, canopy, water, skybox, triangles, and debug lines.
 - Manager classes own residency, LRU replacement, and queued generation work for terrain slices, foliage pages, canopy cells, and water leaf selection.
 - `WorldGridQuadtree` owns the fixed-slot tree structure, LOD decisions, terrain residency update, and linear draw/cache emission.
 
-That split keeps the quadtree responsible for scene decisions, managers responsible for lifetime and queues, and renderers responsible for GPU work.
+That split keeps app flow explicit, the quadtree responsible for scene decisions, managers responsible for lifetime and queues, and renderers responsible for GPU work.
 
 ## File Index
 
 ### App and frame orchestration
 
 - `src/main.cpp`: process entry point and app startup
-- `src/App.*`: application lifetime, per-frame update flow, and system wiring
+- `src/App.*`: application lifetime, per-frame phase sequencing, and system wiring
 - `src/AppPanels.*`: ImGui layout and editor panels
 - `src/AppConfig.hpp`: shared runtime constants and defaults
 
