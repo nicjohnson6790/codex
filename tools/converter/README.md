@@ -23,6 +23,11 @@ The converter currently builds three asset groups:
   - source root: `assets/source/pbr`
   - outputs: `pbr.texbin`, `pbr.assetbin`
   - textures are resized to `1024x1024` with full mip chains; albedo maps use `BC3` sRGB, normal maps use `BC5`, and the remaining maps use `BC3` UNORM
+- `roboto`
+  - source root: `assets/source/font`
+  - outputs: `roboto.texbin`, `roboto.assetbin`
+  - the MSDF atlas is stored as uncompressed `RGBA8_UNORM` texels inside `texbin`; the texel payload is still LZ4-compressed like the other runtime textures
+  - font atlas and glyph layout records are stored in `assetbin`
 
 All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/assets/runtime` by the main build.
 
@@ -63,6 +68,15 @@ The converter expects six cubemap face images there:
 
 These are intended to be the base nighttime cubemap that the runtime atmosphere shader runs on top of, not a fully baked final sky with atmospheric scattering already solved into it. All six faces should share the same dimensions because the runtime uploads them into one cubemap texture.
 
+### Roboto font pack
+
+The repo includes the Roboto variable TTF and its license under:
+
+- `assets/source/font/Roboto-VariableFont_wdth,wght.ttf`
+- `assets/source/font/OFL.txt`
+
+The converter uses FreeType to flatten glyph outlines and build a `1024x1024` MSDF atlas for printable ASCII glyphs. The atlas texture is packed into `roboto.texbin`; `roboto.assetbin` carries the texture blob compression metadata plus binary font atlas and glyph records for later text layout.
+
 ## Build And Usage
 
 From the repo root:
@@ -79,6 +93,7 @@ Manual runs after that:
 .\build\Assets\converter.exe skybox
 .\build\Assets\converter.exe pinetreepack
 .\build\Assets\converter.exe pbr
+.\build\Assets\converter.exe roboto
 ```
 
 Or with explicit paths:
@@ -99,6 +114,9 @@ Default roots:
 - `pbr`
   - source root: `assets/source/pbr`
   - texture root: `assets/source/pbr/tex`
+- `roboto`
+  - source root: `assets/source/font`
+  - font file: `assets/source/font/Roboto-VariableFont_wdth,wght.ttf`
 - output root: `assets/runtime`
 
 ## Conversion Pipeline
@@ -127,6 +145,7 @@ For the pine tree pack, that flow now includes an additional imposter-generation
 - [FbxImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FbxImport.cpp): FBX mesh import through Assimp, unit conversion, transforms, bounds, and LOD grouping
 - [TextureImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TextureImport.cpp): TGA and PNG decoding, texture normalization, resize rules, color-space inference, and deduplication
 - [PineImposterGenerator.cpp](C:/Users/siarr/source/repos/codex/tools/converter/PineImposterGenerator.cpp): offscreen pine imposter capture, supersampled downfiltering, alpha-coverage-preserving mip generation, and BC compression setup
+- [FontMsdfConverter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FontMsdfConverter.cpp): FreeType-based Roboto outline loading, MSDF atlas generation, and glyph metric record generation
 
 ### Runtime format writers
 
@@ -147,6 +166,7 @@ The runtime pack format is intentionally simple:
 - `meshbin` stores geometry-heavy payloads
 - `texbin` stores texture pixel payloads, including BC-compressed 2D array imposter textures
 - `assetbin` stores the lightweight manifest that links everything together
+- font atlas and glyph records in `assetbin` store layout metadata for the Roboto atlas texture
 
 Each mesh blob and texture blob is individually LZ4-compressed, and `assetbin` carries the metadata needed to decompress those items on load.
 
@@ -184,6 +204,7 @@ The generated bins are loaded directly by the main app:
 - `FoliageImposterRenderer` loads the pine `texbin` and `assetbin` imposter metadata for the mid-distance tree pass
 - `SkyboxRenderer` loads `skybox.texbin` and `skybox.assetbin`
 - `QuadtreeMeshRenderer` loads `pbr.texbin` and `pbr.assetbin` for terrain material layers
+- future text rendering can load `roboto.texbin` and `roboto.assetbin` for the MSDF atlas and glyph layout
 
 That makes converter correctness immediately visible in the runtime for mesh layout, material wiring, texture assignment, normal mapping, alpha-mask handling, and skybox cubemap assembly.
 
@@ -195,5 +216,6 @@ The converter fetches and uses:
 - SDL3_image
 - Assimp
 - DirectXTex
+- FreeType
 
 These are converter-only dependencies. The main runtime app only consumes the generated binary packs and the shared runtime reader.

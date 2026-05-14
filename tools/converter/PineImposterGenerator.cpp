@@ -16,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -2052,6 +2053,8 @@ bool OffscreenImposterRenderer::captureAsset(
     bool success = true;
     for (std::uint32_t pitchIndex = 0; pitchIndex < kPitchViewCount && success; ++pitchIndex)
     {
+        std::cout << "[imposters]     Capturing pitch " << (pitchIndex + 1u)
+                  << '/' << kPitchViewCount << " for " << asset.name << '\n';
         for (std::uint32_t yawIndex = 0; yawIndex < kYawViewCount && success; ++yawIndex)
         {
             CaptureView view = buildCaptureView(geometry, pitchIndex, yawIndex);
@@ -2129,8 +2132,13 @@ bool GeneratePineImposters(
     }
 
     bool success = true;
-    for (ImportedAsset& asset : pack->assets)
+    std::cout << "[imposters] Preparing " << pack->assets.size()
+              << " asset(s), " << kLayerCount << " view layer(s) each\n";
+    for (std::size_t assetIndex = 0; assetIndex < pack->assets.size(); ++assetIndex)
     {
+        ImportedAsset& asset = pack->assets[assetIndex];
+        std::cout << "[imposters] [" << (assetIndex + 1u) << '/' << pack->assets.size()
+                  << "] Capturing " << asset.name << '\n';
         std::vector<std::vector<std::byte>> colorLayers;
         std::vector<std::vector<std::byte>> normalLayers;
         std::vector<float> layerCoverageTargets;
@@ -2146,6 +2154,7 @@ bool GeneratePineImposters(
             break;
         }
 
+        std::cout << "[imposters]     Compressing color/alpha mip chain for " << asset.name << '\n';
         std::vector<std::byte> colorPayload;
         success = buildCompressedTexturePayload(
             RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
@@ -2158,6 +2167,7 @@ bool GeneratePineImposters(
             break;
         }
 
+        std::cout << "[imposters]     Compressing normal mip chain for " << asset.name << '\n';
         std::vector<std::byte> normalPayload;
         success = buildCompressedTexturePayload(
             RuntimeAssets::TextureFormat::BC5_RG_UNORM,
@@ -2188,6 +2198,9 @@ bool GeneratePineImposters(
 
         asset.imposterColorTextureIndex = colorTextureIndex;
         asset.imposterNormalTextureIndex = normalTextureIndex;
+        std::cout << "[imposters]     Finished " << asset.name
+                  << " -> texture indices " << colorTextureIndex
+                  << ", " << normalTextureIndex << '\n';
     }
 
     renderer.shutdown();

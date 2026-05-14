@@ -48,6 +48,8 @@ struct LoadedAssetBinView
     std::span<const MeshRefRecord> meshRefs;
     std::span<const MeshBlobRecord> meshBlobs;
     std::span<const TextureBlobRecord> textureBlobs;
+    std::span<const FontAtlasRecord> fontAtlases;
+    std::span<const FontGlyphRecord> fontGlyphs;
     std::span<const std::byte> stringTable;
 
     [[nodiscard]] const char* stringAt(std::uint32_t offset) const;

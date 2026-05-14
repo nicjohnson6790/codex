@@ -14,6 +14,32 @@ namespace RuntimeAssets
 namespace
 {
 
+constexpr std::uint32_t kPreviousFormatVersion = 3;
+
+struct AssetBinHeaderV3
+{
+    std::uint32_t magic = 0;
+    std::uint32_t version = 0;
+    std::uint32_t flags = 0;
+    std::uint32_t meshBinPathOffset = 0;
+    std::uint32_t texBinPathOffset = 0;
+    std::uint32_t assetCount = 0;
+    std::uint32_t materialCount = 0;
+    std::uint32_t meshRefCount = 0;
+    std::uint32_t meshBlobCount = 0;
+    std::uint32_t textureBlobCount = 0;
+    std::uint32_t reserved = 0;
+    std::uint64_t assetRecordOffset = 0;
+    std::uint64_t materialRecordOffset = 0;
+    std::uint64_t meshRefRecordOffset = 0;
+    std::uint64_t meshBlobRecordOffset = 0;
+    std::uint64_t textureBlobRecordOffset = 0;
+    std::uint64_t stringTableOffset = 0;
+    std::uint64_t stringTableSize = 0;
+    std::uint64_t fileSize = 0;
+};
+static_assert(sizeof(AssetBinHeaderV3) == 112);
+
 template <typename T>
 bool IsAligned(std::uint64_t value)
 {
@@ -211,7 +237,7 @@ bool ValidateCommonHeader(
     std::size_t size,
     std::string* error)
 {
-    if (version != kFormatVersion)
+    if (version != kFormatVersion && version != kPreviousFormatVersion)
     {
         if (error != nullptr)
         {
@@ -239,6 +265,121 @@ bool ValidateCommonHeader(
     }
 
     (void)expectedMagic;
+    return true;
+}
+
+bool ValidateAssetBinV3(const void* data, std::size_t size, std::string* error)
+{
+    if (size < sizeof(AssetBinHeaderV3))
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin is smaller than AssetBinHeaderV3";
+        }
+        return false;
+    }
+
+    const AssetBinHeaderV3 header = ReadStruct<AssetBinHeaderV3>(data);
+    if (header.magic != kAssetBinMagic)
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin magic mismatch";
+        }
+        return false;
+    }
+
+    if (!ValidateCommonHeader(kAssetBinMagic, header.version, header.flags, header.fileSize, size, error))
+    {
+        return false;
+    }
+
+    if (!CheckRegion<AssetRecord>(header.assetRecordOffset, header.assetCount, size, "asset records", error) ||
+        !CheckRegion<MaterialRecord>(header.materialRecordOffset, header.materialCount, size, "material records", error) ||
+        !CheckRegion<MeshRefRecord>(header.meshRefRecordOffset, header.meshRefCount, size, "mesh ref records", error) ||
+        !CheckRegion<MeshBlobRecord>(header.meshBlobRecordOffset, header.meshBlobCount, size, "mesh blob records", error) ||
+        !CheckRegion<TextureBlobRecord>(header.textureBlobRecordOffset, header.textureBlobCount, size, "texture blob records", error) ||
+        !CheckByteRegion(header.stringTableOffset, header.stringTableSize, size, "string table", error))
+    {
+        return false;
+    }
+
+    const auto stringTable = std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(data) + header.stringTableOffset,
+        static_cast<std::size_t>(header.stringTableSize));
+    if (!StringOffsetInTable(header.meshBinPathOffset, stringTable) ||
+        !StringOffsetInTable(header.texBinPathOffset, stringTable))
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin path string offset is outside the string table";
+        }
+        return false;
+    }
+
+    const auto assets = std::span<const AssetRecord>(
+        reinterpret_cast<const AssetRecord*>(reinterpret_cast<const std::byte*>(data) + header.assetRecordOffset),
+        static_cast<std::size_t>(header.assetCount));
+    const auto materials = std::span<const MaterialRecord>(
+        reinterpret_cast<const MaterialRecord*>(reinterpret_cast<const std::byte*>(data) + header.materialRecordOffset),
+        static_cast<std::size_t>(header.materialCount));
+    const auto meshBlobs = std::span<const MeshBlobRecord>(
+        reinterpret_cast<const MeshBlobRecord*>(reinterpret_cast<const std::byte*>(data) + header.meshBlobRecordOffset),
+        static_cast<std::size_t>(header.meshBlobCount));
+    const auto textureBlobs = std::span<const TextureBlobRecord>(
+        reinterpret_cast<const TextureBlobRecord*>(reinterpret_cast<const std::byte*>(data) + header.textureBlobRecordOffset),
+        static_cast<std::size_t>(header.textureBlobCount));
+
+    for (const AssetRecord& asset : assets)
+    {
+        if (!StringOffsetInTable(asset.nameOffset, stringTable))
+        {
+            if (error != nullptr)
+            {
+                *error = "asset name offset is outside the string table";
+            }
+            return false;
+        }
+    }
+
+    for (const MaterialRecord& material : materials)
+    {
+        if (!StringOffsetInTable(material.nameOffset, stringTable))
+        {
+            if (error != nullptr)
+            {
+                *error = "material name offset is outside the string table";
+            }
+            return false;
+        }
+    }
+
+    for (const MeshBlobRecord& blob : meshBlobs)
+    {
+        if (blob.compressionType != static_cast<std::uint32_t>(CompressionType::None) &&
+            blob.compressionType != static_cast<std::uint32_t>(CompressionType::Lz4))
+        {
+            if (error != nullptr)
+            {
+                *error = "mesh blob compression type is unsupported";
+            }
+            return false;
+        }
+    }
+
+    for (const TextureBlobRecord& blob : textureBlobs)
+    {
+        if (blob.compressionType != static_cast<std::uint32_t>(CompressionType::None) &&
+            blob.compressionType != static_cast<std::uint32_t>(CompressionType::Lz4))
+        {
+            if (error != nullptr)
+            {
+                *error = "texture blob compression type is unsupported";
+            }
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -522,6 +663,21 @@ bool ValidateTexBin(const void* data, std::size_t size, std::string* error)
 
 bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
 {
+    if (size < sizeof(AssetBinHeaderV3))
+    {
+        if (error != nullptr)
+        {
+            *error = "assetbin is smaller than AssetBinHeader";
+        }
+        return false;
+    }
+
+    const std::uint32_t version = ReadStruct<AssetBinHeaderV3>(data).version;
+    if (version == kPreviousFormatVersion)
+    {
+        return ValidateAssetBinV3(data, size, error);
+    }
+
     if (size < sizeof(AssetBinHeader))
     {
         if (error != nullptr)
@@ -551,6 +707,8 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
         !CheckRegion<MeshRefRecord>(header.meshRefRecordOffset, header.meshRefCount, size, "mesh ref records", error) ||
         !CheckRegion<MeshBlobRecord>(header.meshBlobRecordOffset, header.meshBlobCount, size, "mesh blob records", error) ||
         !CheckRegion<TextureBlobRecord>(header.textureBlobRecordOffset, header.textureBlobCount, size, "texture blob records", error) ||
+        !CheckRegion<FontAtlasRecord>(header.fontAtlasRecordOffset, header.fontAtlasCount, size, "font atlas records", error) ||
+        !CheckRegion<FontGlyphRecord>(header.fontGlyphRecordOffset, header.fontGlyphCount, size, "font glyph records", error) ||
         !CheckByteRegion(header.stringTableOffset, header.stringTableSize, size, "string table", error))
     {
         return false;
@@ -571,6 +729,9 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
     const auto textureBlobs = std::span<const TextureBlobRecord>(
         reinterpret_cast<const TextureBlobRecord*>(reinterpret_cast<const std::byte*>(data) + header.textureBlobRecordOffset),
         static_cast<std::size_t>(header.textureBlobCount));
+    const auto fontAtlases = std::span<const FontAtlasRecord>(
+        reinterpret_cast<const FontAtlasRecord*>(reinterpret_cast<const std::byte*>(data) + header.fontAtlasRecordOffset),
+        static_cast<std::size_t>(header.fontAtlasCount));
 
     if (!StringOffsetInTable(header.meshBinPathOffset, stringTable) ||
         !StringOffsetInTable(header.texBinPathOffset, stringTable))
@@ -669,6 +830,46 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
         }
     }
 
+    for (const FontAtlasRecord& fontAtlas : fontAtlases)
+    {
+        if (!StringOffsetInTable(fontAtlas.nameOffset, stringTable))
+        {
+            if (error != nullptr)
+            {
+                *error = "font atlas name offset is outside the string table";
+            }
+            return false;
+        }
+
+        if (fontAtlas.textureIndex >= header.textureBlobCount)
+        {
+            if (error != nullptr)
+            {
+                *error = "font atlas texture index points past assetbin.textureBlobCount";
+            }
+            return false;
+        }
+
+        if (fontAtlas.firstGlyph > header.fontGlyphCount ||
+            fontAtlas.glyphCount > (header.fontGlyphCount - fontAtlas.firstGlyph))
+        {
+            if (error != nullptr)
+            {
+                *error = "font atlas glyph range is invalid";
+            }
+            return false;
+        }
+
+        if (fontAtlas.glyphCount == 0 || fontAtlas.pixelSize <= 0.0f || fontAtlas.distanceRange <= 0.0f)
+        {
+            if (error != nullptr)
+            {
+                *error = "font atlas metrics are invalid";
+            }
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -685,12 +886,41 @@ bool LoadAssetBinFromSDL(const char* path, LoadedAssetBinView* out, std::string*
         return false;
     }
 
-    out->header = ReadStruct<AssetBinHeader>(out->bytes.data());
+    const AssetBinHeaderV3 headerV3 = ReadStruct<AssetBinHeaderV3>(out->bytes.data());
+    if (headerV3.version == kPreviousFormatVersion)
+    {
+        out->header = {};
+        out->header.magic = headerV3.magic;
+        out->header.version = headerV3.version;
+        out->header.flags = headerV3.flags;
+        out->header.meshBinPathOffset = headerV3.meshBinPathOffset;
+        out->header.texBinPathOffset = headerV3.texBinPathOffset;
+        out->header.assetCount = headerV3.assetCount;
+        out->header.materialCount = headerV3.materialCount;
+        out->header.meshRefCount = headerV3.meshRefCount;
+        out->header.meshBlobCount = headerV3.meshBlobCount;
+        out->header.textureBlobCount = headerV3.textureBlobCount;
+        out->header.assetRecordOffset = headerV3.assetRecordOffset;
+        out->header.materialRecordOffset = headerV3.materialRecordOffset;
+        out->header.meshRefRecordOffset = headerV3.meshRefRecordOffset;
+        out->header.meshBlobRecordOffset = headerV3.meshBlobRecordOffset;
+        out->header.textureBlobRecordOffset = headerV3.textureBlobRecordOffset;
+        out->header.stringTableOffset = headerV3.stringTableOffset;
+        out->header.stringTableSize = headerV3.stringTableSize;
+        out->header.fileSize = headerV3.fileSize;
+    }
+    else
+    {
+        out->header = ReadStruct<AssetBinHeader>(out->bytes.data());
+    }
+
     out->assets = MakeSpan<AssetRecord>(out->bytes, out->header.assetRecordOffset, out->header.assetCount);
     out->materials = MakeSpan<MaterialRecord>(out->bytes, out->header.materialRecordOffset, out->header.materialCount);
     out->meshRefs = MakeSpan<MeshRefRecord>(out->bytes, out->header.meshRefRecordOffset, out->header.meshRefCount);
     out->meshBlobs = MakeSpan<MeshBlobRecord>(out->bytes, out->header.meshBlobRecordOffset, out->header.meshBlobCount);
     out->textureBlobs = MakeSpan<TextureBlobRecord>(out->bytes, out->header.textureBlobRecordOffset, out->header.textureBlobCount);
+    out->fontAtlases = MakeSpan<FontAtlasRecord>(out->bytes, out->header.fontAtlasRecordOffset, out->header.fontAtlasCount);
+    out->fontGlyphs = MakeSpan<FontGlyphRecord>(out->bytes, out->header.fontGlyphRecordOffset, out->header.fontGlyphCount);
     out->stringTable = MakeByteSpan(out->bytes, out->header.stringTableOffset, out->header.stringTableSize);
     return true;
 }

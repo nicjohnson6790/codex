@@ -17,6 +17,7 @@ struct ConverterConfig
         PineTree,
         Skybox,
         Pbr,
+        Font,
     };
 
     std::filesystem::path sourceRoot;
@@ -83,12 +84,20 @@ struct ImportedAsset
     std::uint32_t imposterNormalTextureIndex = std::numeric_limits<std::uint32_t>::max();
 };
 
+struct ImportedFontAtlas
+{
+    std::string name;
+    RuntimeAssets::FontAtlasRecord record{};
+    std::vector<RuntimeAssets::FontGlyphRecord> glyphs;
+};
+
 struct ImportedPack
 {
     std::vector<ImportedMesh> meshes;
     std::vector<ImportedMaterial> materials;
     std::vector<ImportedTexture> textures;
     std::vector<ImportedAsset> assets;
+    std::vector<ImportedFontAtlas> fontAtlases;
     std::unordered_map<std::string, std::uint32_t> textureIndexByBasename;
 };
 

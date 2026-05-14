@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <span>
 #include <string_view>
@@ -545,13 +546,22 @@ bool ImportTextureFolder(
     }
     std::sort(textureFiles.begin(), textureFiles.end());
 
-    for (const std::filesystem::path& texturePath : textureFiles)
+    std::cout << "[textures] Found " << textureFiles.size() << " source texture(s) in "
+              << textureRoot.string() << '\n';
+
+    for (std::size_t textureFileIndex = 0; textureFileIndex < textureFiles.size(); ++textureFileIndex)
     {
+        const std::filesystem::path& texturePath = textureFiles[textureFileIndex];
         const std::string basename = ToLower(texturePath.filename().string());
         if (outPack->textureIndexByBasename.contains(basename))
         {
+            std::cout << "[textures] [" << (textureFileIndex + 1u) << '/' << textureFiles.size()
+                      << "] Skipping duplicate " << texturePath.filename().string() << '\n';
             continue;
         }
+
+        std::cout << "[textures] [" << (textureFileIndex + 1u) << '/' << textureFiles.size()
+                  << "] Loading " << texturePath.filename().string() << '\n';
 
         ImportedTexture texture;
         if (!FinalizeImportedTexture(texturePath, options.forceSrgb, &texture, error))
@@ -563,6 +573,7 @@ bool ImportTextureFolder(
         if (options.resizeSquare != 0 &&
             (texture.width != resizeSquare || texture.height != resizeSquare))
         {
+            std::cout << "[textures]     Resizing to " << resizeSquare << "x" << resizeSquare << '\n';
             texture.payload = ResizeRgbaImage(
                 texture.payload,
                 texture.width,
@@ -575,6 +586,7 @@ bool ImportTextureFolder(
 
         if (options.compressPbrToBc)
         {
+            std::cout << "[textures]     Building mip chain and BC-compressing\n";
             if (!ConverterHasBcCompressionSupport())
             {
                 *error = ConverterBcCompressionUnavailableReason();
@@ -623,6 +635,7 @@ bool ImportTextureFolder(
         const std::uint32_t textureIndex = static_cast<std::uint32_t>(outPack->textures.size());
         outPack->textureIndexByBasename.emplace(basename, textureIndex);
         outPack->textures.push_back(std::move(texture));
+        std::cout << "[textures]     Imported as texture #" << textureIndex << '\n';
     }
 
     return true;

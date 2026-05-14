@@ -110,6 +110,7 @@ That split keeps app flow explicit, the quadtree responsible for scene decisions
 - `src/assets/RuntimeAssetFormat.hpp`: binary layout definitions for `meshbin`, `texbin`, and `assetbin`
 - `src/assets/RuntimeAssetCompression.*`: shared LZ4 compression and decompression helpers
 - `src/assets/RuntimeAssetReader.*`: validated SDL file readers for runtime asset packs
+- `assets/source/font/Roboto-VariableFont_wdth,wght.ttf`: Roboto source font used by the MSDF font atlas converter
 - `assets/source/skybox/tex/*.png`: included skybox source textures for the converter
 - `assets/runtime/*`: generated runtime asset packs staged into build outputs
 - `tools/converter/*`: standalone offline converter for source asset import and runtime pack generation
@@ -196,6 +197,8 @@ Steam builds stage `steam_api64.dll`, a local `steam_appid.txt`, and `steam_inpu
 - `pinetreepack.texbin`
 - `pbr.assetbin`
 - `pbr.texbin`
+- `roboto.assetbin`
+- `roboto.texbin`
 
 Current pine runtime asset details:
 
@@ -221,6 +224,7 @@ This repository does not include the authored pine tree pack source content.
 
 - Missing source content: `assets/source/pinetreepack`
 - Included source content: `assets/source/skybox/tex`
+- Included font source content: `assets/source/font`
 - Generated runtime outputs are expected under `assets/runtime`
 - The main app stages those runtime bins into `build/<Config>/assets/runtime`
 

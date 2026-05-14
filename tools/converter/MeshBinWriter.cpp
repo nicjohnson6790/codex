@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <span>
 #include <string>
@@ -150,8 +151,11 @@ bool WriteMeshBin(
     writer.appendSpan(std::span<const RuntimeAssets::SubmeshRecord>(submeshRecords));
     writer.align(16);
     header.blobDataOffset = writer.bytes.size();
-    for (const ImportedMesh& mesh : pack.meshes)
+    for (std::size_t meshIndex = 0; meshIndex < pack.meshes.size(); ++meshIndex)
     {
+        const ImportedMesh& mesh = pack.meshes[meshIndex];
+        std::cout << "[meshbin] [" << (meshIndex + 1u) << '/' << pack.meshes.size()
+                  << "] LZ4-compressing " << mesh.meshName << '\n';
         std::vector<std::byte> compressedVertexBytes;
         if (!RuntimeAssets::CompressBytes(
                 RuntimeAssets::CompressionType::Lz4,

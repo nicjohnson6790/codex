@@ -2,6 +2,7 @@
 
 #include "AssetBinWriter.hpp"
 #include "FbxImport.hpp"
+#include "FontMsdfConverter.hpp"
 #include "MeshBinWriter.hpp"
 #include "PineImposterGenerator.hpp"
 #include "TexBinWriter.hpp"
@@ -11,6 +12,7 @@
 #include <SDL3/SDL.h>
 
 #include <filesystem>
+#include <iostream>
 #include <limits>
 #include <sstream>
 #include <unordered_set>
@@ -80,6 +82,30 @@ bool ValidateCrossReferences(
             *error = "assetbin texture blob count does not match texbin texture count";
         }
         return false;
+    }
+
+    for (const RuntimeAssets::FontAtlasRecord& fontAtlas : assetBin.fontAtlases)
+    {
+        if (fontAtlas.textureIndex >= texBin.textures.size())
+        {
+            if (error != nullptr)
+            {
+                *error = "assetbin font atlas texture index points past texbin.textureCount";
+            }
+            return false;
+        }
+
+        const RuntimeAssets::TextureRecord& texture = texBin.textures[fontAtlas.textureIndex];
+        if (texture.dimension != static_cast<std::uint32_t>(RuntimeAssets::TextureDimension::Texture2D) ||
+            texture.format != static_cast<std::uint32_t>(RuntimeAssets::TextureFormat::RGBA8_UNORM) ||
+            texture.mipCount != 1u)
+        {
+            if (error != nullptr)
+            {
+                *error = "font atlas texture metadata mismatch";
+            }
+            return false;
+        }
     }
 
     for (const RuntimeAssets::MeshRefRecord& meshRef : assetBin.meshRefs)
@@ -211,6 +237,8 @@ bool ValidateCrossReferences(
 
 bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary* outSummary, std::string* error)
 {
+    std::cout << "[converter] Begin pack '" << config.packName << "'\n";
+
     ImportedPack pack;
     std::size_t fbxFileCount = 0;
     TextureImportOptions textureOptions{};
@@ -228,14 +256,30 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
             .compressPbrToBc = true,
         };
         break;
+    case ConverterConfig::PackKind::Font:
+        break;
     case ConverterConfig::PackKind::PineTree:
         textureOptions = TextureImportOptions{ .allowTga = true, .allowPng = false, .forceSrgb = false, .resizeSquare = 1024u };
         break;
     }
 
-    if (!ImportTextureFolder(config.textureRoot, textureOptions, &pack, error))
+    if (config.packKind == ConverterConfig::PackKind::Font)
+    {
+        std::cout << "[converter] Generating font MSDF atlas\n";
+        if (!GenerateFontMsdfAtlas(config, &pack, error))
+        {
+            return false;
+        }
+        std::cout << "[converter] Font atlas generated: " << pack.textures.size()
+                  << " texture(s), " << pack.fontAtlases.size() << " atlas record(s)\n";
+    }
+    else if (!ImportTextureFolder(config.textureRoot, textureOptions, &pack, error))
     {
         return false;
+    }
+    else
+    {
+        std::cout << "[converter] Imported textures: " << pack.textures.size() << '\n';
     }
     if (config.packKind == ConverterConfig::PackKind::PineTree &&
         !ImportFbxFolder(config.fbxRoot, &pack, &fbxFileCount, error))
@@ -244,11 +288,20 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     }
     if (config.packKind == ConverterConfig::PackKind::PineTree)
     {
+        std::cout << "[converter] Imported FBX files: " << fbxFileCount
+                  << ", meshes: " << pack.meshes.size()
+                  << ", assets: " << pack.assets.size() << '\n';
+    }
+    if (config.packKind == ConverterConfig::PackKind::PineTree)
+    {
+        std::cout << "[converter] Rebuilding material layout\n";
         RebuildMaterialLayout(&pack);
+        std::cout << "[converter] Generating pine imposters\n";
         if (!GeneratePineImposters(&pack, error))
         {
             return false;
         }
+        std::cout << "[converter] Pine imposters generated; total textures: " << pack.textures.size() << '\n';
     }
 
     std::filesystem::create_directories(config.outputRoot);
@@ -261,13 +314,25 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     std::uint64_t assetBinSize = 0;
     std::vector<RuntimeAssets::MeshBlobRecord> meshBlobs;
     std::vector<RuntimeAssets::TextureBlobRecord> textureBlobs;
-    if (config.packKind == ConverterConfig::PackKind::PineTree &&
-        !WriteMeshBin(pack, meshBinPath, &meshBlobs, &meshBinSize, error))
+    if (config.packKind == ConverterConfig::PackKind::PineTree)
+    {
+        std::cout << "[converter] Writing meshbin: " << meshBinPath.string() << '\n';
+        if (!WriteMeshBin(pack, meshBinPath, &meshBlobs, &meshBinSize, error))
+        {
+            return false;
+        }
+        std::cout << "[converter] Meshbin bytes: " << meshBinSize << '\n';
+    }
+
+    std::cout << "[converter] Writing texbin: " << texBinPath.string() << '\n';
+    if (!WriteTexBin(pack, texBinPath, &textureBlobs, &texBinSize, error))
     {
         return false;
     }
-    if (!WriteTexBin(pack, texBinPath, &textureBlobs, &texBinSize, error) ||
-        !WriteAssetBin(
+    std::cout << "[converter] Texbin bytes: " << texBinSize << '\n';
+
+    std::cout << "[converter] Writing assetbin: " << assetBinPath.string() << '\n';
+    if (!WriteAssetBin(
             pack,
             meshBlobs,
             textureBlobs,
@@ -279,10 +344,12 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     {
         return false;
     }
+    std::cout << "[converter] Assetbin bytes: " << assetBinSize << '\n';
 
     RuntimeAssets::LoadedMeshBinView loadedMesh;
     RuntimeAssets::LoadedTexBinView loadedTex;
     RuntimeAssets::LoadedAssetBinView loadedAsset;
+    std::cout << "[converter] Validating generated runtime bins\n";
     if (!RuntimeAssets::LoadAssetBinFromSDL(assetBinPath.string().c_str(), &loadedAsset, error))
     {
         return false;
@@ -306,6 +373,8 @@ bool PineTreePackConverter::run(const ConverterConfig& config, ConversionSummary
     {
         return false;
     }
+
+    std::cout << "[converter] Validation complete\n";
 
     if (outSummary != nullptr)
     {

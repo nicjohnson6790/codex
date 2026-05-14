@@ -8,7 +8,7 @@
 namespace RuntimeAssets
 {
 
-constexpr std::uint32_t kFormatVersion = 3;
+constexpr std::uint32_t kFormatVersion = 4;
 constexpr std::uint32_t kLittleEndianFlag = 1u << 0;
 
 constexpr std::uint32_t MakeMagic(char a, char b, char c, char d)
@@ -258,6 +258,34 @@ struct TextureBlobRecord
 };
 static_assert(sizeof(TextureBlobRecord) == 32);
 
+struct FontAtlasRecord
+{
+    std::uint32_t nameOffset = 0;
+    std::uint32_t textureIndex = 0;
+    std::uint32_t firstGlyph = 0;
+    std::uint32_t glyphCount = 0;
+    std::uint32_t firstCodepoint = 0;
+    std::uint32_t lastCodepoint = 0;
+    float pixelSize = 0.0f;
+    float distanceRange = 0.0f;
+};
+static_assert(sizeof(FontAtlasRecord) == 32);
+
+struct FontGlyphRecord
+{
+    std::uint32_t codepoint = 0;
+    std::uint32_t atlasX = 0;
+    std::uint32_t atlasY = 0;
+    std::uint32_t atlasWidth = 0;
+    std::uint32_t atlasHeight = 0;
+    float planeLeft = 0.0f;
+    float planeBottom = 0.0f;
+    float planeRight = 0.0f;
+    float planeTop = 0.0f;
+    float advance = 0.0f;
+};
+static_assert(sizeof(FontGlyphRecord) == 40);
+
 struct AssetBinHeader
 {
     std::uint32_t magic = 0;
@@ -270,17 +298,20 @@ struct AssetBinHeader
     std::uint32_t meshRefCount = 0;
     std::uint32_t meshBlobCount = 0;
     std::uint32_t textureBlobCount = 0;
-    std::uint32_t reserved = 0;
+    std::uint32_t fontAtlasCount = 0;
+    std::uint32_t fontGlyphCount = 0;
     std::uint64_t assetRecordOffset = 0;
     std::uint64_t materialRecordOffset = 0;
     std::uint64_t meshRefRecordOffset = 0;
     std::uint64_t meshBlobRecordOffset = 0;
     std::uint64_t textureBlobRecordOffset = 0;
+    std::uint64_t fontAtlasRecordOffset = 0;
+    std::uint64_t fontGlyphRecordOffset = 0;
     std::uint64_t stringTableOffset = 0;
     std::uint64_t stringTableSize = 0;
     std::uint64_t fileSize = 0;
 };
-static_assert(sizeof(AssetBinHeader) == 112);
+static_assert(sizeof(AssetBinHeader) == 128);
 
 struct AssetRecord
 {

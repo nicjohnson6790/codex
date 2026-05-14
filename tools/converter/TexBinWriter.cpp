@@ -5,6 +5,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -135,6 +136,9 @@ bool WriteTexBin(
 
     for (std::size_t index = 0; index < pack.textures.size(); ++index)
     {
+        std::cout << "[texbin] [" << (index + 1u) << '/' << pack.textures.size()
+                  << "] LZ4-compressing " << pack.textures[index].name
+                  << " (" << pack.textures[index].payload.size() << " byte payload)\n";
         std::vector<std::byte> compressedPixels;
         if (!RuntimeAssets::CompressBytes(
                 RuntimeAssets::CompressionType::Lz4,

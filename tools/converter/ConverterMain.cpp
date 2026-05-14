@@ -38,6 +38,15 @@ void ApplyPackDefaults(std::string_view packName, ConverterConfig* outConfig)
         return;
     }
 
+    if (packName == "roboto")
+    {
+        outConfig->packKind = ConverterConfig::PackKind::Font;
+        outConfig->sourceRoot = repoRoot() / "assets" / "source" / "font";
+        outConfig->fbxRoot.clear();
+        outConfig->textureRoot.clear();
+        return;
+    }
+
     outConfig->packKind = ConverterConfig::PackKind::PineTree;
     outConfig->sourceRoot = repoRoot() / "assets" / "source" / outConfig->packName;
     outConfig->fbxRoot = outConfig->sourceRoot / "fbx";
@@ -51,6 +60,7 @@ void PrintUsage()
         << "  converter.exe pinetreepack\n"
         << "  converter.exe skybox\n"
         << "  converter.exe pbr\n"
+        << "  converter.exe roboto\n"
         << "  converter.exe --source <path> --out <path> --name <pack>\n";
 }
 
@@ -113,6 +123,8 @@ bool ParseArguments(int argc, char** argv, ConverterConfig* outConfig, std::stri
 
 int main(int argc, char** argv)
 {
+    std::cout << std::unitbuf;
+
     if (!SDL_Init(0))
     {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << '\n';
@@ -133,6 +145,7 @@ int main(int argc, char** argv)
 
     PineTreePackConverter converter;
     ConversionSummary summary;
+    std::cout << "Converting pack: " << config.packName << '\n';
     if (!converter.run(config, &summary, &error))
     {
         std::cerr << "Conversion failed: " << error << '\n';

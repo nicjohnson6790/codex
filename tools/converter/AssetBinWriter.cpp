@@ -86,6 +86,8 @@ bool WriteAssetBin(
     std::vector<RuntimeAssets::AssetRecord> assetRecords;
     std::vector<RuntimeAssets::MaterialRecord> materialRecords;
     std::vector<RuntimeAssets::MeshRefRecord> meshRefs;
+    std::vector<RuntimeAssets::FontAtlasRecord> fontAtlasRecords;
+    std::vector<RuntimeAssets::FontGlyphRecord> fontGlyphRecords;
     std::string stringTable;
 
     if (meshBlobs.size() != pack.meshes.size())
@@ -102,6 +104,7 @@ bool WriteAssetBin(
     assetRecords.reserve(pack.assets.size());
     materialRecords.reserve(pack.materials.size());
     meshRefs.reserve(pack.meshes.size());
+    fontAtlasRecords.reserve(pack.fontAtlases.size());
 
     for (const ImportedMaterial& material : pack.materials)
     {
@@ -136,6 +139,16 @@ bool WriteAssetBin(
         assetRecords.push_back(record);
     }
 
+    for (const ImportedFontAtlas& fontAtlas : pack.fontAtlases)
+    {
+        RuntimeAssets::FontAtlasRecord record = fontAtlas.record;
+        record.nameOffset = AppendString(fontAtlas.name, &stringTable);
+        record.firstGlyph = static_cast<std::uint32_t>(fontGlyphRecords.size());
+        record.glyphCount = static_cast<std::uint32_t>(fontAtlas.glyphs.size());
+        fontAtlasRecords.push_back(record);
+        fontGlyphRecords.insert(fontGlyphRecords.end(), fontAtlas.glyphs.begin(), fontAtlas.glyphs.end());
+    }
+
     RuntimeAssets::AssetBinHeader header{};
     header.magic = RuntimeAssets::kAssetBinMagic;
     header.version = RuntimeAssets::kFormatVersion;
@@ -145,6 +158,8 @@ bool WriteAssetBin(
     header.meshRefCount = static_cast<std::uint32_t>(meshRefs.size());
     header.meshBlobCount = static_cast<std::uint32_t>(meshBlobs.size());
     header.textureBlobCount = static_cast<std::uint32_t>(textureBlobs.size());
+    header.fontAtlasCount = static_cast<std::uint32_t>(fontAtlasRecords.size());
+    header.fontGlyphCount = static_cast<std::uint32_t>(fontGlyphRecords.size());
     header.meshBinPathOffset = AppendString(meshBinFileName, &stringTable);
     header.texBinPathOffset = AppendString(texBinFileName, &stringTable);
 
@@ -165,6 +180,12 @@ bool WriteAssetBin(
     writer.align(8);
     header.textureBlobRecordOffset = writer.bytes.size();
     writer.appendSpan(textureBlobs);
+    writer.align(8);
+    header.fontAtlasRecordOffset = writer.bytes.size();
+    writer.appendSpan(std::span<const RuntimeAssets::FontAtlasRecord>(fontAtlasRecords));
+    writer.align(8);
+    header.fontGlyphRecordOffset = writer.bytes.size();
+    writer.appendSpan(std::span<const RuntimeAssets::FontGlyphRecord>(fontGlyphRecords));
     writer.align(8);
     header.stringTableOffset = writer.bytes.size();
     header.stringTableSize = stringTable.size();

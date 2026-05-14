@@ -33,6 +33,8 @@ if errorlevel 1 exit /b %errorlevel%
 "%BUILD_DIR%\converter.exe" pinetreepack
 if errorlevel 1 exit /b %errorlevel%
 "%BUILD_DIR%\converter.exe" pbr
+if errorlevel 1 exit /b %errorlevel%
+"%BUILD_DIR%\converter.exe" roboto
 exit /b %errorlevel%
 
 :setup_vs_tools

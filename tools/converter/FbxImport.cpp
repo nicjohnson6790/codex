@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cmath>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <optional>
 #include <regex>
@@ -460,8 +461,17 @@ bool ImportFbxFolder(
     std::sort(fbxFiles.begin(), fbxFiles.end());
     *outFbxFileCount = fbxFiles.size();
 
-    for (const std::filesystem::path& fbxPath : fbxFiles)
+    std::cout << "[fbx] Found " << fbxFiles.size() << " FBX file(s) in "
+              << fbxRoot.string() << '\n';
+
+    for (std::size_t fbxFileIndex = 0; fbxFileIndex < fbxFiles.size(); ++fbxFileIndex)
     {
+        const std::filesystem::path& fbxPath = fbxFiles[fbxFileIndex];
+        const std::size_t meshCountBefore = outPack->meshes.size();
+        const std::size_t materialCountBefore = outPack->materials.size();
+        std::cout << "[fbx] [" << (fbxFileIndex + 1u) << '/' << fbxFiles.size()
+                  << "] Importing " << fbxPath.filename().string() << '\n';
+
         Assimp::Importer importer;
         importer.SetPropertyBool(AI_CONFIG_FBX_CONVERT_TO_M, true);
         importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
@@ -656,6 +666,9 @@ bool ImportFbxFolder(
         asset.materialIndices.assign(materialSet.begin(), materialSet.end());
         std::sort(asset.materialIndices.begin(), asset.materialIndices.end());
         outPack->assets.push_back(std::move(asset));
+        std::cout << "[fbx]     Added " << (outPack->meshes.size() - meshCountBefore)
+                  << " mesh(es), " << (outPack->materials.size() - materialCountBefore)
+                  << " material(s)\n";
     }
 
     return true;

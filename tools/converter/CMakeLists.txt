@@ -42,6 +42,11 @@ FetchContent_Declare(
     URL https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip
 )
 
+FetchContent_Declare(
+    freetype
+    URL https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz
+)
+
 if (CONVERTER_ENABLE_DIRECTXTEX)
     FetchContent_Declare(
         DirectXTex
@@ -80,6 +85,11 @@ set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
+set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BZIP2 ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_PNG ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
@@ -88,7 +98,7 @@ set(BUILD_DX12 OFF CACHE BOOL "" FORCE)
 set(BUILD_XBOX_EXTS OFF CACHE BOOL "" FORCE)
 set(ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(SDL3 SDL3_image assimp lz4)
+FetchContent_MakeAvailable(SDL3 SDL3_image assimp lz4 freetype)
 if (CONVERTER_ENABLE_DIRECTXTEX)
     FetchContent_MakeAvailable(DirectXTex)
 endif()
@@ -165,6 +175,7 @@ target_link_libraries(runtime_asset_reader
 add_executable(converter
     ConverterMain.cpp
     BcTextureCompression.cpp
+    FontMsdfConverter.cpp
     PineTreePackConverter.cpp
     PineImposterGenerator.cpp
     FbxImport.cpp
@@ -204,6 +215,7 @@ target_link_libraries(converter
         runtime_asset_reader
         SDL3::SDL3
         SDL3_image::SDL3_image
+        freetype
         ${ASSIMP_TARGET}
 )
 
