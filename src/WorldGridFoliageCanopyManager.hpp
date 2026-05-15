@@ -20,12 +20,26 @@ public:
     void setWaterLevel(float waterLevel);
     void clearCache();
 
-    [[nodiscard]] bool makeResident(
+    [[nodiscard]] std::uint16_t makeResident(
         const WorldGridQuadtreeLeafId& leafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex);
     void scheduleQueuedGenerations(FoliageCanopyRenderer& renderer);
 
+    [[nodiscard]] bool buildReadyCellInfo(
+        const WorldGridQuadtreeLeafId& leafId,
+        std::uint16_t residentIndex,
+        FoliageCanopyReadyCellInfo& cellInfo) const;
+    void emitCanopyDraw(
+        const WorldGridQuadtreeLeafId& nodeId,
+        std::uint16_t terrainSliceIndex,
+        const WorldGridQuadtreeLeafId* cellIds,
+        const std::array<std::uint16_t, FoliageConfig::kCanopyCellCountPerNode>& residentIndices,
+        std::uint32_t cellCount,
+        std::uint32_t readyCellCount,
+        std::uint8_t drawAgeFrames,
+        const std::array<std::uint8_t, 4>& edgeFadeStrengths,
+        FoliageCanopyRenderer& renderer) const;
     [[nodiscard]] bool getReadyCellInfo(
         const WorldGridQuadtreeLeafId& leafId,
         FoliageCanopyReadyCellInfo& cellInfo) const;

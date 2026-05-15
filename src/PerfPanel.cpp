@@ -10,6 +10,7 @@
 #include <cstring>
 #include <deque>
 #include <numeric>
+#include <string>
 #include <vector>
 
 namespace
@@ -27,6 +28,20 @@ struct FlameGraphEntry
     int depth = 0;
 };
 
+struct ChildScopeSummary
+{
+    const char* name = nullptr;
+    std::uint32_t callCount = 0;
+    std::uint64_t cycles = 0;
+};
+
+struct ScopeBreakdown
+{
+    std::vector<ChildScopeSummary> children;
+    std::uint32_t callCount = 0;
+    std::uint64_t cycles = 0;
+};
+
 struct CycleRange
 {
     std::uint64_t start = 0;
@@ -41,6 +56,195 @@ bool isCollapsedWaitScope(const CapturedScope& scope)
 bool isImguiRelatedCompactScope(const CapturedScope& scope)
 {
     return (scope.groups & ProfileScopeGroup::ImGui) != ProfileScopeGroup::None;
+}
+
+const char* scopeDisplayName(const CapturedScope& scope)
+{
+    return scope.name != nullptr ? scope.name : "(unnamed)";
+}
+
+bool scopeNamesMatch(const char* left, const char* right)
+{
+    return std::strcmp(left != nullptr ? left : "(unnamed)", right != nullptr ? right : "(unnamed)") == 0;
+}
+
+void addChildScopeSummary(std::vector<ChildScopeSummary>& summaries, const CapturedScope& scope)
+{
+    const char* name = scopeDisplayName(scope);
+    for (ChildScopeSummary& summary : summaries)
+    {
+        if (scopeNamesMatch(summary.name, name))
+        {
+            ++summary.callCount;
+            summary.cycles += scope.stop - scope.start;
+            return;
+        }
+    }
+
+    summaries.push_back({
+        .name = name,
+        .callCount = 1,
+        .cycles = scope.stop - scope.start,
+    });
+}
+
+std::size_t findScopeIndexForRange(
+    const std::vector<CapturedScope>& scopes,
+    const CapturedFrame& frame,
+    std::uint64_t start,
+    std::uint64_t stop,
+    const char* name)
+{
+    for (std::size_t scopeIndex = frame.scopeBeginIndex; scopeIndex < frame.scopeEndIndex; ++scopeIndex)
+    {
+        const CapturedScope& scope = scopes[scopeIndex];
+        if (scope.start == start && scope.stop == stop && scopeNamesMatch(scope.name, name))
+        {
+            return scopeIndex;
+        }
+    }
+
+    return static_cast<std::size_t>(-1);
+}
+
+std::size_t findLargestScopeIndexByName(
+    const std::vector<CapturedScope>& scopes,
+    const CapturedFrame& frame,
+    const char* name)
+{
+    std::size_t bestScopeIndex = static_cast<std::size_t>(-1);
+    std::uint64_t bestCycles = 0;
+    for (std::size_t scopeIndex = frame.scopeBeginIndex; scopeIndex < frame.scopeEndIndex; ++scopeIndex)
+    {
+        const CapturedScope& scope = scopes[scopeIndex];
+        if (scope.stop <= scope.start || !scopeNamesMatch(scope.name, name))
+        {
+            continue;
+        }
+
+        const std::uint64_t cycles = scope.stop - scope.start;
+        if (bestScopeIndex == static_cast<std::size_t>(-1) || cycles > bestCycles)
+        {
+            bestScopeIndex = scopeIndex;
+            bestCycles = cycles;
+        }
+    }
+
+    return bestScopeIndex;
+}
+
+std::vector<std::size_t> buildImmediateParentIndices(
+    const std::vector<CapturedScope>& scopes,
+    const CapturedFrame& frame)
+{
+    const std::size_t invalidIndex = static_cast<std::size_t>(-1);
+    std::vector<std::size_t> immediateParents(frame.scopeEndIndex - frame.scopeBeginIndex, invalidIndex);
+
+    std::vector<std::size_t> stack;
+    stack.reserve(frame.scopeEndIndex - frame.scopeBeginIndex);
+    for (std::size_t scopeIndex = frame.scopeBeginIndex; scopeIndex < frame.scopeEndIndex; ++scopeIndex)
+    {
+        const CapturedScope& scope = scopes[scopeIndex];
+        if (scope.stop <= scope.start)
+        {
+            continue;
+        }
+
+        while (!stack.empty() && scope.start >= scopes[stack.back()].stop)
+        {
+            stack.pop_back();
+        }
+
+        immediateParents[scopeIndex - frame.scopeBeginIndex] = stack.empty() ? invalidIndex : stack.back();
+        stack.push_back(scopeIndex);
+    }
+
+    return immediateParents;
+}
+
+bool containsScopeIndex(const std::vector<std::size_t>& scopeIndices, std::size_t scopeIndex)
+{
+    return std::find(scopeIndices.begin(), scopeIndices.end(), scopeIndex) != scopeIndices.end();
+}
+
+void sortChildScopeSummaries(std::vector<ChildScopeSummary>& summaries)
+{
+    std::sort(summaries.begin(), summaries.end(), [](const ChildScopeSummary& left, const ChildScopeSummary& right) {
+        return left.cycles > right.cycles;
+    });
+}
+
+ScopeBreakdown buildScopeBreakdown(
+    const std::vector<CapturedScope>& scopes,
+    const CapturedFrame& frame,
+    std::size_t rootScopeIndex,
+    std::uint64_t rootCycles,
+    const std::vector<std::string>& path)
+{
+    const std::size_t invalidIndex = static_cast<std::size_t>(-1);
+    const std::vector<std::size_t> immediateParents = buildImmediateParentIndices(scopes, frame);
+    std::vector<std::size_t> parentScopeIndices{ rootScopeIndex };
+
+    for (const std::string& pathElement : path)
+    {
+        std::vector<std::size_t> nextParentScopeIndices;
+        for (std::size_t scopeIndex = frame.scopeBeginIndex; scopeIndex < frame.scopeEndIndex; ++scopeIndex)
+        {
+            const CapturedScope& scope = scopes[scopeIndex];
+            if (scope.stop <= scope.start)
+            {
+                continue;
+            }
+
+            const std::size_t parentIndex = immediateParents[scopeIndex - frame.scopeBeginIndex];
+            if (containsScopeIndex(parentScopeIndices, parentIndex) && scopeNamesMatch(scope.name, pathElement.c_str()))
+            {
+                nextParentScopeIndices.push_back(scopeIndex);
+            }
+        }
+
+        parentScopeIndices = std::move(nextParentScopeIndices);
+        if (parentScopeIndices.empty())
+        {
+            break;
+        }
+    }
+
+    ScopeBreakdown breakdown{};
+    breakdown.callCount = static_cast<std::uint32_t>(parentScopeIndices.size());
+    if (path.empty() && rootScopeIndex == invalidIndex)
+    {
+        breakdown.callCount = 1;
+        breakdown.cycles = rootCycles;
+    }
+    else
+    {
+        for (std::size_t scopeIndex : parentScopeIndices)
+        {
+            if (scopeIndex != invalidIndex)
+            {
+                breakdown.cycles += scopes[scopeIndex].stop - scopes[scopeIndex].start;
+            }
+        }
+    }
+
+    for (std::size_t scopeIndex = frame.scopeBeginIndex; scopeIndex < frame.scopeEndIndex; ++scopeIndex)
+    {
+        const CapturedScope& scope = scopes[scopeIndex];
+        if (scope.stop <= scope.start)
+        {
+            continue;
+        }
+
+        const std::size_t parentIndex = immediateParents[scopeIndex - frame.scopeBeginIndex];
+        if (containsScopeIndex(parentScopeIndices, parentIndex))
+        {
+            addChildScopeSummary(breakdown.children, scope);
+        }
+    }
+
+    sortChildScopeSummaries(breakdown.children);
+    return breakdown;
 }
 
 std::vector<CycleRange> mergeRanges(std::vector<CycleRange> ranges)
@@ -175,7 +379,9 @@ void PerfPanel::draw(bool& viewportPaused)
         return;
     }
 
-    m_selectedFrame = std::min(m_selectedFrame, frames.size() - 1);
+    m_selectedFrame = viewportPaused
+        ? std::min(m_selectedFrame, frames.size() - 1)
+        : performanceCapture.latestFrameIndex();
 
     std::vector<float> frameSamples;
     std::vector<float> cpuSamples;
@@ -245,7 +451,9 @@ void PerfPanel::draw(bool& viewportPaused)
         if (!viewportPaused)
         {
             m_flameGraphZoomActive = false;
+            m_flameGraphFollowLive = false;
             m_flameGraphZoomLabel.clear();
+            m_childScopePath.clear();
         }
     }
     ImGui::SameLine();
@@ -325,7 +533,9 @@ void PerfPanel::draw(bool& viewportPaused)
         performanceCapture.setPaused(true);
         m_selectedFrame = clickedIndex;
         m_flameGraphZoomActive = false;
+        m_flameGraphFollowLive = false;
         m_flameGraphZoomLabel.clear();
+        m_childScopePath.clear();
     }
 
     ImGui::Spacing();
@@ -337,7 +547,22 @@ void PerfPanel::draw(bool& viewportPaused)
     ImGui::SameLine(0.0f, 6.0f);
     ImGui::TextUnformatted("Frame time");
 
+    const std::vector<CapturedScope>& scopes = performanceCapture.scopes();
     const CapturedFrame& selectedFrame = frames[m_selectedFrame];
+    if (!viewportPaused && m_flameGraphZoomActive && m_flameGraphFollowLive)
+    {
+        const std::size_t followedScopeIndex = findLargestScopeIndexByName(
+            scopes,
+            selectedFrame,
+            m_flameGraphZoomLabel.c_str());
+        if (followedScopeIndex != static_cast<std::size_t>(-1))
+        {
+            const CapturedScope& followedScope = scopes[followedScopeIndex];
+            m_flameGraphZoomFrame = m_selectedFrame;
+            m_flameGraphZoomStart = followedScope.start;
+            m_flameGraphZoomStop = followedScope.stop;
+        }
+    }
     const std::uint64_t selectedCpuCycles = performanceCapture.cpuCycles(selectedFrame);
     const float selectedFrameMs = performanceCapture.cyclesToMilliseconds(performanceCapture.frameCycles(selectedFrame));
     const float selectedCpuMs = performanceCapture.cyclesToMilliseconds(selectedCpuCycles);
@@ -362,7 +587,9 @@ void PerfPanel::draw(bool& viewportPaused)
         if (ImGui::Button("Reset Zoom"))
         {
             m_flameGraphZoomActive = false;
+            m_flameGraphFollowLive = false;
             m_flameGraphZoomLabel.clear();
+            m_childScopePath.clear();
         }
     }
     else
@@ -370,7 +597,6 @@ void PerfPanel::draw(bool& viewportPaused)
         ImGui::TextUnformatted("Zoom: frame");
     }
 
-    const std::vector<CapturedScope>& scopes = performanceCapture.scopes();
     std::vector<FlameGraphEntry> flameEntries;
     flameEntries.reserve(selectedFrame.scopeEndIndex - selectedFrame.scopeBeginIndex);
     std::vector<CycleRange> collapsedRanges;
@@ -522,17 +748,176 @@ void PerfPanel::draw(bool& viewportPaused)
     {
         const CapturedScope& clickedScope = scopes[clickedScopeIndex];
         m_flameGraphZoomActive = true;
+        m_flameGraphFollowLive = !viewportPaused;
         m_flameGraphZoomFrame = m_selectedFrame;
         m_flameGraphZoomStart = clickedScope.start;
         m_flameGraphZoomStop = clickedScope.stop;
-        m_flameGraphZoomLabel = clickedScope.name != nullptr ? clickedScope.name : "(unnamed)";
+        m_flameGraphZoomLabel = scopeDisplayName(clickedScope);
+        m_childScopePath.clear();
     }
 
     if (hoveredScope != nullptr)
     {
         ImGui::BeginTooltip();
-        ImGui::TextUnformatted(hoveredScope->name != nullptr ? hoveredScope->name : "(unnamed)");
+        ImGui::TextUnformatted(scopeDisplayName(*hoveredScope));
         ImGui::Text("%.3f ms", performanceCapture.cyclesToMilliseconds(hoveredScope->stop - hoveredScope->start));
         ImGui::EndTooltip();
+    }
+
+    std::size_t selectedScopeIndex = static_cast<std::size_t>(-1);
+    if (zoomAppliesToSelectedFrame)
+    {
+        selectedScopeIndex = findScopeIndexForRange(
+            scopes,
+            selectedFrame,
+            m_flameGraphZoomStart,
+            m_flameGraphZoomStop,
+            m_flameGraphZoomLabel.c_str());
+    }
+
+    const char* selectedScopeName = selectedScopeIndex != static_cast<std::size_t>(-1)
+        ? scopeDisplayName(scopes[selectedScopeIndex])
+        : "Frame";
+    const std::uint64_t selectedScopeCycles = selectedScopeIndex != static_cast<std::size_t>(-1)
+        ? (scopes[selectedScopeIndex].stop - scopes[selectedScopeIndex].start)
+        : selectedCpuCycles;
+    const std::uint64_t rootStart = selectedScopeIndex != static_cast<std::size_t>(-1)
+        ? scopes[selectedScopeIndex].start
+        : selectedFrame.start;
+    const std::uint64_t rootStop = selectedScopeIndex != static_cast<std::size_t>(-1)
+        ? scopes[selectedScopeIndex].stop
+        : selectedFrame.stop;
+    const bool followingLiveZoom = !viewportPaused && m_flameGraphZoomActive && m_flameGraphFollowLive;
+    const bool childRootChanged =
+        m_childScopeRootLabel != selectedScopeName ||
+        (!followingLiveZoom && (
+            m_childScopeRootFrame != m_selectedFrame ||
+            m_childScopeRootStart != rootStart ||
+            m_childScopeRootStop != rootStop));
+    if (childRootChanged)
+    {
+        m_childScopeRootFrame = m_selectedFrame;
+        m_childScopeRootStart = rootStart;
+        m_childScopeRootStop = rootStop;
+        m_childScopeRootLabel = selectedScopeName;
+        m_childScopePath.clear();
+    }
+
+    const ScopeBreakdown scopeBreakdown = buildScopeBreakdown(
+        scopes,
+        selectedFrame,
+        selectedScopeIndex,
+        selectedScopeCycles,
+        m_childScopePath);
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Direct Child Scope Time");
+    ImGui::Text("%s", selectedScopeName);
+    for (const std::string& pathElement : m_childScopePath)
+    {
+        ImGui::SameLine();
+        ImGui::TextUnformatted(">");
+        ImGui::SameLine();
+        ImGui::TextUnformatted(pathElement.c_str());
+    }
+    if (!m_childScopePath.empty())
+    {
+        ImGui::SameLine();
+        if (ImGui::Button("Up"))
+        {
+            m_childScopePath.pop_back();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reset"))
+        {
+            m_childScopePath.clear();
+        }
+    }
+    ImGui::Text("%.3f ms, %llu cycles",
+        performanceCapture.cyclesToMilliseconds(scopeBreakdown.cycles),
+        static_cast<unsigned long long>(scopeBreakdown.cycles));
+    if (!m_childScopePath.empty())
+    {
+        ImGui::SameLine();
+        ImGui::Text("(%u calls)", scopeBreakdown.callCount);
+    }
+
+    if (scopeBreakdown.children.empty())
+    {
+        ImGui::TextUnformatted("No direct child scopes captured for this selection.");
+        return;
+    }
+
+    if (ImGui::Button("Copy Table"))
+    {
+        std::string clipboardText;
+        clipboardText += "Scope\tCalls\tTimeMs\tCycles\tPercent\n";
+        for (const ChildScopeSummary& summary : scopeBreakdown.children)
+        {
+            const float childMs = performanceCapture.cyclesToMilliseconds(summary.cycles);
+            const float childPercent = percentageOrZero(
+                static_cast<float>(summary.cycles),
+                static_cast<float>(scopeBreakdown.cycles));
+            clipboardText += summary.name;
+            clipboardText += '\t';
+            clipboardText += std::to_string(summary.callCount);
+            clipboardText += '\t';
+            clipboardText += std::to_string(childMs);
+            clipboardText += '\t';
+            clipboardText += std::to_string(summary.cycles);
+            clipboardText += '\t';
+            clipboardText += std::to_string(childPercent);
+            clipboardText += '\n';
+        }
+        ImGui::SetClipboardText(clipboardText.c_str());
+    }
+
+    if (ImGui::BeginTable(
+        "##DirectChildScopeTime",
+        5,
+        ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_Resizable |
+            ImGuiTableFlags_SizingStretchProp))
+    {
+        ImGui::TableSetupColumn("Scope");
+        ImGui::TableSetupColumn("Calls", ImGuiTableColumnFlags_WidthFixed, 54.0f);
+        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 82.0f);
+        ImGui::TableSetupColumn("Cycles", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("%", ImGuiTableColumnFlags_WidthFixed, 54.0f);
+        ImGui::TableHeadersRow();
+
+        std::string clickedChildScopeName;
+        for (const ChildScopeSummary& summary : scopeBreakdown.children)
+        {
+            const float childMs = performanceCapture.cyclesToMilliseconds(summary.cycles);
+            const float childPercent = percentageOrZero(
+                static_cast<float>(summary.cycles),
+                static_cast<float>(scopeBreakdown.cycles));
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(summary.name);
+            if (ImGui::Selectable(summary.name, false, ImGuiSelectableFlags_SpanAllColumns))
+            {
+                clickedChildScopeName = summary.name;
+            }
+            ImGui::PopID();
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", summary.callCount);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f ms", childMs);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%llu", static_cast<unsigned long long>(summary.cycles));
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.1f%%", childPercent);
+        }
+
+        ImGui::EndTable();
+
+        if (!clickedChildScopeName.empty())
+        {
+            m_childScopePath.push_back(clickedChildScopeName);
+        }
     }
 }

@@ -87,11 +87,12 @@ public:
     void clear();
     void collectCompletedDecodedPages();
 
-    [[nodiscard]] bool makeResident(
+    [[nodiscard]] std::uint16_t makeResident(
         const WorldGridQuadtreeLeafId& pageKey,
         const FoliageReadyPageInfo& sourcePageInfo);
     void addNearbyInstancesForPage(
         const WorldGridQuadtreeLeafId& pageKey,
+        std::uint16_t decodedPageIndex,
         std::uint16_t terrainSliceIndex,
         const Position& nearCenter,
         float nearRadiusMeters);

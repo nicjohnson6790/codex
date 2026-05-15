@@ -9,6 +9,7 @@
 #include <vector>
 
 class QuadtreeMeshRenderer;
+class FoliageImposterRenderer;
 
 class WorldGridFoliageManager
 {
@@ -22,7 +23,7 @@ public:
     void setWaterLevel(float waterLevel);
     void clearCache();
 
-    [[nodiscard]] bool makeResident(
+    [[nodiscard]] std::uint16_t makeResident(
         const WorldGridQuadtreeLeafId& leafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex);
@@ -30,6 +31,16 @@ public:
     void applyGeneratedPageLiveCounts(
         const std::vector<std::pair<WorldGridQuadtreeLeafId, std::uint16_t>>& generatedLiveCounts);
 
+    [[nodiscard]] bool buildReadyPageInfo(
+        const WorldGridQuadtreeLeafId& leafId,
+        std::uint16_t residentIndex,
+        FoliageReadyPageInfo& pageInfo) const;
+    [[nodiscard]] bool emitPageDraw(
+        const WorldGridQuadtreeLeafId& pageId,
+        std::uint16_t residentIndex,
+        const WorldGridQuadtreeLeafId& terrainLeafId,
+        std::uint16_t terrainSliceIndex,
+        FoliageImposterRenderer& foliageRenderer) const;
     [[nodiscard]] bool getReadyPageInfo(
         const WorldGridQuadtreeLeafId& leafId,
         FoliageReadyPageInfo& pageInfo) const;

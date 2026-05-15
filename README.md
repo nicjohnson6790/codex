@@ -17,9 +17,10 @@ This branch does not include the authored pine tree source assets needed to rebu
 - Mid-distance foliage imposter path that renders BC-compressed pine imposter texture arrays with runtime lighting and an alpha-tested depth prepass
 - Far-canopy path that renders deterministic procedural coverage as 3 terrain-following shells, with 1024m fallback and 2048m state-driven fade
 - Shared-cascade FFT water with equal-LOD and `2:1` bridge meshes, shallow-water damping, crest foam, shoreline foam, and terrain-aware depth response
-- Free-flight and third-person follow cameras with position-preserving handoff and terrain-aware follow-camera clamping
+- Free-flight and third-person follow cameras with Steam Input, SDL gamepad fallback, and terrain-aware follow-camera clamping
 - Skybox and water shading driven by the same cubemap and atmosphere model
 - Offline asset converter that builds compressed runtime `meshbin`, `texbin`, and `assetbin` packs
+- ImGui performance panel with flame graph zooming, live scope following, and selected-scope child timing tables
 - Self-contained build outputs with shaders and runtime assets staged under `build/<Config>`
 
 ## Frame Flow
@@ -28,7 +29,7 @@ Each frame is split into a few predictable phases:
 
 - Collect completed terrain readbacks into the heightmap manager.
 - Update the quadtree structure and terrain residency. Parents stay leaves until children are resident; children stay active until a collapsing parent is resident.
-- Emit from a linear scan of the fixed node list. Terrain draws use resident heightmaps; foliage, canopy, nearby foliage, and water request their own residency as they emit.
+- Emit from a linear scan of the fixed node list. Visible nodes request draw residency after visibility; invisible would-draw nodes warm caches through a 16-frame round robin.
 - Schedule queued terrain, foliage, canopy, and nearby decode work.
 - Upload per-frame draw data, dispatch terrain generation, dispatch foliage generation, dispatch canopy generation, dispatch nearby decode work, and run the water simulation passes.
 - Render terrain, foliage, nearby foliage, canopy shells, water, skybox, debug overlays, and ImGui into the offscreen viewport.
@@ -39,7 +40,7 @@ The runtime is split into four main layers:
 
 - `SDLRenderer` owns the SDL GPU device, swapchain, render targets, and top-level frame submission order.
 - `App` owns lifecycle and frame sequencing, with windowing, input, UI, simulation, scene emission, and rendering kept as named phases.
-- `SteamService` owns optional Steamworks initialization, Steam Input fallback, callback pumping, status, and shutdown.
+- `SteamService` owns optional Steamworks initialization, Steam Input hotplug, SDL fallback handoff, callback pumping, status, and shutdown.
 - Renderer classes own concrete draw and compute paths such as terrain, foliage, nearby foliage, canopy, water, skybox, triangles, and debug lines.
 - Manager classes own residency, LRU replacement, and queued generation work for terrain slices, foliage pages, canopy cells, and water leaf selection.
 - `WorldGridQuadtree` owns the fixed-slot tree structure, LOD decisions, terrain residency update, and linear draw/cache emission.
@@ -217,6 +218,12 @@ Current PBR runtime asset details:
 - albedo maps are stored as `BC3` sRGB
 - normal maps are stored as `BC5`
 - roughness, AO, height, metallic, and similar scalar maps are stored as `BC3` UNORM
+
+Current font runtime asset details:
+
+- Roboto is converted from `assets/source/font`
+- glyphs are packed into an LZ4-compressed MSDF `texbin`
+- font metrics and glyph records are stored in `roboto.assetbin`
 
 ## Assets
 

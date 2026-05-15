@@ -1,5 +1,6 @@
 #include "WorldGridFoliageManager.hpp"
 
+#include "FoliageImposterRenderer.hpp"
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 
@@ -104,7 +105,7 @@ void WorldGridFoliageManager::clearCache()
     resetCacheState();
 }
 
-bool WorldGridFoliageManager::makeResident(
+std::uint16_t WorldGridFoliageManager::makeResident(
     const WorldGridQuadtreeLeafId& leafId,
     const WorldGridQuadtreeLeafId& terrainLeafId,
     std::uint16_t terrainSliceIndex)
@@ -120,15 +121,16 @@ bool WorldGridFoliageManager::makeResident(
         FoliageResidentPageEntry& entry = m_residentEntries[residentIndex];
         entry.age = 0;
         m_terrainSources[residentIndex] = terrainSource;
-        return
+        const bool ready =
             residentHasFlag(entry, ReadyMask) &&
             residentHasFlag(entry, MaskValidMask) &&
             !residentHasFlag(entry, MaskPendingMask) &&
             !residentHasFlag(entry, UploadPendingMask);
+        return ready ? residentIndex : kCapacity;
     }
 
     enqueueLeaf(leafId, terrainSource);
-    return false;
+    return kCapacity;
 }
 
 void WorldGridFoliageManager::scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer)
@@ -221,18 +223,19 @@ void WorldGridFoliageManager::applyGeneratedPageLiveCounts(
     }
 }
 
-bool WorldGridFoliageManager::getReadyPageInfo(
+bool WorldGridFoliageManager::buildReadyPageInfo(
     const WorldGridQuadtreeLeafId& leafId,
+    std::uint16_t residentIndex,
     FoliageReadyPageInfo& pageInfo) const
 {
-    const std::uint16_t residentIndex = findResidentIndex(leafId);
-    if (residentIndex == kCapacity)
+    if (residentIndex >= kCapacity || !m_residentUsed[residentIndex])
     {
         return false;
     }
 
     const FoliageResidentPageEntry& entry = m_residentEntries[residentIndex];
-    if (!residentHasFlag(entry, ReadyMask) ||
+    if (entry.leafId != leafId ||
+        !residentHasFlag(entry, ReadyMask) ||
         !residentHasFlag(entry, MaskValidMask) ||
         residentHasFlag(entry, MaskPendingMask) ||
         residentHasFlag(entry, UploadPendingMask))
@@ -246,6 +249,43 @@ bool WorldGridFoliageManager::getReadyPageInfo(
         .contentVersion = entry.contentVersion,
         .seed = static_cast<std::uint32_t>(hashLeafId(entry.leafId)),
     };
+    return true;
+}
+
+bool WorldGridFoliageManager::getReadyPageInfo(
+    const WorldGridQuadtreeLeafId& leafId,
+    FoliageReadyPageInfo& pageInfo) const
+{
+    const std::uint16_t residentIndex = findResidentIndex(leafId);
+    return buildReadyPageInfo(leafId, residentIndex, pageInfo);
+}
+
+bool WorldGridFoliageManager::emitPageDraw(
+    const WorldGridQuadtreeLeafId& pageId,
+    std::uint16_t residentIndex,
+    const WorldGridQuadtreeLeafId& terrainLeafId,
+    std::uint16_t terrainSliceIndex,
+    FoliageImposterRenderer& foliageRenderer) const
+{
+    if (residentIndex >= kCapacity)
+    {
+        return false;
+    }
+
+    const FoliageResidentPageEntry& entry = m_residentEntries[residentIndex];
+    const auto [terrainLeafOrigin, terrainLeafMaxCorner] = worldGridQuadtreeLeafBounds(terrainLeafId);
+    (void)terrainLeafMaxCorner;
+    const auto [pageOrigin, pageMaxCorner] = worldGridQuadtreeLeafBounds(pageId);
+    (void)pageMaxCorner;
+    foliageRenderer.addPageDraw({
+        .pageIndex = entry.pageIndex,
+        .liveCount = entry.liveCount,
+        .seed = static_cast<std::uint32_t>(hashLeafId(entry.leafId)),
+        .pageOrigin = pageOrigin,
+        .terrainLeafOrigin = terrainLeafOrigin,
+        .terrainSliceIndex = terrainSliceIndex,
+        .terrainScalePow = worldGridQuadtreeLeafScalePow(terrainLeafId),
+    });
     return true;
 }
 

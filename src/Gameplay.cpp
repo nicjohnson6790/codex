@@ -131,11 +131,12 @@ void CollisionManager::updateAroundPlayer(
             std::uint16_t terrainSliceIndex = 0;
             if (heightmapManager.getResidentSliceIndex(key, terrainSliceIndex))
             {
-                if (foliageManager.makeResident(key, key, terrainSliceIndex))
+                const std::uint16_t foliageResidentIndex = foliageManager.makeResident(key, key, terrainSliceIndex);
+                if (foliageResidentIndex != WorldGridFoliageManager::kCapacity)
                 {
                     FoliageReadyPageInfo pageInfo{};
-                    if (foliageManager.getReadyPageInfo(key, pageInfo) &&
-                        nearbyFoliageRenderer.makeResident(key, pageInfo))
+                    if (foliageManager.buildReadyPageInfo(key, foliageResidentIndex, pageInfo) &&
+                        nearbyFoliageRenderer.makeResident(key, pageInfo) != FoliageConfig::kNearbyDecodedPageLruCapacity)
                     {
                         NearbyFoliageRenderer::CpuResidentPageView foliageView{};
                         if (nearbyFoliageRenderer.tryGetCpuResidentPage(key, foliageView) &&

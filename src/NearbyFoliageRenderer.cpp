@@ -369,7 +369,7 @@ void NearbyFoliageRenderer::collectCompletedDecodedPages()
     }
 }
 
-bool NearbyFoliageRenderer::makeResident(
+std::uint16_t NearbyFoliageRenderer::makeResident(
     const WorldGridQuadtreeLeafId& pageKey,
     const FoliageReadyPageInfo& sourcePageInfo)
 {
@@ -382,12 +382,14 @@ bool NearbyFoliageRenderer::makeResident(
         entry.lruAge = 0u;
         if (entryMatchesSource(entry, pageKey, sourcePageInfo))
         {
-            return entry.valid && !entry.readbackPending;
+            return entry.valid && !entry.readbackPending
+                ? entryIndex
+                : FoliageConfig::kNearbyDecodedPageLruCapacity;
         }
 
         if (entry.readbackPending || m_pendingDecodeCount >= m_pendingDecodeRequests.size())
         {
-            return false;
+            return FoliageConfig::kNearbyDecodedPageLruCapacity;
         }
 
         entry = {
@@ -405,18 +407,18 @@ bool NearbyFoliageRenderer::makeResident(
             .key = pageKey,
             .sourcePageInfo = sourcePageInfo,
         };
-        return false;
+        return FoliageConfig::kNearbyDecodedPageLruCapacity;
     }
 
     if (m_pendingDecodeCount >= m_pendingDecodeRequests.size())
     {
-        return false;
+        return FoliageConfig::kNearbyDecodedPageLruCapacity;
     }
 
     entryIndex = findReusableEntryIndex();
     if (entryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity)
     {
-        return false;
+        return FoliageConfig::kNearbyDecodedPageLruCapacity;
     }
 
     m_decodedPages[entryIndex] = {
@@ -434,17 +436,17 @@ bool NearbyFoliageRenderer::makeResident(
         .key = pageKey,
         .sourcePageInfo = sourcePageInfo,
     };
-    return false;
+    return FoliageConfig::kNearbyDecodedPageLruCapacity;
 }
 
 void NearbyFoliageRenderer::addNearbyInstancesForPage(
     const WorldGridQuadtreeLeafId& pageKey,
+    std::uint16_t decodedPageIndex,
     std::uint16_t terrainSliceIndex,
     const Position& nearCenter,
     float nearRadiusMeters)
 {
-    const std::uint16_t entryIndex = findEntryIndex(pageKey);
-    if (entryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity)
+    if (decodedPageIndex >= m_decodedPages.size())
     {
         return;
     }
@@ -453,8 +455,8 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
         return;
     }
 
-    const DecodedPageEntry& entry = m_decodedPages[entryIndex];
-    if (!entry.valid || entry.readbackPending)
+    const DecodedPageEntry& entry = m_decodedPages[decodedPageIndex];
+    if (entry.key != pageKey || !entry.valid || entry.readbackPending)
     {
         return;
     }

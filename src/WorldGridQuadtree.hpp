@@ -21,6 +21,13 @@ class WorldGridFoliageManager;
 class WorldGridFoliageCanopyManager;
 class WorldGridQuadtreeWaterManager;
 
+struct WorldGridVisibilityFrustum
+{
+    Position cameraPosition{};
+    std::array<glm::dvec3, 5> planeNormals{};
+    std::array<double, 5> planeOffsets{};
+};
+
 struct QuadtreeNode
 {
     WorldGridQuadtreeLeafId nodeId{};
@@ -94,6 +101,34 @@ private:
         Collapse,
     };
 
+    struct FoliageCanonicalPageCache
+    {
+        WorldGridQuadtreeLeafId nodeId{};
+        std::array<WorldGridQuadtreeLeafId, 16> pageIds{};
+        std::uint32_t pageCount = 0;
+        bool valid = false;
+    };
+
+    struct FoliageCanonicalPageView
+    {
+        const WorldGridQuadtreeLeafId* pageIds = nullptr;
+        std::uint32_t pageCount = 0;
+    };
+
+    struct CanopyCanonicalCellCache
+    {
+        WorldGridQuadtreeLeafId nodeId{};
+        std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> cellIds{};
+        std::uint32_t cellCount = 0;
+        bool valid = false;
+    };
+
+    struct CanopyCanonicalCellView
+    {
+        const WorldGridQuadtreeLeafId* cellIds = nullptr;
+        std::uint32_t cellCount = 0;
+    };
+
     void reset();
     void refreshBaseNodes(const Position& cameraPosition);
     [[nodiscard]] std::uint16_t allocateNode();
@@ -106,15 +141,12 @@ private:
     [[nodiscard]] static bool nodeHasChildren(const QuadtreeNode& node);
     [[nodiscard]] std::uint8_t quadrantInParent(std::uint16_t nodeIndex) const;
     [[nodiscard]] static std::array<WorldGridQuadtreeLeafId, 4> childIdsForNode(const QuadtreeNode& node);
-    [[nodiscard]] bool collectNodeFoliagePageIds(
+    [[nodiscard]] FoliageCanonicalPageView foliagePageIdsForNode(std::uint16_t nodeIndex, const QuadtreeNode& node) const;
+    [[nodiscard]] CanopyCanonicalCellView canopyCellIdsForNode(std::uint16_t nodeIndex, const QuadtreeNode& node) const;
+    [[nodiscard]] bool nodeIsVisible(
         const QuadtreeNode& node,
-        std::array<WorldGridQuadtreeLeafId, 16>& canonicalLeafIds,
-        std::uint32_t& canonicalLeafCount) const;
-    [[nodiscard]] bool collectNodeCanopyCellIds(
-        const QuadtreeNode& node,
-        std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode>& canonicalLeafIds,
-        std::uint32_t& canonicalLeafCount) const;
-    [[nodiscard]] bool nodeIsVisible(const QuadtreeNode& node, HeightmapExtents* extents = nullptr) const;
+        const WorldGridVisibilityFrustum& frustum,
+        HeightmapExtents* extents = nullptr) const;
     [[nodiscard]] bool nodeIntersectsCanopyRange(const QuadtreeNode& node) const;
     [[nodiscard]] bool nodeIsInNearbyFoliageTopology(const QuadtreeNode& node) const;
     [[nodiscard]] bool nodeIntersectsNearbyFoliageRange(const QuadtreeNode& node, const HeightmapExtents& extents) const;
@@ -124,30 +156,7 @@ private:
     [[nodiscard]] bool nodeIsCanopyLod(const QuadtreeNode& node) const;
     [[nodiscard]] std::uint8_t nodeStateFadeAgeFrames(const QuadtreeNode& node) const;
     [[nodiscard]] std::uint8_t canopyEdgeFadeStrength(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
-    [[nodiscard]] bool requestFoliageResidencyForNode(
-        const QuadtreeNode& node,
-        WorldGridFoliageManager& foliageManager) const;
-    [[nodiscard]] bool requestCanopyResidencyForNode(
-        const QuadtreeNode& node,
-        WorldGridFoliageCanopyManager& canopyManager) const;
-    [[nodiscard]] bool requestNearbyFoliageResidencyForNode(
-        const QuadtreeNode& node,
-        WorldGridFoliageManager& foliageManager,
-        NearbyFoliageRenderer& nearbyFoliageRenderer) const;
     void emitTerrainDrawForNode(std::uint16_t nodeIndex, const QuadtreeNode& node, RenderEngines& renderEngines);
-    [[nodiscard]] bool emitFoliageDrawForNode(
-        const QuadtreeNode& node,
-        WorldGridFoliageManager& foliageManager,
-        FoliageImposterRenderer& foliageRenderer) const;
-    void emitNearbyFoliageDrawForNode(
-        const QuadtreeNode& node,
-        WorldGridFoliageManager& foliageManager,
-        NearbyFoliageRenderer& nearbyFoliageRenderer) const;
-    [[nodiscard]] bool emitCanopyDrawForNode(
-        std::uint16_t nodeIndex,
-        const QuadtreeNode& node,
-        WorldGridFoliageCanopyManager& canopyManager,
-        FoliageCanopyRenderer& canopyRenderer) const;
     void emitWaterDrawForNode(std::uint16_t nodeIndex, const QuadtreeNode& node, WorldGridQuadtreeWaterManager& waterManager) const;
     [[nodiscard]] bool edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
@@ -172,6 +181,8 @@ private:
     WorldGridQuadtreeDebugRenderer m_debugRenderer;
     WorldGridQuadtreeHeightmapManager m_heightmapManager;
     std::array<QuadtreeNode, kNodeCapacity> m_nodes{};
+    mutable std::array<FoliageCanonicalPageCache, kNodeCapacity> m_foliageCanonicalPageCaches{};
+    mutable std::array<CanopyCanonicalCellCache, kNodeCapacity> m_canopyCanonicalCellCaches{};
     std::array<std::uint16_t, kNodeCapacity> m_freeNodes{};
     std::array<std::uint16_t, kBaseNodeCount> m_baseNodes{};
     std::uint16_t m_freeNodeCount = 0;

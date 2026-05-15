@@ -49,14 +49,14 @@ glm::dvec3 nodeCenterAtZeroHeight(const Position& minCorner, const Position& max
     };
 }
 
-bool shouldDrawNodeFrustum(
-    const Position& minCornerPosition,
-    const Position& maxCornerPosition,
-    const CameraManager::Camera& activeCamera,
+WorldGridVisibilityFrustum buildVisibilityFrustum(
+    const Position& cameraPosition,
+    const glm::dvec3& cameraForward,
+    const glm::dvec3& cameraUp,
     Extent2D viewportExtent)
 {
-    const glm::dvec3 forward = glm::normalize(activeCamera.forward);
-    glm::dvec3 right = glm::cross(forward, activeCamera.up);
+    const glm::dvec3 forward = glm::normalize(cameraForward);
+    glm::dvec3 right = glm::cross(forward, cameraUp);
     if (glm::length(right) <= 0.00001)
     {
         right = { 1.0, 0.0, 0.0 };
@@ -64,16 +64,41 @@ bool shouldDrawNodeFrustum(
     right = glm::normalize(right);
     const glm::dvec3 up = glm::normalize(glm::cross(right, forward));
 
-    const glm::dvec3 minCorner = minCornerPosition.localCoordinatesInCellOf(activeCamera.position);
-    const glm::dvec3 maxCorner = maxCornerPosition.localCoordinatesInCellOf(activeCamera.position);
-    const glm::dvec3 center = (minCorner + maxCorner) * 0.5;
-    const glm::dvec3 extents = (maxCorner - minCorner) * 0.5;
-
     const double aspectRatio =
         static_cast<double>(std::max(viewportExtent.width, 1u)) /
         static_cast<double>(std::max(viewportExtent.height, 1u));
     const double tanHalfVerticalFov = std::tan(AppConfig::Camera::kVerticalFovRadians * 0.5);
     const double tanHalfHorizontalFov = tanHalfVerticalFov * aspectRatio;
+
+    WorldGridVisibilityFrustum frustum{};
+    frustum.cameraPosition = cameraPosition;
+    frustum.planeNormals = {
+        forward,
+        right + (forward * tanHalfHorizontalFov),
+        (-right) + (forward * tanHalfHorizontalFov),
+        up + (forward * tanHalfVerticalFov),
+        (-up) + (forward * tanHalfVerticalFov),
+    };
+    frustum.planeOffsets = {
+        -AppConfig::Camera::kNearPlane,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    };
+    return frustum;
+}
+
+bool shouldDrawNodeFrustum(
+    const Position& minCornerPosition,
+    const Position& maxCornerPosition,
+    const WorldGridVisibilityFrustum& frustum)
+{
+    const glm::dvec3 minCorner = minCornerPosition.localCoordinatesInCellOf(frustum.cameraPosition);
+    const glm::dvec3 maxCorner = maxCornerPosition.localCoordinatesInCellOf(frustum.cameraPosition);
+    const glm::dvec3 center = (minCorner + maxCorner) * 0.5;
+    const glm::dvec3 extents = (maxCorner - minCorner) * 0.5;
+
     const auto boxIsOutsidePlane = [&center, &extents](const glm::dvec3& planeNormal, double planeOffset)
     {
         const double projectedRadius =
@@ -84,12 +109,14 @@ bool shouldDrawNodeFrustum(
         return (signedDistance + projectedRadius) < 0.0;
     };
 
-    return
-        !boxIsOutsidePlane(forward, -AppConfig::Camera::kNearPlane) &&
-        !boxIsOutsidePlane(right + (forward * tanHalfHorizontalFov), 0.0) &&
-        !boxIsOutsidePlane((-right) + (forward * tanHalfHorizontalFov), 0.0) &&
-        !boxIsOutsidePlane(up + (forward * tanHalfVerticalFov), 0.0) &&
-        !boxIsOutsidePlane((-up) + (forward * tanHalfVerticalFov), 0.0);
+    for (std::size_t planeIndex = 0; planeIndex < frustum.planeNormals.size(); ++planeIndex)
+    {
+        if (boxIsOutsidePlane(frustum.planeNormals[planeIndex], frustum.planeOffsets[planeIndex]))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::uint64_t mixLeafIdWord64(std::uint64_t x)
@@ -273,15 +300,6 @@ void collectCanonicalLeafIds(
         return;
     }
 
-    double localMinX = 0.0;
-    double localMinZ = 0.0;
-    double size = 0.0;
-    worldGridQuadtreeLeafExtents(nodeId, localMinX, localMinZ, size);
-    const std::uint32_t pageSize = FoliageConfig::kPageSizeMeters;
-    const std::uint32_t pagesPerCell = static_cast<std::uint32_t>(Position::kCellSize / pageSize);
-    const std::uint32_t startPageX = static_cast<std::uint32_t>(std::llround(localMinX / static_cast<double>(pageSize)));
-    const std::uint32_t startPageZ = static_cast<std::uint32_t>(std::llround(localMinZ / static_cast<double>(pageSize)));
-
     for (std::uint32_t pageZ = 0; pageZ < pageCountPerSide; ++pageZ)
     {
         for (std::uint32_t pageX = 0; pageX < pageCountPerSide; ++pageX)
@@ -289,12 +307,12 @@ void collectCanonicalLeafIds(
             WorldGridQuadtreeLeafId canonicalLeafId{
                 .gridX = nodeId.gridX,
                 .gridY = nodeId.gridY,
-                .subdivisionPath = 0,
+                .subdivisionPath = nodeId.subdivisionPath,
             };
 
-            std::uint32_t localTileX = startPageX + pageX;
-            std::uint32_t localTileZ = startPageZ + pageZ;
-            std::uint32_t currentTilesPerSide = pagesPerCell;
+            std::uint32_t localTileX = pageX;
+            std::uint32_t localTileZ = pageZ;
+            std::uint32_t currentTilesPerSide = pageCountPerSide;
             while (currentTilesPerSide > 1u)
             {
                 const std::uint32_t halfTilesPerSide = currentTilesPerSide / 2u;
@@ -402,6 +420,89 @@ void WorldGridQuadtree::emitSceneDraws(
 {
     HELLO_PROFILE_SCOPE("WorldGridQuadtree::EmitSceneDraws");
 
+    const std::uint16_t warmupSlot = static_cast<std::uint16_t>(m_currentFrameIndex % 16u);
+    const WorldGridVisibilityFrustum visibilityFrustum = buildVisibilityFrustum(
+        m_activeCameraPosition,
+        m_activeCameraForward,
+        m_activeCameraUp,
+        m_viewportExtent);
+    const auto warmResidencyForNode = [&](
+        std::uint16_t nodeIndex,
+        const QuadtreeNode& node,
+        const HeightmapExtents* extents)
+    {
+        std::uint16_t terrainSliceIndex = 0;
+        if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex))
+        {
+            return;
+        }
+
+        bool foliageReady = false;
+        std::uint16_t warmNearbyFoliageResidentIndex = WorldGridFoliageManager::kCapacity;
+        if (canopyManager != nullptr && nodeCanUseCanopy(node))
+        {
+            const CanopyCanonicalCellView cells = canopyCellIdsForNode(nodeIndex, node);
+            if (cells.cellCount > 0u)
+            {
+                for (std::uint32_t cellIndex = 0; cellIndex < cells.cellCount; ++cellIndex)
+                {
+                    (void)canopyManager->makeResident(cells.cellIds[cellIndex], node.nodeId, terrainSliceIndex);
+                }
+            }
+        }
+        else if (foliageManager != nullptr && nodeUsesCanonicalFoliagePages(node))
+        {
+            const FoliageCanonicalPageView pages = foliagePageIdsForNode(nodeIndex, node);
+            if (pages.pageCount > 0u)
+            {
+                foliageReady = true;
+                for (std::uint32_t pageIndex = 0; pageIndex < pages.pageCount; ++pageIndex)
+                {
+                    foliageReady =
+                        (pages.pageIds[pageIndex] == node.nodeId
+                            ? (warmNearbyFoliageResidentIndex = foliageManager->makeResident(
+                                pages.pageIds[pageIndex],
+                                node.nodeId,
+                                terrainSliceIndex))
+                            : foliageManager->makeResident(pages.pageIds[pageIndex], node.nodeId, terrainSliceIndex)) !=
+                            WorldGridFoliageManager::kCapacity &&
+                        foliageReady;
+                }
+            }
+        }
+
+        if (canopyManager != nullptr && !foliageReady && nodeCanUseCanopyFallback(node))
+        {
+            const CanopyCanonicalCellView cells = canopyCellIdsForNode(nodeIndex, node);
+            if (cells.cellCount > 0u)
+            {
+                for (std::uint32_t cellIndex = 0; cellIndex < cells.cellCount; ++cellIndex)
+                {
+                    (void)canopyManager->makeResident(cells.cellIds[cellIndex], node.nodeId, terrainSliceIndex);
+                }
+            }
+        }
+
+        if (foliageManager != nullptr &&
+            nearbyFoliageRenderer != nullptr &&
+            extents != nullptr &&
+            nodeIsInNearbyFoliageTopology(node) &&
+            nodeIntersectsNearbyFoliageRange(node, *extents))
+        {
+            const std::uint16_t residentIndex = warmNearbyFoliageResidentIndex != WorldGridFoliageManager::kCapacity
+                ? warmNearbyFoliageResidentIndex
+                : foliageManager->makeResident(node.nodeId, node.nodeId, terrainSliceIndex);
+            if (residentIndex != WorldGridFoliageManager::kCapacity)
+            {
+                FoliageReadyPageInfo pageInfo{};
+                if (foliageManager->buildReadyPageInfo(node.nodeId, residentIndex, pageInfo))
+                {
+                    (void)nearbyFoliageRenderer->makeResident(node.nodeId, pageInfo);
+                }
+            }
+        }
+    };
+
     for (std::uint16_t nodeIndex = 0; nodeIndex < static_cast<std::uint16_t>(m_nodes.size()); ++nodeIndex)
     {
         const QuadtreeNode& node = m_nodes[nodeIndex];
@@ -412,28 +513,95 @@ void WorldGridQuadtree::emitSceneDraws(
 
         HeightmapExtents extents{};
         const bool hasExtents = m_heightmapManager.getExtents(node.nodeId, extents);
-        bool foliageReady = false;
-        bool canopyReady = false;
-        if (foliageManager != nullptr && nodeUsesCanonicalFoliagePages(node))
+        if (!nodeIsVisible(node, visibilityFrustum, hasExtents ? &extents : nullptr))
         {
-            foliageReady = requestFoliageResidencyForNode(node, *foliageManager);
-        }
-        if (canopyManager != nullptr && nodeCanUseCanopy(node))
-        {
-            canopyReady = requestCanopyResidencyForNode(node, *canopyManager);
-        }
-        else if (canopyManager != nullptr && !foliageReady && nodeCanUseCanopyFallback(node))
-        {
-            canopyReady = requestCanopyResidencyForNode(node, *canopyManager);
-        }
-        if (foliageManager != nullptr && nearbyFoliageRenderer != nullptr)
-        {
-            (void)requestNearbyFoliageResidencyForNode(node, *foliageManager, *nearbyFoliageRenderer);
+            if ((nodeIndex % 16u) == warmupSlot)
+            {
+                warmResidencyForNode(nodeIndex, node, hasExtents ? &extents : nullptr);
+            }
+            continue;
         }
 
-        if (!nodeIsVisible(node, hasExtents ? &extents : nullptr))
+        std::uint16_t terrainSliceIndex = 0;
+        const bool hasTerrainSlice = m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex);
+
+        bool foliageReady = false;
+        std::uint16_t foliageResidentIndexForNode = WorldGridFoliageManager::kCapacity;
+        std::array<std::uint16_t, 16> foliageResidentIndices;
+        FoliageCanonicalPageView foliagePages{};
+        if (hasTerrainSlice && foliageManager != nullptr && nodeUsesCanonicalFoliagePages(node))
         {
-            continue;
+            foliagePages = foliagePageIdsForNode(nodeIndex, node);
+            if (foliagePages.pageCount > 0u)
+            {
+                foliageReady = true;
+                for (std::uint32_t pageIndex = 0; pageIndex < foliagePages.pageCount; ++pageIndex)
+                {
+                    foliageResidentIndices[pageIndex] = foliageManager->makeResident(
+                        foliagePages.pageIds[pageIndex],
+                        node.nodeId,
+                        terrainSliceIndex);
+                    if (foliagePages.pageIds[pageIndex] == node.nodeId)
+                    {
+                        foliageResidentIndexForNode = foliageResidentIndices[pageIndex];
+                    }
+                    foliageReady =
+                        foliageResidentIndices[pageIndex] != WorldGridFoliageManager::kCapacity &&
+                        foliageReady;
+                }
+            }
+        }
+
+        const bool drawCanopy =
+            nodeCanUseCanopy(node) ||
+            (!foliageReady && nodeCanUseCanopyFallback(node));
+        bool canopyReady = false;
+        std::array<std::uint16_t, FoliageConfig::kCanopyCellCountPerNode> canopyResidentIndices;
+        CanopyCanonicalCellView canopyCells{};
+        std::uint32_t readyCanopyCellCount = 0;
+        if (hasTerrainSlice && canopyManager != nullptr && drawCanopy)
+        {
+            canopyCells = canopyCellIdsForNode(nodeIndex, node);
+            if (canopyCells.cellCount > 0u)
+            {
+                canopyReady = true;
+                for (std::uint32_t cellIndex = 0; cellIndex < canopyCells.cellCount; ++cellIndex)
+                {
+                    canopyResidentIndices[cellIndex] = canopyManager->makeResident(
+                        canopyCells.cellIds[cellIndex],
+                        node.nodeId,
+                        terrainSliceIndex);
+                    if (canopyResidentIndices[cellIndex] != WorldGridFoliageCanopyManager::kCapacity)
+                    {
+                        ++readyCanopyCellCount;
+                    }
+                    canopyReady =
+                        canopyResidentIndices[cellIndex] != WorldGridFoliageCanopyManager::kCapacity &&
+                        canopyReady;
+                }
+            }
+        }
+
+        std::uint16_t nearbyDecodedResidentIndex = FoliageConfig::kNearbyDecodedPageLruCapacity;
+        if (hasTerrainSlice &&
+            foliageManager != nullptr &&
+            nearbyFoliageRenderer != nullptr &&
+            nodeIsInNearbyFoliageTopology(node) &&
+            hasExtents &&
+            nodeIntersectsNearbyFoliageRange(node, extents))
+        {
+            const std::uint16_t nearbyFoliageResidentIndex =
+                foliageResidentIndexForNode != WorldGridFoliageManager::kCapacity
+                    ? foliageResidentIndexForNode
+                    : foliageManager->makeResident(node.nodeId, node.nodeId, terrainSliceIndex);
+            if (nearbyFoliageResidentIndex != WorldGridFoliageManager::kCapacity)
+            {
+                FoliageReadyPageInfo pageInfo{};
+                if (foliageManager->buildReadyPageInfo(node.nodeId, nearbyFoliageResidentIndex, pageInfo))
+                {
+                    nearbyDecodedResidentIndex = nearbyFoliageRenderer->makeResident(node.nodeId, pageInfo);
+                }
+            }
         }
 
         ++treeData.drawableNodeCount;
@@ -444,22 +612,58 @@ void WorldGridQuadtree::emitSceneDraws(
         }
 
         bool canopyDrawn = false;
-        const bool drawCanopy =
-            nodeCanUseCanopy(node) ||
-            (!foliageReady && nodeCanUseCanopyFallback(node));
-        if (canopyReady && canopyManager != nullptr && canopyRenderer != nullptr && drawCanopy)
+        const std::uint32_t minimumReadyCanopyCellCount = std::min<std::uint32_t>(
+            canopyCells.cellCount,
+            FoliageConfig::kCanopyMinimumReadyCellCount);
+        const bool canopyDrawable =
+            canopyReady &&
+            canopyCells.cellCount > 0u &&
+            readyCanopyCellCount >= minimumReadyCanopyCellCount;
+        if (canopyDrawable && canopyManager != nullptr && canopyRenderer != nullptr && drawCanopy)
         {
-            canopyDrawn = emitCanopyDrawForNode(nodeIndex, node, *canopyManager, *canopyRenderer);
+            std::array<std::uint8_t, 4> edgeFadeStrengths{};
+            if (nodeIsCanopyLod(node))
+            {
+                for (std::uint8_t edgeIndex = 0; edgeIndex < edgeFadeStrengths.size(); ++edgeIndex)
+                {
+                    edgeFadeStrengths[edgeIndex] = canopyEdgeFadeStrength(nodeIndex, edgeIndex);
+                }
+            }
+            canopyManager->emitCanopyDraw(
+                node.nodeId,
+                terrainSliceIndex,
+                canopyCells.cellIds,
+                canopyResidentIndices,
+                canopyCells.cellCount,
+                readyCanopyCellCount,
+                nodeIsCanopyLod(node) ? nodeStateFadeAgeFrames(node) : FoliageConfig::kCanopyFadeInFrameCount,
+                edgeFadeStrengths,
+                *canopyRenderer);
+            canopyDrawn = true;
         }
 
-        if (!canopyDrawn && foliageManager != nullptr && foliageRenderer != nullptr && nodeUsesCanonicalFoliagePages(node))
+        if (!canopyDrawn && foliageReady && foliageManager != nullptr && foliageRenderer != nullptr)
         {
-            (void)emitFoliageDrawForNode(node, *foliageManager, *foliageRenderer);
+            for (std::uint32_t pageIndex = 0; pageIndex < foliagePages.pageCount; ++pageIndex)
+            {
+                (void)foliageManager->emitPageDraw(
+                    foliagePages.pageIds[pageIndex],
+                    foliageResidentIndices[pageIndex],
+                    node.nodeId,
+                    terrainSliceIndex,
+                    *foliageRenderer);
+            }
         }
 
-        if (foliageManager != nullptr && nearbyFoliageRenderer != nullptr)
+        if (nearbyFoliageRenderer != nullptr &&
+            nearbyDecodedResidentIndex != FoliageConfig::kNearbyDecodedPageLruCapacity)
         {
-            emitNearbyFoliageDrawForNode(node, *foliageManager, *nearbyFoliageRenderer);
+            nearbyFoliageRenderer->addNearbyInstancesForPage(
+                node.nodeId,
+                nearbyDecodedResidentIndex,
+                terrainSliceIndex,
+                m_activeCameraPosition,
+                FoliageConfig::kNearbyDefaultRadiusMeters);
         }
 
         if (waterManager != nullptr)
@@ -507,22 +711,40 @@ void WorldGridQuadtree::clearTerrainCache()
     reset();
 }
 
-bool WorldGridQuadtree::collectNodeFoliagePageIds(
-    const QuadtreeNode& node,
-    std::array<WorldGridQuadtreeLeafId, 16>& canonicalLeafIds,
-    std::uint32_t& canonicalLeafCount) const
+WorldGridQuadtree::FoliageCanonicalPageView WorldGridQuadtree::foliagePageIdsForNode(
+    std::uint16_t nodeIndex,
+    const QuadtreeNode& node) const
 {
-    collectCanonicalFoliageLeafIds(node.nodeId, canonicalLeafIds, canonicalLeafCount);
-    return canonicalLeafCount > 0;
+    FoliageCanonicalPageCache& cache = m_foliageCanonicalPageCaches[nodeIndex];
+    if (!cache.valid || !(cache.nodeId == node.nodeId))
+    {
+        collectCanonicalFoliageLeafIds(node.nodeId, cache.pageIds, cache.pageCount);
+        cache.nodeId = node.nodeId;
+        cache.valid = true;
+    }
+
+    return {
+        .pageIds = cache.pageIds.data(),
+        .pageCount = cache.pageCount,
+    };
 }
 
-bool WorldGridQuadtree::collectNodeCanopyCellIds(
-    const QuadtreeNode& node,
-    std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode>& canonicalLeafIds,
-    std::uint32_t& canonicalLeafCount) const
+WorldGridQuadtree::CanopyCanonicalCellView WorldGridQuadtree::canopyCellIdsForNode(
+    std::uint16_t nodeIndex,
+    const QuadtreeNode& node) const
 {
-    collectCanonicalCanopyLeafIds(node.nodeId, canonicalLeafIds, canonicalLeafCount);
-    return canonicalLeafCount > 0;
+    CanopyCanonicalCellCache& cache = m_canopyCanonicalCellCaches[nodeIndex];
+    if (!cache.valid || !(cache.nodeId == node.nodeId))
+    {
+        collectCanonicalCanopyLeafIds(node.nodeId, cache.cellIds, cache.cellCount);
+        cache.nodeId = node.nodeId;
+        cache.valid = true;
+    }
+
+    return {
+        .cellIds = cache.cellIds.data(),
+        .cellCount = cache.cellCount,
+    };
 }
 
 void WorldGridQuadtree::setWaterVisibilityBounds(float waterMinHeight, float waterMaxHeight, bool enabled)
@@ -554,265 +776,6 @@ void WorldGridQuadtree::emitDebugDraws(RenderEngines& renderEngines) const
             extents.minHeight,
             extents.maxHeight);
     }
-}
-
-bool WorldGridQuadtree::emitFoliageDrawForNode(
-    const QuadtreeNode& node,
-    WorldGridFoliageManager& foliageManager,
-    FoliageImposterRenderer& foliageRenderer) const
-{
-    std::uint16_t terrainSliceIndex = 0;
-    if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex))
-    {
-        return false;
-    }
-
-    std::array<WorldGridQuadtreeLeafId, 16> canonicalLeafIds{};
-    std::uint32_t canonicalLeafCount = 0;
-    if (!collectNodeFoliagePageIds(node, canonicalLeafIds, canonicalLeafCount))
-    {
-        return false;
-    }
-
-    bool allPagesReady = true;
-    for (std::uint32_t pageIndex = 0; pageIndex < canonicalLeafCount; ++pageIndex)
-    {
-        allPagesReady = foliageManager.makeResident(
-            canonicalLeafIds[pageIndex],
-            node.nodeId,
-            terrainSliceIndex) && allPagesReady;
-    }
-    if (!allPagesReady)
-    {
-        return false;
-    }
-
-    const auto [terrainLeafOrigin, terrainLeafMaxCorner] = worldGridQuadtreeLeafBounds(node.nodeId);
-    (void)terrainLeafMaxCorner;
-    const std::uint8_t terrainScalePow = worldGridQuadtreeLeafScalePow(node.nodeId);
-    for (std::uint32_t pageIndex = 0; pageIndex < canonicalLeafCount; ++pageIndex)
-    {
-        FoliageReadyPageInfo pageInfo{};
-        if (!foliageManager.getReadyPageInfo(canonicalLeafIds[pageIndex], pageInfo))
-        {
-            return false;
-        }
-
-        const auto [pageOrigin, pageMaxCorner] = worldGridQuadtreeLeafBounds(canonicalLeafIds[pageIndex]);
-        (void)pageMaxCorner;
-        foliageRenderer.addPageDraw({
-            .pageIndex = pageInfo.pageIndex,
-            .liveCount = pageInfo.liveCount,
-            .seed = pageInfo.seed,
-            .pageOrigin = pageOrigin,
-            .terrainLeafOrigin = terrainLeafOrigin,
-            .terrainSliceIndex = terrainSliceIndex,
-            .terrainScalePow = terrainScalePow,
-        });
-    }
-
-    return true;
-}
-
-bool WorldGridQuadtree::requestFoliageResidencyForNode(
-    const QuadtreeNode& node,
-    WorldGridFoliageManager& foliageManager) const
-{
-    std::uint16_t terrainSliceIndex = 0;
-    if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex))
-    {
-        return false;
-    }
-
-    std::array<WorldGridQuadtreeLeafId, 16> canonicalLeafIds{};
-    std::uint32_t canonicalLeafCount = 0;
-    if (!collectNodeFoliagePageIds(node, canonicalLeafIds, canonicalLeafCount))
-    {
-        return false;
-    }
-
-    bool allPagesReady = true;
-    for (std::uint32_t pageIndex = 0; pageIndex < canonicalLeafCount; ++pageIndex)
-    {
-        allPagesReady = foliageManager.makeResident(
-            canonicalLeafIds[pageIndex],
-            node.nodeId,
-            terrainSliceIndex) && allPagesReady;
-    }
-    return allPagesReady;
-}
-
-void WorldGridQuadtree::emitNearbyFoliageDrawForNode(
-    const QuadtreeNode& node,
-    WorldGridFoliageManager& foliageManager,
-    NearbyFoliageRenderer& nearbyFoliageRenderer) const
-{
-    if (!nodeIsInNearbyFoliageTopology(node))
-    {
-        return;
-    }
-
-    HeightmapExtents extents{};
-    if (!m_heightmapManager.getExtents(node.nodeId, extents) ||
-        !nodeIntersectsNearbyFoliageRange(node, extents))
-    {
-        return;
-    }
-
-    std::uint16_t terrainSliceIndex = 0;
-    if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex))
-    {
-        return;
-    }
-
-    if (!foliageManager.makeResident(node.nodeId, node.nodeId, terrainSliceIndex))
-    {
-        return;
-    }
-
-    FoliageReadyPageInfo pageInfo{};
-    if (!foliageManager.getReadyPageInfo(node.nodeId, pageInfo) ||
-        !nearbyFoliageRenderer.makeResident(node.nodeId, pageInfo))
-    {
-        return;
-    }
-
-    nearbyFoliageRenderer.addNearbyInstancesForPage(
-        node.nodeId,
-        terrainSliceIndex,
-        m_activeCameraPosition,
-        FoliageConfig::kNearbyDefaultRadiusMeters);
-}
-
-bool WorldGridQuadtree::requestNearbyFoliageResidencyForNode(
-    const QuadtreeNode& node,
-    WorldGridFoliageManager& foliageManager,
-    NearbyFoliageRenderer& nearbyFoliageRenderer) const
-{
-    if (!nodeIsInNearbyFoliageTopology(node))
-    {
-        return false;
-    }
-
-    HeightmapExtents extents{};
-    if (!m_heightmapManager.getExtents(node.nodeId, extents) ||
-        !nodeIntersectsNearbyFoliageRange(node, extents))
-    {
-        return false;
-    }
-
-    std::uint16_t terrainSliceIndex = 0;
-    if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex) ||
-        !foliageManager.makeResident(node.nodeId, node.nodeId, terrainSliceIndex))
-    {
-        return false;
-    }
-
-    FoliageReadyPageInfo pageInfo{};
-    if (!foliageManager.getReadyPageInfo(node.nodeId, pageInfo))
-    {
-        return false;
-    }
-
-    return nearbyFoliageRenderer.makeResident(node.nodeId, pageInfo);
-}
-
-bool WorldGridQuadtree::emitCanopyDrawForNode(
-    std::uint16_t nodeIndex,
-    const QuadtreeNode& node,
-    WorldGridFoliageCanopyManager& canopyManager,
-    FoliageCanopyRenderer& canopyRenderer) const
-{
-    std::uint16_t terrainSliceIndex = 0;
-    if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex))
-    {
-        return false;
-    }
-
-    std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canonicalLeafIds{};
-    std::uint32_t canonicalLeafCount = 0;
-    if (!collectNodeCanopyCellIds(node, canonicalLeafIds, canonicalLeafCount))
-    {
-        return false;
-    }
-
-    FoliageCanopyDrawReference drawReference{};
-    drawReference.patchOrigin = worldGridQuadtreeLeafBounds(node.nodeId).first;
-    drawReference.terrainLeafOrigin = drawReference.patchOrigin;
-    drawReference.patchSizeMeters = static_cast<float>(worldGridQuadtreeLeafSize(node.nodeId));
-    drawReference.terrainLeafSizeMeters = drawReference.patchSizeMeters;
-    drawReference.terrainSliceIndex = terrainSliceIndex;
-    drawReference.patchSeed = foliageLeafSeed(node.nodeId);
-    drawReference.drawAgeFrames = nodeIsCanopyLod(node)
-        ? nodeStateFadeAgeFrames(node)
-        : FoliageConfig::kCanopyFadeInFrameCount;
-    drawReference.edgeFadeStrengths.fill(0u);
-    if (nodeIsCanopyLod(node))
-    {
-        for (std::uint8_t edgeIndex = 0; edgeIndex < drawReference.edgeFadeStrengths.size(); ++edgeIndex)
-        {
-            drawReference.edgeFadeStrengths[edgeIndex] = canopyEdgeFadeStrength(nodeIndex, edgeIndex);
-        }
-    }
-    drawReference.cellSlotIndices.fill(UINT16_MAX);
-    drawReference.cellSeeds.fill(0u);
-
-    std::uint32_t readyCellCount = 0;
-    for (std::uint32_t cellIndex = 0; cellIndex < canonicalLeafCount; ++cellIndex)
-    {
-        FoliageCanopyReadyCellInfo cellInfo{};
-        if (canopyManager.getReadyCellInfo(canonicalLeafIds[cellIndex], cellInfo))
-        {
-            drawReference.cellSlotIndices[cellIndex] = cellInfo.slotIndex;
-            drawReference.cellSeeds[cellIndex] = cellInfo.seed;
-            ++readyCellCount;
-        }
-    }
-
-    const std::uint32_t minimumReadyCellCount = std::min<std::uint32_t>(
-        canonicalLeafCount,
-        FoliageConfig::kCanopyMinimumReadyCellCount);
-    if (readyCellCount < minimumReadyCellCount)
-    {
-        return false;
-    }
-
-    for (std::uint32_t cellIndex = 0; cellIndex < canonicalLeafCount; ++cellIndex)
-    {
-        if (drawReference.cellSlotIndices[cellIndex] != UINT16_MAX)
-        {
-            canopyManager.noteRenderedCell(canonicalLeafIds[cellIndex]);
-        }
-    }
-
-    canopyRenderer.addCanopyDraw(drawReference);
-    return true;
-}
-
-bool WorldGridQuadtree::requestCanopyResidencyForNode(
-    const QuadtreeNode& node,
-    WorldGridFoliageCanopyManager& canopyManager) const
-{
-    std::uint16_t terrainSliceIndex = 0;
-    if (!m_heightmapManager.getResidentSliceIndex(node.nodeId, terrainSliceIndex))
-    {
-        return false;
-    }
-
-    std::array<WorldGridQuadtreeLeafId, FoliageConfig::kCanopyCellCountPerNode> canonicalLeafIds{};
-    std::uint32_t canonicalLeafCount = 0;
-    if (!collectNodeCanopyCellIds(node, canonicalLeafIds, canonicalLeafCount))
-    {
-        return false;
-    }
-
-    bool allCellsReady = true;
-    for (std::uint32_t cellIndex = 0; cellIndex < canonicalLeafCount; ++cellIndex)
-    {
-        allCellsReady = canopyManager.makeResident(canonicalLeafIds[cellIndex], node.nodeId, terrainSliceIndex) &&
-            allCellsReady;
-    }
-    return allCellsReady;
 }
 
 void WorldGridQuadtree::emitWaterDrawForNode(
@@ -1226,7 +1189,10 @@ std::array<WorldGridQuadtreeLeafId, 4> WorldGridQuadtree::childIdsForNode(const 
     return childIds;
 }
 
-bool WorldGridQuadtree::nodeIsVisible(const QuadtreeNode& node, HeightmapExtents* extents) const
+bool WorldGridQuadtree::nodeIsVisible(
+    const QuadtreeNode& node,
+    const WorldGridVisibilityFrustum& frustum,
+    HeightmapExtents* extents) const
 {
     double minHeight = extents != nullptr ? static_cast<double>(extents->minHeight) : -kVisibilityBoundsHalfHeight;
     double maxHeight = extents != nullptr ? static_cast<double>(extents->maxHeight) : kVisibilityBoundsHalfHeight;
@@ -1237,11 +1203,7 @@ bool WorldGridQuadtree::nodeIsVisible(const QuadtreeNode& node, HeightmapExtents
     }
 
     const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(node.nodeId, minHeight, maxHeight);
-    return shouldDrawNodeFrustum(minCorner, maxCorner, CameraManager::Camera{
-        .position = m_activeCameraPosition,
-        .forward = m_activeCameraForward,
-        .up = m_activeCameraUp,
-    }, m_viewportExtent);
+    return shouldDrawNodeFrustum(minCorner, maxCorner, frustum);
 }
 
 bool WorldGridQuadtree::nodeIntersectsCanopyRange(const QuadtreeNode& node) const

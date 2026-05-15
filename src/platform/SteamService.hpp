@@ -6,6 +6,10 @@
 #include <filesystem>
 #include <string>
 
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+#include <steam/steam_api.h>
+#endif
+
 class SteamService
 {
 public:
@@ -34,7 +38,12 @@ public:
 private:
     void initializeSteamInput(const std::filesystem::path& inputManifestPath);
     void refreshSteamInputControllers();
-    [[nodiscard]] bool digitalAction(std::uint64_t actionHandle) const;
+    [[nodiscard]] bool digitalAction(std::uint64_t inputHandle, std::uint64_t actionHandle) const;
+
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+    STEAM_CALLBACK(SteamService, onSteamInputDeviceConnected, SteamInputDeviceConnected_t);
+    STEAM_CALLBACK(SteamService, onSteamInputDeviceDisconnected, SteamInputDeviceDisconnected_t);
+#endif
 
     bool m_requested = false;
     bool m_initialized = false;

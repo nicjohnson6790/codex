@@ -105,7 +105,7 @@ void WorldGridFoliageCanopyManager::clearCache()
     resetCacheState();
 }
 
-bool WorldGridFoliageCanopyManager::makeResident(
+std::uint16_t WorldGridFoliageCanopyManager::makeResident(
     const WorldGridQuadtreeLeafId& leafId,
     const WorldGridQuadtreeLeafId& terrainLeafId,
     std::uint16_t terrainSliceIndex)
@@ -121,11 +121,11 @@ bool WorldGridFoliageCanopyManager::makeResident(
         FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
         entry.evictionAge = 0;
         m_terrainSources[residentIndex] = terrainSource;
-        return residentHasFlag(entry, ReadyMask);
+        return residentHasFlag(entry, ReadyMask) ? residentIndex : kCapacity;
     }
 
     (void)enqueueLeaf(leafId, terrainSource);
-    return false;
+    return kCapacity;
 }
 
 void WorldGridFoliageCanopyManager::scheduleQueuedGenerations(FoliageCanopyRenderer& renderer)
@@ -207,6 +207,30 @@ void WorldGridFoliageCanopyManager::scheduleQueuedGenerations(FoliageCanopyRende
     }
 }
 
+bool WorldGridFoliageCanopyManager::buildReadyCellInfo(
+    const WorldGridQuadtreeLeafId& leafId,
+    std::uint16_t residentIndex,
+    FoliageCanopyReadyCellInfo& cellInfo) const
+{
+    if (residentIndex >= kCapacity || !m_residentUsed[residentIndex])
+    {
+        return false;
+    }
+
+    const FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
+    if (entry.leafId != leafId || !residentHasFlag(entry, ReadyMask))
+    {
+        return false;
+    }
+
+    cellInfo = {
+        .slotIndex = entry.slotIndex,
+        .seed = static_cast<std::uint32_t>(hashLeafId(leafId)),
+        .residentFrameAge = entry.residentFrameAge,
+    };
+    return true;
+}
+
 bool WorldGridFoliageCanopyManager::getReadyCellInfo(
     const WorldGridQuadtreeLeafId& leafId,
     FoliageCanopyReadyCellInfo& cellInfo) const
@@ -229,6 +253,44 @@ bool WorldGridFoliageCanopyManager::getReadyCellInfo(
         .residentFrameAge = entry.residentFrameAge,
     };
     return true;
+}
+
+void WorldGridFoliageCanopyManager::emitCanopyDraw(
+    const WorldGridQuadtreeLeafId& nodeId,
+    std::uint16_t terrainSliceIndex,
+    const WorldGridQuadtreeLeafId* cellIds,
+    const std::array<std::uint16_t, FoliageConfig::kCanopyCellCountPerNode>& residentIndices,
+    std::uint32_t cellCount,
+    std::uint32_t readyCellCount,
+    std::uint8_t drawAgeFrames,
+    const std::array<std::uint8_t, 4>& edgeFadeStrengths,
+    FoliageCanopyRenderer& renderer) const
+{
+    FoliageCanopyDrawReference drawReference{};
+    drawReference.patchOrigin = worldGridQuadtreeLeafBounds(nodeId).first;
+    drawReference.terrainLeafOrigin = drawReference.patchOrigin;
+    drawReference.patchSizeMeters = static_cast<float>(worldGridQuadtreeLeafSize(nodeId));
+    drawReference.terrainLeafSizeMeters = drawReference.patchSizeMeters;
+    drawReference.terrainSliceIndex = terrainSliceIndex;
+    drawReference.patchSeed = static_cast<std::uint32_t>(hashLeafId(nodeId));
+    drawReference.drawAgeFrames = drawAgeFrames;
+    drawReference.edgeFadeStrengths = edgeFadeStrengths;
+    drawReference.cellSlotIndices.fill(UINT16_MAX);
+    drawReference.cellSeeds.fill(0u);
+
+    for (std::uint32_t cellIndex = 0; cellIndex < cellCount; ++cellIndex)
+    {
+        if (residentIndices[cellIndex] == kCapacity)
+        {
+            continue;
+        }
+
+        const FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndices[cellIndex]];
+        drawReference.cellSlotIndices[cellIndex] = entry.slotIndex;
+        drawReference.cellSeeds[cellIndex] = static_cast<std::uint32_t>(hashLeafId(entry.leafId));
+    }
+
+    renderer.addCanopyDraw(drawReference);
 }
 
 void WorldGridFoliageCanopyManager::noteRenderedCell(const WorldGridQuadtreeLeafId& leafId)
