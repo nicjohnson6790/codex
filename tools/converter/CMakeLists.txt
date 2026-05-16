@@ -198,6 +198,7 @@ target_compile_definitions(converter
         CONVERTER_SHADER_DIR="${CONVERTER_SHADER_OUTPUT_DIR}"
 )
 
+
 target_include_directories(converter
     PRIVATE
         ../../src

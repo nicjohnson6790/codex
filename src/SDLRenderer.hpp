@@ -20,6 +20,7 @@ class QuadtreeMeshRenderer;
 class QuadtreeWaterMeshRenderer;
 class SkyboxRenderer;
 class TriangleRenderer;
+class WorldTextRenderer;
 
 class SDLRenderer
 {
@@ -56,6 +57,7 @@ public:
         NearbyFoliageRenderer& nearbyFoliageRenderer,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer,
+        WorldTextRenderer& worldTextRenderer,
         SkyboxRenderer& skyboxRenderer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,

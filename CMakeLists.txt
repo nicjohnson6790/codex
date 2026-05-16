@@ -141,6 +141,8 @@ set(TRIANGLE_VERT_SPV ${SHADER_OUTPUT_DIR}/triangle.vert.spv)
 set(TRIANGLE_FRAG_SPV ${SHADER_OUTPUT_DIR}/triangle.frag.spv)
 set(LINE_VERT_SPV ${SHADER_OUTPUT_DIR}/line.vert.spv)
 set(LINE_FRAG_SPV ${SHADER_OUTPUT_DIR}/line.frag.spv)
+set(WORLD_TEXT_VERT_SPV ${SHADER_OUTPUT_DIR}/world_text.vert.spv)
+set(WORLD_TEXT_FRAG_SPV ${SHADER_OUTPUT_DIR}/world_text.frag.spv)
 set(QUADTREE_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.vert.spv)
 set(QUADTREE_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh_bridge.vert.spv)
 set(QUADTREE_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.frag.spv)
@@ -170,6 +172,8 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/triangle.vert ${TRIANGLE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/triangle.frag ${TRIANGLE_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/line.vert ${LINE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/line.frag ${LINE_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/world_text.vert ${WORLD_TEXT_VERT_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/world_text.frag ${WORLD_TEXT_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.vert ${QUADTREE_MESH_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_MESH_BRIDGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV})
@@ -216,6 +220,8 @@ add_custom_target(shaders ALL
         ${TRIANGLE_FRAG_SPV}
         ${LINE_VERT_SPV}
         ${LINE_FRAG_SPV}
+        ${WORLD_TEXT_VERT_SPV}
+        ${WORLD_TEXT_FRAG_SPV}
         ${QUADTREE_MESH_VERT_SPV}
         ${QUADTREE_MESH_BRIDGE_VERT_SPV}
         ${QUADTREE_MESH_FRAG_SPV}
@@ -273,6 +279,7 @@ add_executable(terrain_sandbox
     src/WorldGridQuadtreeDebugRenderer.cpp
     src/WorldGridQuadtreeHeightmapManager.cpp
     src/WorldGridQuadtreeWaterManager.cpp
+    src/WorldTextRenderer.cpp
 )
 
 add_dependencies(terrain_sandbox shaders)

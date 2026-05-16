@@ -23,6 +23,7 @@
 #include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
+#include "WorldTextRenderer.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -93,6 +94,7 @@ private:
     SDLRenderer m_renderer;
     TriangleRenderer m_triangleRenderer;
     LineRenderer m_lineRenderer;
+    WorldTextRenderer m_worldTextRenderer;
     QuadtreeMeshRenderer m_quadtreeMeshRenderer;
     FoliageCanopyRenderer m_foliageCanopyRenderer;
     FoliageImposterRenderer m_foliageRenderer;

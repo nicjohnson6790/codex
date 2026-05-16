@@ -13,6 +13,7 @@
 #include "SubmittedGpuFence.hpp"
 #include "TriangleRenderer.hpp"
 #include "WorldGridFoliageManager.hpp"
+#include "WorldTextRenderer.hpp"
 
 #include <imgui_impl_sdlgpu3.h>
 
@@ -208,6 +209,7 @@ void SDLRenderer::renderFrame(
     NearbyFoliageRenderer& nearbyFoliageRenderer,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer,
+    WorldTextRenderer& worldTextRenderer,
     SkyboxRenderer& skyboxRenderer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
@@ -249,6 +251,7 @@ void SDLRenderer::renderFrame(
             waterMeshRenderer.upload(copyPass);
         }
         lineRenderer.upload(copyPass);
+        worldTextRenderer.upload(copyPass);
         SDL_EndGPUCopyPass(copyPass);
     }
 
@@ -396,6 +399,10 @@ void SDLRenderer::renderFrame(
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderDebugPrimitives", ProfileScopeGroup::Renderer);
             triangleRenderer.render(renderPass, commandBuffer, viewProjection);
             lineRenderer.render(renderPass, commandBuffer, viewProjection);
+        }
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderWorldText", ProfileScopeGroup::Renderer);
+            worldTextRenderer.render(renderPass, commandBuffer, viewProjection);
         }
         SDL_EndGPURenderPass(renderPass);
 

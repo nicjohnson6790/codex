@@ -192,6 +192,13 @@ void App::initializeRenderers(const std::filesystem::path& shaderDirectory)
         m_renderer.viewportDepthFormat(),
         shaderDirectory
     );
+    logStartup("init world text renderer");
+    m_worldTextRenderer.initialize(
+        m_renderer.device(),
+        m_renderer.swapchainFormat(),
+        m_renderer.viewportDepthFormat(),
+        shaderDirectory
+    );
     logStartup("init quadtree mesh renderer");
     m_quadtreeMeshRenderer.initialize(
         m_renderer.device(),
@@ -310,6 +317,7 @@ void App::shutdownRenderers()
         m_waterMeshRenderer.shutdown();
     }
     m_skyboxRenderer.shutdown();
+    m_worldTextRenderer.shutdown();
     m_lineRenderer.shutdown();
     m_triangleRenderer.shutdown();
     m_renderer.shutdown();
@@ -520,6 +528,7 @@ void App::updateSceneForFrame()
             .triangleRenderer = m_triangleRenderer,
             .lineRenderer = m_lineRenderer,
             .quadtreeMeshRenderer = &m_quadtreeMeshRenderer,
+            .worldTextRenderer = &m_worldTextRenderer,
         };
         HELLO_PROFILE_SCOPE_GROUPS(
             "App::UpdateSceneForFrame::EmitDebugDraws",
@@ -542,6 +551,10 @@ void App::syncRenderStateForActiveCamera(Extent2D viewportExtent)
         m_nearbyFoliageRenderer,
         m_waterMeshRenderer,
         m_lineRenderer);
+    m_worldTextRenderer.setActiveCamera(
+        cameraPosition,
+        m_cameraManager.activeCamera().forward,
+        m_cameraManager.activeCamera().up);
     m_quadtreeMeshRenderer.setTerrainHeightParams(
         static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
         static_cast<float>(terrainNoiseMaxAmplitude(m_worldGridQuadtree.terrainSettings())));
@@ -662,6 +675,10 @@ void App::syncFollowCameraRenderState(Extent2D viewportExtent)
         m_nearbyFoliageRenderer,
         m_waterMeshRenderer,
         m_lineRenderer);
+    m_worldTextRenderer.setActiveCamera(
+        cameraPosition,
+        m_cameraManager.activeCamera().forward,
+        m_cameraManager.activeCamera().up);
     if constexpr (AppConfig::Foliage::kCanopyEnabled)
     {
         m_foliageCanopyRenderer.setActiveCamera(cameraPosition);
@@ -685,6 +702,7 @@ void App::buildPrimitiveDraws()
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BuildTriangles");
     m_triangleRenderer.clear();
+    m_worldTextRenderer.clear();
     m_quadtreeMeshRenderer.clear();
     if constexpr (AppConfig::Foliage::kCanopyEnabled)
     {
@@ -704,6 +722,22 @@ void App::buildPrimitiveDraws()
             m_playerPawn.position.translated({ 0.0, 1.0, 0.0 }),
             static_cast<float>(m_playerPawn.yawRadians));
     }
+
+    m_worldTextRenderer.addMultilineCentered(
+        Position(0, -1, { 1257.0, 265.0, 523566.0 }),
+        glm::vec3(1.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 18.0f, 0.0f),
+        "Terrain Sandbox\nTest Text",
+        WorldTextRenderer::HorizontalJustify::Center,
+        WorldTextRenderer::Style{
+            .lineSpacing = 1.15f,
+            .baseColor = glm::vec4(1.0f, 0.92f, 0.18f, 1.0f),
+            .strokeColor = glm::vec4(0.02f, 0.015f, 0.005f, 1.0f),
+            .strokeWidth = 2.0f,
+            .glowColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.65f),
+            .glowWidth = 4.0f,
+            .glowOffset = glm::vec2(5.0f, -5.0f),
+        });
 }
 
 void App::buildDebugAxes()
@@ -727,6 +761,7 @@ void App::emitWorldDraws()
         .triangleRenderer = m_triangleRenderer,
         .lineRenderer = m_lineRenderer,
         .quadtreeMeshRenderer = &m_quadtreeMeshRenderer,
+        .worldTextRenderer = &m_worldTextRenderer,
     };
     m_worldGridQuadtree.emitSceneDraws(
         renderEngines,
@@ -767,6 +802,7 @@ void App::renderCurrentFrame()
         m_nearbyFoliageRenderer,
         m_waterMeshRenderer,
         m_lineRenderer,
+        m_worldTextRenderer,
         m_skyboxRenderer,
         viewProjection,
         m_lightingSystem,

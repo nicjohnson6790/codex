@@ -204,7 +204,7 @@ The generated bins are loaded directly by the main app:
 - `FoliageImposterRenderer` loads the pine `texbin` and `assetbin` imposter metadata for the mid-distance tree pass
 - `SkyboxRenderer` loads `skybox.texbin` and `skybox.assetbin`
 - `QuadtreeMeshRenderer` loads `pbr.texbin` and `pbr.assetbin` for terrain material layers
-- future text rendering can load `roboto.texbin` and `roboto.assetbin` for the MSDF atlas and glyph layout
+- `WorldTextRenderer` loads `roboto.texbin` and `roboto.assetbin` for the MSDF atlas and glyph layout
 
 That makes converter correctness immediately visible in the runtime for mesh layout, material wiring, texture assignment, normal mapping, alpha-mask handling, and skybox cubemap assembly.
 

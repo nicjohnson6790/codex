@@ -8,12 +8,15 @@
 [startup] gamepad input initialized
 [startup] init performance capture
 [startup] performance capture initialized
+[startup] init Steam service
+[startup] Steam service disabled by launch option
 [startup] create default camera
 [startup] default camera created
 [startup] init SDL GPU renderer
 [startup] SDL GPU renderer initialized
 [startup] init triangle renderer
 [startup] init line renderer
+[startup] init world text renderer
 [startup] init quadtree mesh renderer
 [startup] init foliage canopy renderer
 [startup] init foliage renderer
@@ -30,4 +33,5 @@
 [startup] wait for device idle
 [startup] shutdown ImGui
 [startup] shutdown app subsystems
+[startup] shutdown platform services
 [startup] shutdown complete
