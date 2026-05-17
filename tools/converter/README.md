@@ -134,30 +134,30 @@ For the pine tree pack, that flow now includes an additional imposter-generation
 
 ### Entry and orchestration
 
-- [ConverterMain.cpp](C:/Users/siarr/source/repos/codex/tools/converter/ConverterMain.cpp): CLI parsing and default pack routing
-- [PineTreePackConverter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.cpp): top-level import, write, reload validation, and summary reporting
-- [PineTreePackConverter.hpp](C:/Users/siarr/source/repos/codex/tools/converter/PineTreePackConverter.hpp): normalized in-memory data model and pack configuration
-- [CMakeLists.txt](C:/Users/siarr/source/repos/codex/tools/converter/CMakeLists.txt): standalone converter build and dependencies
-- [BcTextureCompression.cpp](C:/Users/siarr/source/repos/codex/tools/converter/BcTextureCompression.cpp): converter-only BC3 and BC5 compression wrapper
+- [ConverterMain.cpp](ConverterMain.cpp): CLI parsing and default pack routing
+- [PineTreePackConverter.cpp](PineTreePackConverter.cpp): top-level import, write, reload validation, and summary reporting
+- [PineTreePackConverter.hpp](PineTreePackConverter.hpp): normalized in-memory data model and pack configuration
+- [CMakeLists.txt](CMakeLists.txt): standalone converter build and dependencies
+- [BcTextureCompression.cpp](BcTextureCompression.cpp): converter-only BC3 and BC5 compression wrapper
 
 ### Import
 
-- [FbxImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FbxImport.cpp): FBX mesh import through Assimp, unit conversion, transforms, bounds, and LOD grouping
-- [TextureImport.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TextureImport.cpp): TGA and PNG decoding, texture normalization, resize rules, color-space inference, and deduplication
-- [PineImposterGenerator.cpp](C:/Users/siarr/source/repos/codex/tools/converter/PineImposterGenerator.cpp): offscreen pine imposter capture, supersampled downfiltering, alpha-coverage-preserving mip generation, and BC compression setup
-- [FontMsdfConverter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/FontMsdfConverter.cpp): FreeType-based Roboto outline loading, MSDF atlas generation, and glyph metric record generation
+- [FbxImport.cpp](FbxImport.cpp): FBX mesh import through Assimp, unit conversion, transforms, bounds, and LOD grouping
+- [TextureImport.cpp](TextureImport.cpp): TGA and PNG decoding, texture normalization, resize rules, color-space inference, and deduplication
+- [PineImposterGenerator.cpp](PineImposterGenerator.cpp): offscreen pine imposter capture, supersampled downfiltering, alpha-coverage-preserving mip generation, and BC compression setup
+- [FontMsdfConverter.cpp](FontMsdfConverter.cpp): FreeType-based Roboto outline loading, MSDF atlas generation, and glyph metric record generation
 
 ### Runtime format writers
 
-- [MeshBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/MeshBinWriter.cpp): mesh metadata and per-mesh compressed geometry blobs
-- [TexBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/TexBinWriter.cpp): texture metadata and per-texture compressed RGBA8 blobs
-- [AssetBinWriter.cpp](C:/Users/siarr/source/repos/codex/tools/converter/AssetBinWriter.cpp): manifest linking meshes, materials, textures, and per-item compression metadata
+- [MeshBinWriter.cpp](MeshBinWriter.cpp): mesh metadata and per-mesh compressed geometry blobs
+- [TexBinWriter.cpp](TexBinWriter.cpp): texture metadata and per-texture compressed RGBA8 blobs
+- [AssetBinWriter.cpp](AssetBinWriter.cpp): manifest linking meshes, materials, textures, and per-item compression metadata
 
 ### Shared runtime reader
 
-- [RuntimeAssetReader.cpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetReader.cpp): validation and reload of emitted runtime bins
-- [RuntimeAssetFormat.hpp](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetFormat.hpp): binary format definitions
-- [RuntimeAssetCompression.*](C:/Users/siarr/source/repos/codex/src/assets/RuntimeAssetCompression.cpp): shared LZ4 compression and decompression helpers
+- [RuntimeAssetReader.cpp](../../src/assets/RuntimeAssetReader.cpp): validation and reload of emitted runtime bins
+- [RuntimeAssetFormat.hpp](../../src/assets/RuntimeAssetFormat.hpp): binary format definitions
+- [RuntimeAssetCompression.*](../../src/assets/RuntimeAssetCompression.cpp): shared LZ4 compression and decompression helpers
 
 ## Format Notes
 

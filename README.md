@@ -97,4 +97,4 @@ Missing external source assets:
 
 The Roboto font pack is converted into a `1024x1024` MSDF atlas plus glyph metrics. `WorldTextRenderer` consumes those records for baseline/centered, single-line/multiline, justified world-space text.
 
-For converter details, see [tools/converter/README.md](C:/Users/siarr/source/repos/codex/tools/converter/README.md).
+For converter details, see [tools/converter/README.md](tools/converter/README.md).
