@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
 
 #include <filesystem>
 #include <vector>
@@ -22,6 +23,8 @@ public:
     {
         float offset[3];
         float yawRadians = 0.0f;
+        float color[3]{ 1.0f, 1.0f, 1.0f };
+        float padding = 0.0f;
     };
 
     TriangleRenderer() = default;
@@ -40,7 +43,7 @@ public:
 
     void clear();
     void setActiveCamera(const Position& cameraPosition);
-    void addTriangle(const Position& position, float yawRadians = 0.0f);
+    void addTriangle(const Position& position, float yawRadians = 0.0f, const glm::vec3& color = glm::vec3(1.0f));
     void upload(SDL_GPUCopyPass* copyPass);
     void render(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* commandBuffer, const glm::mat4& viewProjection) const;
 

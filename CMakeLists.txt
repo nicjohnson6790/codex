@@ -265,6 +265,9 @@ add_executable(terrain_sandbox
     src/HeightmapNoiseGenerator.cpp
     src/LineRenderer.cpp
     src/LightingSystem.cpp
+    src/Multiplayer/MultiplayerManager.cpp
+    src/Multiplayer/MultiplayerRenderManager.cpp
+    src/Multiplayer/SteamSocketsTransport.cpp
     src/NearbyFoliageRenderer.cpp
     src/PerfPanel.cpp
     src/PerformanceCapture.cpp

@@ -9,8 +9,10 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <glm/geometric.hpp>
 #include <glm/matrix.hpp>
 #include <glm/vec3.hpp>
 #include <iostream>
@@ -32,7 +34,8 @@ std::filesystem::path executableRelativePath(const std::filesystem::path& relati
 }
 
 App::App(const Options& options)
-    : m_options(options)
+    : m_steamTransport(m_steamService)
+    , m_options(options)
 {
 }
 
@@ -83,6 +86,7 @@ void App::run()
             HELLO_PROFILE_SCOPE("App::UpdateScene");
             updateSceneForFrame();
         }
+        updateMultiplayerForFrame();
 
         renderCurrentFrame();
         finishFrame();
@@ -326,6 +330,7 @@ void App::shutdownRenderers()
 void App::shutdownPlatformServices()
 {
     logStartup("shutdown platform services");
+    m_multiplayerManager.leaveSession(m_steamService, m_steamTransport);
     m_steamService.shutdown();
 }
 
@@ -421,6 +426,7 @@ void App::buildUi()
         .cameraManager = m_cameraManager,
         .renderer = m_renderer,
         .steamService = m_steamService,
+        .multiplayerManager = m_multiplayerManager,
         .playerPawn = m_playerPawn,
         .collisionManager = m_collisionManager,
         .playerFollowCameraEnabled = m_playerFollowCameraEnabled,
@@ -439,6 +445,26 @@ void App::buildUi()
         .viewportTextureId = m_renderer.viewportTextureId(),
     };
     m_panels.draw(context);
+    handleMultiplayerPanelCommands();
+}
+
+void App::handleMultiplayerPanelCommands()
+{
+    std::uint64_t lobbyId = 0;
+    switch (m_panels.consumeMultiplayerCommand(lobbyId))
+    {
+    case AppPanels::MultiplayerCommand::CreateLobby:
+        m_multiplayerManager.hostLobby(m_steamService, m_steamTransport);
+        break;
+    case AppPanels::MultiplayerCommand::JoinLobby:
+        m_multiplayerManager.joinLobby(m_steamService, m_steamTransport, lobbyId);
+        break;
+    case AppPanels::MultiplayerCommand::LeaveLobby:
+        m_multiplayerManager.leaveSession(m_steamService, m_steamTransport);
+        break;
+    case AppPanels::MultiplayerCommand::None:
+        break;
+    }
 }
 
 void App::syncCameraModeTransition()
@@ -535,6 +561,51 @@ void App::updateSceneForFrame()
             ProfileScopeGroup::TreeUpdate);
         m_worldGridQuadtree.emitDebugDraws(renderEngines);
     }
+}
+
+void App::updateMultiplayerForFrame()
+{
+    HELLO_PROFILE_SCOPE("App::UpdateMultiplayer");
+    m_multiplayerLocalPawnSnapshot = buildMultiplayerLocalPawnSnapshot();
+    m_multiplayerManager.update(
+        m_steamService,
+        m_steamTransport,
+        m_multiplayerLocalPawnSnapshot,
+        m_lightingSystem,
+        m_deltaTimeSeconds,
+        static_cast<double>(m_elapsedTimeSeconds));
+}
+
+PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
+{
+    if (m_playerFollowCameraEnabled || !m_cameraManager.hasActiveCamera())
+    {
+        m_hasPreviousMultiplayerSnapshot = false;
+        return m_playerPawn;
+    }
+
+    PlayerPawn snapshot = m_playerPawn;
+    snapshot.position = m_cameraManager.activeCameraPosition();
+    const glm::dvec3 forward = m_cameraManager.activeCamera().forward;
+    const glm::dvec3 horizontalForward{ forward.x, 0.0, forward.z };
+    if (glm::length(horizontalForward) > 0.0001)
+    {
+        snapshot.yawRadians = std::atan2(horizontalForward.x, horizontalForward.z);
+    }
+
+    if (m_hasPreviousMultiplayerSnapshot && m_deltaTimeSeconds > 0.00001f)
+    {
+        snapshot.velocity =
+            (snapshot.position.worldPosition() - m_multiplayerLocalPawnSnapshot.position.worldPosition()) /
+            static_cast<double>(m_deltaTimeSeconds);
+    }
+    else
+    {
+        snapshot.velocity = glm::dvec3(0.0);
+        m_hasPreviousMultiplayerSnapshot = true;
+    }
+
+    return snapshot;
 }
 
 void App::syncRenderStateForActiveCamera(Extent2D viewportExtent)
@@ -722,6 +793,10 @@ void App::buildPrimitiveDraws()
             m_playerPawn.position.translated({ 0.0, 1.0, 0.0 }),
             static_cast<float>(m_playerPawn.yawRadians));
     }
+    m_multiplayerRenderManager.emitDraws(
+        m_multiplayerManager,
+        m_triangleRenderer,
+        m_worldTextRenderer);
 
     m_worldTextRenderer.addMultilineCentered(
         Position(0, -1, { 1257.0, 265.0, 523566.0 }),

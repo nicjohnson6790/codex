@@ -9,6 +9,9 @@
 #include "Gameplay.hpp"
 #include "LineRenderer.hpp"
 #include "LightingSystem.hpp"
+#include "Multiplayer/MultiplayerManager.hpp"
+#include "Multiplayer/MultiplayerRenderManager.hpp"
+#include "Multiplayer/SteamSocketsTransport.hpp"
 #include "NearbyFoliageRenderer.hpp"
 #include "PerformanceCapture.hpp"
 #include "platform/SteamService.hpp"
@@ -71,8 +74,11 @@ private:
     void updateSimulationTime();
     void beginImGuiFrame();
     void buildUi();
+    void handleMultiplayerPanelCommands();
     void syncCameraModeTransition();
     void updateSceneForFrame();
+    void updateMultiplayerForFrame();
+    [[nodiscard]] PlayerPawn buildMultiplayerLocalPawnSnapshot();
     void renderCurrentFrame();
     void finishFrame();
 
@@ -103,6 +109,9 @@ private:
     SkyboxRenderer m_skyboxRenderer;
     GamepadInput m_gamepadInput;
     SteamService m_steamService;
+    SteamSocketsTransport m_steamTransport;
+    MultiplayerManager m_multiplayerManager;
+    MultiplayerRenderManager m_multiplayerRenderManager;
     CameraManager m_cameraManager;
     FreeFlightCameraController m_cameraController;
     PlayerPawn m_playerPawn;
@@ -111,6 +120,7 @@ private:
     FollowCameraController m_followCameraController;
     CollisionManager m_collisionManager;
     PlayerMoveIntent m_playerMoveIntent;
+    PlayerPawn m_multiplayerLocalPawnSnapshot;
     AppPanels m_panels;
     WorldGridQuadtree m_worldGridQuadtree;
     WorldGridFoliageCanopyManager m_foliageCanopyManager;
@@ -129,6 +139,7 @@ private:
     std::size_t m_playerCameraIndex = 0;
     bool m_playerFollowCameraEnabled = false;
     bool m_previousPlayerFollowCameraEnabled = false;
+    bool m_hasPreviousMultiplayerSnapshot = false;
     bool m_firstFramePresented = false;
     std::uint64_t m_lastFrameTsc = 0;
     std::uint64_t m_frameIndex = 0;

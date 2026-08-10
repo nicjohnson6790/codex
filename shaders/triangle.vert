@@ -9,6 +9,7 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
 layout(location = 2) in vec3 inInstanceOffset;
 layout(location = 3) in float inInstanceYaw;
+layout(location = 4) in vec3 inInstanceColor;
 
 layout(location = 0) out vec3 fragColor;
 
@@ -22,5 +23,5 @@ void main()
         (-inPosition.x * s) + (inPosition.z * c));
     vec3 position = rotated + inInstanceOffset;
     gl_Position = camera.viewProjection * vec4(position, 1.0);
-    fragColor = inColor;
+    fragColor = inColor * inInstanceColor;
 }

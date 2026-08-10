@@ -77,12 +77,14 @@ void TriangleRenderer::setActiveCamera(const Position& cameraPosition)
     setActiveCameraPosition(cameraPosition);
 }
 
-void TriangleRenderer::addTriangle(const Position& position, float yawRadians)
+void TriangleRenderer::addTriangle(const Position& position, float yawRadians, const glm::vec3& color)
 {
     const glm::vec3 localOffset = localPositionFromWorldPosition(position);
     m_instances.push_back({
         { localOffset.x, localOffset.y, localOffset.z },
-        yawRadians
+        yawRadians,
+        { color.x, color.y, color.z },
+        0.0f
     });
 }
 
@@ -147,7 +149,7 @@ void TriangleRenderer::createPipeline(const std::filesystem::path& shaderDirecto
     vertexBufferDescriptions[1].input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE;
     vertexBufferDescriptions[1].instance_step_rate = 0;
 
-    SDL_GPUVertexAttribute vertexAttributes[4]{};
+    SDL_GPUVertexAttribute vertexAttributes[5]{};
     vertexAttributes[0].location = 0;
     vertexAttributes[0].buffer_slot = 0;
     vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
@@ -164,6 +166,10 @@ void TriangleRenderer::createPipeline(const std::filesystem::path& shaderDirecto
     vertexAttributes[3].buffer_slot = 1;
     vertexAttributes[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT;
     vertexAttributes[3].offset = offsetof(InstanceData, yawRadians);
+    vertexAttributes[4].location = 4;
+    vertexAttributes[4].buffer_slot = 1;
+    vertexAttributes[4].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    vertexAttributes[4].offset = offsetof(InstanceData, color);
 
     SDL_GPUColorTargetBlendState blendState{};
     blendState.enable_blend = true;
@@ -197,7 +203,7 @@ void TriangleRenderer::createPipeline(const std::filesystem::path& shaderDirecto
     pipelineInfo.target_info.depth_stencil_format = m_depthFormat;
     pipelineInfo.vertex_input_state.num_vertex_buffers = 2;
     pipelineInfo.vertex_input_state.vertex_buffer_descriptions = vertexBufferDescriptions;
-    pipelineInfo.vertex_input_state.num_vertex_attributes = 4;
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 5;
     pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
     m_pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);

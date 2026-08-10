@@ -4,6 +4,7 @@
 #include "FoliageCanopyRenderer.hpp"
 #include "Gameplay.hpp"
 #include "LightingSystem.hpp"
+#include "Multiplayer/MultiplayerManager.hpp"
 #include "NearbyFoliageRenderer.hpp"
 #include "PerfPanel.hpp"
 #include "platform/SteamService.hpp"
@@ -29,11 +30,20 @@
 class AppPanels
 {
 public:
+    enum class MultiplayerCommand
+    {
+        None,
+        CreateLobby,
+        JoinLobby,
+        LeaveLobby,
+    };
+
     struct Context
     {
         CameraManager& cameraManager;
         SDLRenderer& renderer;
         const SteamService& steamService;
+        MultiplayerManager& multiplayerManager;
         PlayerPawn& playerPawn;
         CollisionManager& collisionManager;
         bool& playerFollowCameraEnabled;
@@ -57,6 +67,14 @@ public:
     [[nodiscard]] Extent2D viewportExtent() const { return m_viewportPanelExtent; }
     [[nodiscard]] bool viewportPaused() const { return m_viewportPaused; }
     [[nodiscard]] bool showQuadtreeBorders() const { return m_showQuadtreeBorders; }
+    [[nodiscard]] MultiplayerCommand consumeMultiplayerCommand(std::uint64_t& lobbyId)
+    {
+        const MultiplayerCommand command = m_pendingMultiplayerCommand;
+        lobbyId = m_pendingLobbyId;
+        m_pendingMultiplayerCommand = MultiplayerCommand::None;
+        m_pendingLobbyId = 0;
+        return command;
+    }
 
 private:
     void drawDockSpace();
@@ -64,6 +82,7 @@ private:
     void drawInfoPane(Context& context);
     void drawControlsTab(Context& context);
     void drawSteamTab(Context& context);
+    void drawMultiplayerTab(Context& context);
     void drawTerrainTab(Context& context);
     void drawWaterTab(Context& context);
     void drawDebugTab(Context& context);
@@ -76,6 +95,8 @@ private:
     bool m_showViewportFpsCounter = true;
     bool m_showQuadtreeBorders = false;
     bool m_layoutDirty = false;
+    MultiplayerCommand m_pendingMultiplayerCommand = MultiplayerCommand::None;
+    std::uint64_t m_pendingLobbyId = 0;
     ImGuiID m_viewportDockId = 0;
     PerfPanel m_perfPanel;
 };

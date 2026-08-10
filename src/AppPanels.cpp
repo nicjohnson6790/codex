@@ -113,6 +113,12 @@ void AppPanels::drawInfoPane(Context& context)
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("MP"))
+        {
+            drawMultiplayerTab(context);
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Terrain"))
         {
             drawTerrainTab(context);
@@ -343,6 +349,88 @@ void AppPanels::drawSteamTab(Context& context)
     ImGui::Text("AppID: %u", context.steamService.appId());
     ImGui::Text("User ID: %llu", static_cast<unsigned long long>(context.steamService.userId()));
     ImGui::Text("Persona: %s", context.steamService.personaName().c_str());
+}
+
+void AppPanels::drawMultiplayerTab(Context& context)
+{
+    HELLO_PROFILE_SCOPE("AppPanels::DrawMultiplayerTab");
+
+    const MultiplayerManager::DebugSnapshot debug = context.multiplayerManager.debugSnapshot();
+    ImGui::SeparatorText("Steam");
+    ImGui::Text("Available: %s", context.steamService.initialized() ? "yes" : "no");
+    ImGui::Text("Persona: %s", context.steamService.personaName().empty() ? "offline" : context.steamService.personaName().c_str());
+    ImGui::Text("Steam ID: %llu", static_cast<unsigned long long>(context.steamService.userId()));
+
+    ImGui::SeparatorText("Session");
+    ImGui::Text("State: %s", MultiplayerManager::stateName(debug.state));
+    if (context.steamService.lobbyRequestPending())
+    {
+        ImGui::TextUnformatted("Lobby request pending...");
+    }
+    if (!debug.error.empty())
+    {
+        ImGui::TextWrapped("Error: %s", debug.error.c_str());
+    }
+
+    if (debug.state == MultiplayerManager::SessionState::Offline ||
+        debug.state == MultiplayerManager::SessionState::Error)
+    {
+        if (ImGui::Button("Create Lobby"))
+        {
+            m_pendingMultiplayerCommand = MultiplayerCommand::CreateLobby;
+            m_pendingLobbyId = 0;
+        }
+    }
+    else
+    {
+        if (ImGui::Button("Leave Lobby"))
+        {
+            m_pendingMultiplayerCommand = MultiplayerCommand::LeaveLobby;
+            m_pendingLobbyId = 0;
+        }
+    }
+
+    ImGui::Text("Lobby ID: %llu", static_cast<unsigned long long>(debug.lobbyId));
+    ImGui::Text("Host ID: %llu", static_cast<unsigned long long>(debug.hostId));
+    ImGui::Text("Connections: %zu", debug.connectionCount);
+    ImGui::Text("Remote entities: %zu", debug.remoteEntityCount);
+    ImGui::Text(
+        "Player packets sent/recv: %llu / %llu",
+        static_cast<unsigned long long>(debug.sentPlayerStateCount),
+        static_cast<unsigned long long>(debug.receivedPlayerStateCount));
+    ImGui::Text("Packet age: %.2f s", debug.newestPacketAgeSeconds);
+    ImGui::Text("Connection: %s", debug.connectionState.c_str());
+    ImGui::Text("Time drift: %.4f h", debug.timeSyncDriftHours);
+    ImGui::Text("Time revision: %u", debug.timeRevision);
+
+    ImGui::SeparatorText("Friends");
+    const std::vector<SteamService::FriendLobby> friendLobbies = context.steamService.joinableFriendLobbies();
+    if (friendLobbies.empty())
+    {
+        ImGui::TextUnformatted("No joinable friends found.");
+    }
+    for (const SteamService::FriendLobby& friendLobby : friendLobbies)
+    {
+        ImGui::PushID(static_cast<int>(friendLobby.friendSteamId & 0x7fffffffu));
+        ImGui::Text("%s", friendLobby.personaName.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Join"))
+        {
+            m_pendingMultiplayerCommand = MultiplayerCommand::JoinLobby;
+            m_pendingLobbyId = friendLobby.lobbyId;
+        }
+        ImGui::PopID();
+    }
+
+    ImGui::SeparatorText("Members");
+    for (const SteamService::LobbyMember& member : context.steamService.lobbyMembers())
+    {
+        ImGui::BulletText(
+            "%s (%llu)%s",
+            member.personaName.c_str(),
+            static_cast<unsigned long long>(member.steamId),
+            member.steamId == debug.hostId ? " host" : "");
+    }
 }
 
 void AppPanels::drawTerrainTab(Context& context)

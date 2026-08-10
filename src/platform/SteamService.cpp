@@ -4,6 +4,8 @@
 #include <steam/steam_api.h>
 #endif
 
+#include <algorithm>
+
 namespace
 {
 void clearLastSteamInputState(
@@ -84,6 +86,7 @@ void SteamService::shutdown()
 #if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
     if (m_initialized)
     {
+        leaveLobby();
         if (m_steamInputInitialized)
         {
             SteamInput()->Shutdown();
@@ -109,10 +112,12 @@ void SteamService::shutdown()
     m_sprintAction = 0;
     m_alignUpAction = 0;
     m_lastSteamInputStateActive = false;
+    m_lobbyRequestPending = false;
     m_lastMoveX = 0.0f;
     m_lastMoveY = 0.0f;
     m_lastLookX = 0.0f;
     m_lastLookY = 0.0f;
+    clearLobbyState();
     m_personaName.clear();
 }
 
@@ -255,6 +260,117 @@ GamepadState SteamService::pollGamepadState()
 #endif
 }
 
+std::vector<SteamService::FriendLobby> SteamService::joinableFriendLobbies() const
+{
+    std::vector<FriendLobby> lobbies;
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+    if (!m_initialized || SteamFriends() == nullptr || SteamUtils() == nullptr)
+    {
+        return lobbies;
+    }
+
+    const AppId_t appId = SteamUtils()->GetAppID();
+    const int friendCount = SteamFriends()->GetFriendCount(k_EFriendFlagImmediate);
+    for (int friendIndex = 0; friendIndex < friendCount; ++friendIndex)
+    {
+        const CSteamID friendId = SteamFriends()->GetFriendByIndex(friendIndex, k_EFriendFlagImmediate);
+        FriendGameInfo_t gameInfo{};
+        if (!SteamFriends()->GetFriendGamePlayed(friendId, &gameInfo) ||
+            gameInfo.m_gameID.AppID() != appId ||
+            !gameInfo.m_steamIDLobby.IsValid())
+        {
+            continue;
+        }
+
+        lobbies.push_back({
+            .friendSteamId = friendId.ConvertToUint64(),
+            .lobbyId = gameInfo.m_steamIDLobby.ConvertToUint64(),
+            .personaName = personaNameFor(friendId.ConvertToUint64()),
+        });
+    }
+#endif
+    return lobbies;
+}
+
+std::string SteamService::personaNameFor(std::uint64_t steamId) const
+{
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+    if (m_initialized && SteamFriends() != nullptr && steamId != 0)
+    {
+        const char* name = SteamFriends()->GetFriendPersonaName(CSteamID(steamId));
+        if (name != nullptr && name[0] != '\0')
+        {
+            return name;
+        }
+    }
+#endif
+    return steamId == m_userId ? m_personaName : std::string("Player ") + std::to_string(steamId);
+}
+
+bool SteamService::createLobby(int maxMembers)
+{
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+    if (!m_initialized || SteamMatchmaking() == nullptr || m_lobbyRequestPending)
+    {
+        return false;
+    }
+
+    if (m_currentLobbyId != 0)
+    {
+        leaveLobby();
+    }
+    m_lobbyRequestPending = true;
+    const SteamAPICall_t call = SteamMatchmaking()->CreateLobby(
+        k_ELobbyTypeFriendsOnly,
+        std::max(maxMembers, 2));
+    m_lobbyCreatedCallResult.Set(call, this, &SteamService::onLobbyCreated);
+    return true;
+#else
+    (void)maxMembers;
+    return false;
+#endif
+}
+
+bool SteamService::joinLobby(std::uint64_t lobbyId)
+{
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+    if (!m_initialized || SteamMatchmaking() == nullptr || m_lobbyRequestPending || lobbyId == 0)
+    {
+        return false;
+    }
+
+    if (m_currentLobbyId != 0 && m_currentLobbyId != lobbyId)
+    {
+        leaveLobby();
+    }
+    if (m_currentLobbyId == lobbyId)
+    {
+        refreshLobbyMembers();
+        return true;
+    }
+
+    m_lobbyRequestPending = true;
+    const SteamAPICall_t call = SteamMatchmaking()->JoinLobby(CSteamID(lobbyId));
+    m_lobbyEnteredCallResult.Set(call, this, &SteamService::onLobbyEntered);
+    return true;
+#else
+    (void)lobbyId;
+    return false;
+#endif
+}
+
+void SteamService::leaveLobby()
+{
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+    if (m_initialized && SteamMatchmaking() != nullptr && m_currentLobbyId != 0)
+    {
+        SteamMatchmaking()->LeaveLobby(CSteamID(m_currentLobbyId));
+    }
+#endif
+    clearLobbyState();
+    m_lobbyRequestPending = false;
+}
+
 void SteamService::initializeSteamInput(const std::filesystem::path& inputManifestPath)
 {
 #if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
@@ -337,6 +453,38 @@ bool SteamService::digitalAction(std::uint64_t inputHandle, std::uint64_t action
 #endif
 }
 
+void SteamService::refreshLobbyMembers()
+{
+    m_lobbyMembers.clear();
+#if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
+    if (!m_initialized || SteamMatchmaking() == nullptr || m_currentLobbyId == 0)
+    {
+        m_currentLobbyOwnerId = 0;
+        return;
+    }
+
+    const CSteamID lobbyId(m_currentLobbyId);
+    m_currentLobbyOwnerId = SteamMatchmaking()->GetLobbyOwner(lobbyId).ConvertToUint64();
+    const int memberCount = SteamMatchmaking()->GetNumLobbyMembers(lobbyId);
+    m_lobbyMembers.reserve(static_cast<std::size_t>(std::max(memberCount, 0)));
+    for (int memberIndex = 0; memberIndex < memberCount; ++memberIndex)
+    {
+        const CSteamID memberId = SteamMatchmaking()->GetLobbyMemberByIndex(lobbyId, memberIndex);
+        m_lobbyMembers.push_back({
+            .steamId = memberId.ConvertToUint64(),
+            .personaName = personaNameFor(memberId.ConvertToUint64()),
+        });
+    }
+#endif
+}
+
+void SteamService::clearLobbyState()
+{
+    m_currentLobbyId = 0;
+    m_currentLobbyOwnerId = 0;
+    m_lobbyMembers.clear();
+}
+
 #if defined(TERRAIN_SANDBOX_ENABLE_STEAM)
 void SteamService::onSteamInputDeviceConnected(SteamInputDeviceConnected_t* event)
 {
@@ -365,5 +513,54 @@ void SteamService::onSteamInputDeviceDisconnected(SteamInputDeviceDisconnected_t
         m_activeInputHandle = 0;
     }
     refreshSteamInputControllers();
+}
+
+void SteamService::onLobbyChatUpdate(LobbyChatUpdate_t* event)
+{
+    if (event == nullptr || event->m_ulSteamIDLobby != m_currentLobbyId)
+    {
+        return;
+    }
+    refreshLobbyMembers();
+}
+
+void SteamService::onGameLobbyJoinRequested(GameLobbyJoinRequested_t* event)
+{
+    if (event == nullptr)
+    {
+        return;
+    }
+    (void)joinLobby(event->m_steamIDLobby.ConvertToUint64());
+}
+
+void SteamService::onLobbyCreated(LobbyCreated_t* event, bool ioFailure)
+{
+    m_lobbyRequestPending = false;
+    if (ioFailure || event == nullptr || event->m_eResult != k_EResultOK || event->m_ulSteamIDLobby == 0)
+    {
+        clearLobbyState();
+        return;
+    }
+
+    m_currentLobbyId = event->m_ulSteamIDLobby;
+    if (SteamMatchmaking() != nullptr)
+    {
+        SteamMatchmaking()->SetLobbyData(CSteamID(m_currentLobbyId), "terrain_sandbox", "1");
+        SteamMatchmaking()->SetLobbyJoinable(CSteamID(m_currentLobbyId), true);
+    }
+    refreshLobbyMembers();
+}
+
+void SteamService::onLobbyEntered(LobbyEnter_t* event, bool ioFailure)
+{
+    m_lobbyRequestPending = false;
+    if (ioFailure || event == nullptr || event->m_EChatRoomEnterResponse != k_EChatRoomEnterResponseSuccess)
+    {
+        clearLobbyState();
+        return;
+    }
+
+    m_currentLobbyId = event->m_ulSteamIDLobby;
+    refreshLobbyMembers();
 }
 #endif
