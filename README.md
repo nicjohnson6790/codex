@@ -2,99 +2,89 @@
 
 ![rendered screenshot](images/Screenshot%202026-05-16%20175430.png)
 
-An editor-style terrain sandbox built on SDL3 GPU and Dear ImGui. It combines large-world quadtree terrain, GPU-generated foliage, FFT water, atmospheric sky rendering, debug primitives, and immediate-mode world-space MSDF text.
+Codex is an experimental large-world terrain sandbox and editor built in C++20 with SDL3 GPU and Dear ImGui. It combines streamed quadtree terrain, procedural foliage, FFT water, atmospheric rendering, world-space text, and optional Steam multiplayer in a dockable desktop UI.
 
-The authored pine tree source pack is not included, so the app can build from this repo, but the nearby tree mesh runtime assets cannot be regenerated end to end without that external content.
+## Highlights
 
-## Features
+- Large-world terrain with GPU-generated heightmaps and quadtree LOD
+- Near-detail trees, mid-distance imposters, and far-field procedural canopy
+- Cascaded FFT water with shoreline foam and terrain interaction
+- Skybox, atmosphere, time-of-day lighting, debug drawing, and profiling tools
+- Offline runtime-asset conversion for meshes, textures, fonts, and global elevation data
+- Optional Steamworks lobbies, networking, and Steam Input support
 
-- SDL3 GPU renderer presented inside an ImGui docking UI
-- Large-world camera/player flow using grid/local `Position` coordinates
-- Quadtree terrain with GPU heightmap generation and resident slice management
-- Terrain material blending from generated PBR runtime texture arrays
-- Nearby foliage meshes, mid-distance imposters, and far-canopy procedural shells
-- Shared-cascade FFT water with bridge meshes, shoreline foam, and terrain-aware response
-- Skybox and atmosphere composite driven by shared lighting/time-of-day state
-- Immediate-mode world text using generated Roboto MSDF assets, instanced indirect groups, depth testing, stroke, and glow/drop shadow styling
-- Offline converter for `meshbin`, `texbin`, and `assetbin` runtime packs
-- ImGui performance panel with frame scopes, flame graph zooming, and timing details
+## Requirements
 
-## Frame Shape
+- Windows 10 or 11
+- Visual Studio 2022 or 2026 Community with the **Desktop development with C++** workload
+- [CMake](https://cmake.org/) 3.25 or newer, installed at the standard `C:\Program Files\CMake` location
+- [Vulkan SDK](https://vulkan.lunarg.com/) 1.4.341.1 installed at `C:\VulkanSDK\1.4.341.1` so `glslc` is available
+- Internet access during the first configure so CMake can download declared dependencies
+- Generated runtime assets under `assets/runtime` (see [Runtime assets](#runtime-assets))
 
-`App` owns lifecycle, input, simulation, scene emission, and UI. `SDLRenderer` owns the SDL GPU device, viewport targets, pass order, and command submission.
+Ninja is supplied by supported Visual Studio installations. The build scripts initialize the Visual Studio environment automatically and refresh stale CMake caches after an MSVC toolset upgrade.
 
-Per frame, the app updates terrain/foliage/water residency, schedules GPU generation work, uploads emitted draw data, runs compute passes, then renders the viewport:
+## Build and run
 
-1. Terrain, water, foliage, canopy, debug triangles/lines, and world text render into the main color/depth targets.
-2. Skybox and atmosphere composite over the viewport color using the depth texture.
-3. ImGui renders the viewport texture and editor UI to the swapchain.
-
-## Key Files
-
-- `src/App.*`: application lifetime, frame sequencing, UI wiring, and scene emission
-- `src/SDLRenderer.*`: SDL GPU setup, compute dispatch order, render pass order, and presentation
-- `src/WorldGridQuadtree.*`: fixed-slot quadtree, LOD decisions, visibility, and draw/cache emission
-- `src/QuadtreeMeshRenderer.*`: terrain mesh rendering, bridge meshes, heightmap generation, and extent readback
-- `src/QuadtreeWaterMeshRenderer.*`: FFT water simulation and water mesh rendering
-- `src/*Foliage*.*`, `src/NearbyFoliageRenderer.*`: foliage residency, generation, imposters, nearby decode, and canopy rendering
-- `src/SkyboxRenderer.*`: cubemap loading, atmosphere LUT generation, and fullscreen sky composite
-- `src/WorldTextRenderer.*`: immediate-mode world-space Roboto MSDF text renderer
-- `src/assets/*`: runtime asset binary formats, compression, and readers
-- `tools/converter/*`: offline asset converter
-- `shaders/*`: GLSL shaders compiled to SPIR-V during the build
-
-## Build
-
-Requirements:
-
-- Windows with Visual Studio C++ tools
-- CMake 3.25+
-- Ninja
-- Vulkan SDK with `glslc`
-- Optional: Steamworks SDK 1.64 at `../deps/steamworks_sdk_164/sdk`, or configure with `-DSTEAMWORKS_SDK_DIR=...`
-- Internet access during first configure for `FetchContent`
-
-From the repo root:
+From a PowerShell or Command Prompt opened at the repository root:
 
 ```powershell
-tools\configure.cmd Debug
 tools\build.cmd Debug
 .\build\Debug\terrain_sandbox.exe
 ```
 
-Useful variants:
+`tools\build.cmd` configures the requested build directory on its first run, compiles shaders, builds the app, and stages runtime assets. Later builds are incremental.
+
+Useful launch options:
 
 ```powershell
-tools\build.cmd Release
-tools\build.cmd Assets
+# Run locally without initializing Steam
 .\build\Debug\terrain_sandbox.exe --disable-steam
+
+# Exercise startup and exit after one rendered frame
 .\build\Debug\terrain_sandbox.exe --verbose-startup --quit-after-first-frame
 ```
 
-`tools\build.cmd Assets` builds `build\Assets\converter.exe` and regenerates supported runtime packs under `assets/runtime`.
+For an optimized build:
 
-## Runtime Assets
+```powershell
+tools\build.cmd Release
+.\build\Release\terrain_sandbox.exe
+```
 
-Generated runtime assets are staged from `assets/runtime` into `build/<Config>/assets/runtime`.
+The canonical build directories are `build/Debug`, `build/Release`, and `build/Assets`.
 
-Supported converter packs:
+## Runtime assets
 
-- `skybox.assetbin`, `skybox.texbin`
-- `pbr.assetbin`, `pbr.texbin`
-- `pinetreepack.assetbin`, `pinetreepack.meshbin`, `pinetreepack.texbin`
-- `roboto.assetbin`, `roboto.texbin`
+The application loads prebuilt runtime packs from `assets/runtime`; the build copies them into `build/<Config>/assets/runtime`. The `assets` tree is intentionally ignored by Git, so a clean clone needs the source/runtime asset set supplied separately before the complete scene can run.
 
-Included source assets:
+To rebuild the standard packs after their source files are present:
 
-- `assets/source/skybox/tex`
-- `assets/source/pbr/tex`
-- `assets/source/font`
+```powershell
+tools\build.cmd Assets
+```
 
-Missing external source assets:
+The pine source pack is externally licensed and is not part of the repository. Details about expected source directories, individual converter modes, and the optional ETOPO global-heightmap build are in the [asset converter guide](tools/converter/README.md). The ETOPO pack is currently an offline foundation and is not yet consumed by the runtime terrain sampler.
 
-- `assets/source/pinetreepack/fbx`
-- `assets/source/pinetreepack/tex`
+## Optional Steamworks support
 
-The Roboto font pack is converted into a `1024x1024` MSDF atlas plus glyph metrics. `WorldTextRenderer` consumes those records for baseline/centered, single-line/multiline, justified world-space text.
+Steam support is enabled automatically when Steamworks SDK 1.64 is found at:
 
-For converter details, see [tools/converter/README.md](tools/converter/README.md).
+```text
+../deps/steamworks_sdk_164/sdk
+```
+
+Without the SDK, the project configures with Steam support disabled. You can also provide another SDK location through `STEAMWORKS_SDK_DIR` during manual CMake configuration. At runtime, use `--disable-steam` when testing without the Steam client.
+
+## Troubleshooting
+
+- **`glslc was not found`**: verify Vulkan SDK 1.4.341.1 is installed at the path above.
+- **Dependency download failed**: confirm GitHub access, then rerun the same build command.
+- **Runtime asset load failed**: confirm the required `.assetbin`, `.meshbin`, and `.texbin` files exist under `assets/runtime`, then rebuild the app to stage them.
+- **Visual Studio was upgraded**: rerun the normal build command; stale compiler paths are detected and the CMake cache is refreshed automatically.
+
+## Documentation
+
+- [Rendering architecture](docs/codex_rendering_architecture.md)
+- [Asset converter and ETOPO workflow](tools/converter/README.md)
+- [Agent working notes](AGENTS.md)
