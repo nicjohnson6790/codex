@@ -5,9 +5,11 @@ if /I "%BUILD_TYPE%"=="Assets" goto :build_assets
 
 set "BUILD_DIR=build\%BUILD_TYPE%"
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
-if not exist "%BUILD_DIR%\build.ninja" call "%~dp0configure.cmd" %BUILD_TYPE%
-if errorlevel 1 exit /b %errorlevel%
 call :ensure_ninja_cache "%BUILD_DIR%"
+if errorlevel 1 exit /b %errorlevel%
+if "%CMAKE_CACHE_STALE%"=="1" call "%~dp0configure.cmd" %BUILD_TYPE%
+if errorlevel 1 exit /b %errorlevel%
+if not exist "%BUILD_DIR%\build.ninja" call "%~dp0configure.cmd" %BUILD_TYPE%
 if errorlevel 1 exit /b %errorlevel%
 call :setup_vs_tools
 if errorlevel 1 exit /b %errorlevel%
@@ -18,9 +20,11 @@ exit /b %errorlevel%
 :build_assets
 set "BUILD_DIR=build\Assets"
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
-if not exist "%BUILD_DIR%\build.ninja" call "%~dp0configure.cmd" Assets
-if errorlevel 1 exit /b %errorlevel%
 call :ensure_ninja_cache "%BUILD_DIR%"
+if errorlevel 1 exit /b %errorlevel%
+if "%CMAKE_CACHE_STALE%"=="1" call "%~dp0configure.cmd" Assets
+if errorlevel 1 exit /b %errorlevel%
+if not exist "%BUILD_DIR%\build.ninja" call "%~dp0configure.cmd" Assets
 if errorlevel 1 exit /b %errorlevel%
 call :setup_vs_tools
 if errorlevel 1 exit /b %errorlevel%
@@ -64,6 +68,7 @@ exit /b 0
 
 :ensure_ninja_cache
 set "CACHE_DIR=%~1"
+set "CMAKE_CACHE_STALE=0"
 if exist "%CACHE_DIR%\CMakeCache.txt" (
     findstr /B /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "%CACHE_DIR%\CMakeCache.txt" >nul
     if errorlevel 1 (
@@ -71,5 +76,12 @@ if exist "%CACHE_DIR%\CMakeCache.txt" (
         echo Remove %CACHE_DIR% or configure a clean build directory before switching to Ninja.
         exit /b 1
     )
+)
+set "CACHED_CXX_COMPILER="
+if exist "%CACHE_DIR%\CMakeCache.txt" for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_CXX_COMPILER:FILEPATH=" "%CACHE_DIR%\CMakeCache.txt"') do set "CACHED_CXX_COMPILER=%%B"
+if defined CACHED_CXX_COMPILER if not exist "%CACHED_CXX_COMPILER%" (
+    echo Cached compiler no longer exists: "%CACHED_CXX_COMPILER%"
+    echo Refreshing the CMake cache for the installed Visual Studio toolset.
+    set "CMAKE_CACHE_STALE=1"
 )
 exit /b 0
