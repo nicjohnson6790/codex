@@ -297,7 +297,8 @@ file(MAKE_DIRECTORY "${asset_output_dir}")
 file(GLOB runtime_asset_bins
     "${asset_source_dir}/*.meshbin"
     "${asset_source_dir}/*.texbin"
-    "${asset_source_dir}/*.assetbin")
+    "${asset_source_dir}/*.assetbin"
+    "${asset_source_dir}/*.heightbin")
 
 foreach(asset_bin IN LISTS runtime_asset_bins)
     execute_process(

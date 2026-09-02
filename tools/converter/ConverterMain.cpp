@@ -1,4 +1,5 @@
 #include "PineTreePackConverter.hpp"
+#include "EtopoHeightmapConverter.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -61,7 +62,32 @@ void PrintUsage()
         << "  converter.exe skybox\n"
         << "  converter.exe pbr\n"
         << "  converter.exe roboto\n"
+        << "  converter.exe etopo2022 [--source <tif>] [--out <directory>] [--verbose|--self-test]\n"
         << "  converter.exe --source <path> --out <path> --name <pack>\n";
+}
+
+bool RunEtopo(int argc, char** argv, std::string* error)
+{
+    EtopoConversionConfig config{
+        repoRoot() / "assets" / "source" / "etopo2022" / "ETOPO_2022_v1_60s_N90W180_surface.tif",
+        repoRoot() / "assets" / "runtime",
+        false,
+        false
+    };
+    for (int index = 2; index < argc; ++index)
+    {
+        const std::string_view arg = argv[index];
+        if ((arg == "--source" || arg == "--out") && index + 1 >= argc)
+        { *error = std::string(arg) + " requires a path"; return false; }
+        if (arg == "--source") config.sourceTiff = argv[++index];
+        else if (arg == "--out") config.outputRoot = argv[++index];
+        else if (arg == "--verbose") config.verbose = true;
+        else if (arg == "--self-test") config.selfTestOnly = true;
+        else { *error = "unknown etopo2022 argument: " + std::string(arg); return false; }
+    }
+    EtopoHeightmapConverter converter;
+    EtopoConversionSummary summary;
+    return converter.run(config, &summary, error);
 }
 
 bool ParseArguments(int argc, char** argv, ConverterConfig* outConfig, std::string* error)
@@ -129,6 +155,15 @@ int main(int argc, char** argv)
     {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << '\n';
         return 1;
+    }
+
+    if (argc >= 2 && std::string_view(argv[1]) == "etopo2022")
+    {
+        std::string etopoError;
+        const bool success = RunEtopo(argc, argv, &etopoError);
+        if (!success) std::cerr << "ETOPO conversion failed: " << etopoError << '\n';
+        SDL_Quit();
+        return success ? 0 : 1;
     }
 
     ConverterConfig config;

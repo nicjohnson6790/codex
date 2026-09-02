@@ -1,6 +1,6 @@
 # Runtime Asset Converter
 
-This folder contains the standalone offline converter that turns source art into the runtime `meshbin`, `texbin`, and `assetbin` files used by the main app. Runtime camera, quadtree, canopy shell, and gameplay changes do not require regenerating these packs.
+This folder contains the standalone offline converter that turns source art into the runtime `meshbin`, `texbin`, `assetbin`, and tiled heightmap files used by the project. Runtime camera, quadtree, canopy shell, and gameplay changes do not require regenerating these packs.
 
 The converter is separate on purpose:
 
@@ -118,6 +118,53 @@ Default roots:
   - source root: `assets/source/font`
   - font file: `assets/source/font/Roboto-VariableFont_wdth,wght.ttf`
 - output root: `assets/runtime`
+
+## ETOPO 2022 global base-height atlas
+
+ETOPO generation is deliberately separate from `tools\build.cmd Assets`: the official input is approximately 444 MB and is not committed. Download, build, and convert it explicitly from the repository root:
+
+```powershell
+tools\download_etopo2022.cmd
+tools\build.cmd Assets
+.\build\Assets\converter.exe etopo2022
+```
+
+The download script uses Windows `curl.exe`, retries failures, downloads to a `.part` file, and only replaces the final file after success. Pass `--force` to download it again. The official source is NOAA's [ETOPO 2022 60 arc-second surface elevation GeoTIFF](https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif), stored as `assets/source/etopo2022/ETOPO_2022_v1_60s_N90W180_surface.tif`.
+
+To build only the already-configured converter without regenerating the normal packs:
+
+```powershell
+cmake --build build\Assets --target converter --parallel
+```
+
+Input/output overrides and tile logging are available:
+
+```powershell
+.\build\Assets\converter.exe etopo2022 --source D:\data\etopo.tif --out D:\generated --verbose
+```
+
+The dependency-independent filter/projection checks can be run without the TIFF:
+
+```powershell
+.\build\Assets\converter.exe etopo2022 --self-test
+```
+
+The output is:
+
+- `etopo2022.assetbin`: compact header and tile-coordinate index;
+- `etopo2022.heightbin`: independently compressed tile blobs;
+- `etopo2022_preview.png`: diagnostic hypsometric projection preview with tile lines (not runtime data).
+- `etopo2022_tiles_preview.png`: dense near-square contact sheet of 32x32 thumbnails decoded from every indexed LZ4 tile blob, in index/blob order. Fully invalid discarded tiles consume no cell; only unused cells at the end of the final row are empty (not runtime data).
+
+Projection version 3 is a fixed Airocean "one-island" icosahedral gnomonic net on the authalic sphere (radius `6,371,007.180918475 m`). Its face tree keeps the north-pole faces connected and routes most cuts through oceans; three faces are subdivided so the cuts pass around Japan and Australia. The globe orientation is `(-83.65929, 25.44458, -87.45184)` degrees and the unfolded net is rotated `-60 degrees` in atlas space. All three orientation components and the atlas rotation are stored explicitly in format-version-2 pack headers, while the precise cut topology is identified by projection version 3. This is an Airocean-layout gnomonic implementation, not Fuller's proprietary per-face transform. The atlas coordinate system is independent of Codex's `Position` grid and does not bake in runtime terrain resolution or world placement.
+
+Tiles have a physical footprint of exactly `524,288 m` and signed `int8` coordinates. Tile `(x,y)` begins at atlas coordinate `(x * 524288, y * 524288)`. Each tile stores `256x256` signed 16-bit integer-meter samples on a global lattice with a stride of 255 intervals, so neighboring tiles duplicate their shared border bit-for-bit. `INT16_MIN` marks samples outside the unfolded projection; only completely invalid tiles are omitted. Ocean and bathymetry remain in the pack.
+
+Each tile is filtered independently using serpentine spatial traversal, modulo-16-bit first differences, signed ZigZag folding, and low/high byte planes, then compressed as its own normal LZ4 blob. The small index contains every tile's signed coordinate, blob offset, compressed size, fixed filtered size, valid sample count, and elevation range, so tile lookup never requires scanning `heightbin`.
+
+Index records are sorted deterministically by `tileY`, then `tileX`.
+
+Generation validates source dimensions/georeferencing/sample type, exhaustively self-tests the reversible residual transform, round-trips every filtered/compressed tile, compares every emitted shared edge, validates index ranges and uniqueness, then closes and reopens both output files and decodes all blobs. Runtime sampling, world placement transforms, terrain-generator integration, and user heightmap layers are intentionally outside this stage.
 
 ## Conversion Pipeline
 

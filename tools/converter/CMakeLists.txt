@@ -47,6 +47,11 @@ FetchContent_Declare(
     URL https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz
 )
 
+FetchContent_Declare(
+    tiff
+    URL https://download.osgeo.org/libtiff/tiff-4.7.1.tar.xz
+)
+
 if (CONVERTER_ENABLE_DIRECTXTEX)
     FetchContent_Declare(
         DirectXTex
@@ -97,8 +102,33 @@ set(BUILD_DX11 OFF CACHE BOOL "" FORCE)
 set(BUILD_DX12 OFF CACHE BOOL "" FORCE)
 set(BUILD_XBOX_EXTS OFF CACHE BOOL "" FORCE)
 set(ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
+set(tiff-tools OFF CACHE BOOL "" FORCE)
+set(tiff-tests OFF CACHE BOOL "" FORCE)
+set(tiff-contrib OFF CACHE BOOL "" FORCE)
+set(tiff-docs OFF CACHE BOOL "" FORCE)
+set(tiff-deprecated OFF CACHE BOOL "" FORCE)
+set(jbig OFF CACHE BOOL "" FORCE)
+set(jpeg OFF CACHE BOOL "" FORCE)
+set(lzma OFF CACHE BOOL "" FORCE)
+set(webp OFF CACHE BOOL "" FORCE)
+set(zstd OFF CACHE BOOL "" FORCE)
+set(zlib ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(SDL3 SDL3_image assimp lz4 freetype)
+
+# Assimp's converter-only zlib is already available here. Reuse it so libtiff
+# can decode DEFLATE-compressed GeoTIFFs without adding another runtime or
+# duplicate compression dependency.
+set(ZLIB_FOUND TRUE)
+set(ZLIB_INCLUDE_DIR "${assimp_SOURCE_DIR}/contrib/zlib" "${assimp_BINARY_DIR}/contrib/zlib")
+set(ZLIB_INCLUDE_DIRS ${ZLIB_INCLUDE_DIR})
+if (NOT TARGET ZLIB::ZLIB)
+    add_library(ZLIB::ZLIB ALIAS zlibstatic)
+endif()
+set(ZLIB_LIBRARY ZLIB::ZLIB)
+set(ZLIB_LIBRARIES ZLIB::ZLIB)
+FetchContent_MakeAvailable(tiff)
+target_include_directories(tiff PRIVATE ${ZLIB_INCLUDE_DIRS})
 if (CONVERTER_ENABLE_DIRECTXTEX)
     FetchContent_MakeAvailable(DirectXTex)
 endif()
@@ -174,6 +204,10 @@ target_link_libraries(runtime_asset_reader
 
 add_executable(converter
     ConverterMain.cpp
+    EtopoHeightmapConverter.cpp
+    EtopoGeoTiffReader.cpp
+    HeightmapTileFilter.cpp
+    IcosahedralProjection.cpp
     BcTextureCompression.cpp
     FontMsdfConverter.cpp
     PineTreePackConverter.cpp
@@ -218,6 +252,7 @@ target_link_libraries(converter
         SDL3_image::SDL3_image
         freetype
         ${ASSIMP_TARGET}
+        TIFF::tiff
 )
 
 if (DEFINED CONVERTER_DIRECTXTEX_TARGET)
