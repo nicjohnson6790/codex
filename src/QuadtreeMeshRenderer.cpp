@@ -2,6 +2,7 @@
 
 #include "AppConfig.hpp"
 #include "PerformanceCapture.hpp"
+#include "WorldGridFoliageManager.hpp"
 #include "assets/RuntimeAssetReader.hpp"
 
 #include <SDL3/SDL_filesystem.h>
@@ -717,7 +718,8 @@ void QuadtreeMeshRenderer::setWaterCausticsState(const WaterSettings& settings)
 bool QuadtreeMeshRenderer::queueHeightmapGeneration(
     const WorldGridQuadtreeLeafId& leafId,
     std::uint16_t sliceIndex,
-    const TerrainNoiseSettings& settings)
+    const TerrainNoiseSettings& settings,
+    GenerationJobHandle job)
 {
     if (m_pendingHeightmapGenerationCount >= m_pendingHeightmapGenerations.size())
     {
@@ -739,6 +741,7 @@ bool QuadtreeMeshRenderer::queueHeightmapGeneration(
 
     HeightmapGenerationUniforms& uniforms = m_pendingHeightmapGenerations[m_pendingHeightmapGenerationCount++];
     m_pendingGenerationLeafIds[m_pendingHeightmapGenerationCount - 1] = leafId;
+    m_pendingGenerationJobs[m_pendingHeightmapGenerationCount - 1] = job;
     uniforms.sampleOriginAndStep = glm::vec4(
         static_cast<float>(worldMinX),
         static_cast<float>(worldMinZ),
@@ -1083,6 +1086,7 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
     {
         m_lastDispatchedLeafIds[index] = m_pendingGenerationLeafIds[index];
         m_lastDispatchedSlices[index] = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].dispatchParams.x);
+        m_lastDispatchedGenerationJobs[index] = m_pendingGenerationJobs[index];
     }
 
     SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, m_pendingHeightmapGenerationCount);
@@ -1126,6 +1130,7 @@ void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPa
         {
             readback.leafIds[index] = m_lastDispatchedLeafIds[index];
             readback.sliceIndices[index] = m_lastDispatchedSlices[index];
+            readback.jobs[index] = m_lastDispatchedGenerationJobs[index];
         }
 
         m_pendingFenceReadbackSlot = static_cast<std::uint16_t>(slotIndex);
@@ -1208,7 +1213,8 @@ bool QuadtreeMeshRenderer::queueFoliagePageGeneration(
     const WorldGridQuadtreeLeafId& terrainLeafId,
     std::uint16_t terrainSliceIndex,
     std::uint16_t pageIndex,
-    float waterLevel)
+    float waterLevel,
+    GenerationJobHandle job)
 {
     if (m_pendingFoliageInstanceGenerationCount >= m_pendingFoliageInstanceGenerations.size())
     {
@@ -1223,6 +1229,8 @@ bool QuadtreeMeshRenderer::queueFoliagePageGeneration(
 
     const std::uint16_t generationIndex = m_pendingFoliageInstanceGenerationCount++;
     m_pendingFoliageInstanceLeafIds[generationIndex] = foliageLeafId;
+    m_pendingFoliagePageIndices[generationIndex] = pageIndex;
+    m_pendingFoliageJobs[generationIndex] = job;
     m_pendingFoliageInstanceGenerations[generationIndex] = {
         .dispatchParams = glm::uvec4(
             pageIndex,
@@ -1312,6 +1320,8 @@ void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(
     for (std::uint16_t index = 0; index < m_pendingFoliageInstanceGenerationCount; ++index)
     {
         m_lastDispatchedFoliageInstanceLeafIds[index] = m_pendingFoliageInstanceLeafIds[index];
+        m_lastDispatchedFoliagePageIndices[index] = m_pendingFoliagePageIndices[index];
+        m_lastDispatchedFoliageJobs[index] = m_pendingFoliageJobs[index];
     }
 
     const std::uint32_t groupCountX =
@@ -1361,6 +1371,8 @@ void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPas
         for (std::uint16_t index = 0; index < readback.count; ++index)
         {
             readback.leafIds[index] = m_lastDispatchedFoliageInstanceLeafIds[index];
+            readback.pageIndices[index] = m_lastDispatchedFoliagePageIndices[index];
+            readback.jobs[index] = m_lastDispatchedFoliageJobs[index];
         }
 
         m_pendingFoliageLiveCountFenceReadbackSlot = static_cast<std::uint16_t>(slotIndex);
@@ -1375,7 +1387,10 @@ void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPas
     }
 }
 
-void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence>& fence)
+void QuadtreeMeshRenderer::attachSubmittedFence(
+    const std::shared_ptr<SubmittedGpuFence>& fence,
+    WorldGridQuadtreeHeightmapManager& heightmapManager,
+    WorldGridFoliageManager& foliageManager)
 {
     if (m_pendingFenceReadbackSlot == UINT16_MAX)
     {
@@ -1390,6 +1405,8 @@ void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedG
     {
         PendingExtentsReadback& readback = m_pendingExtentsReadbacks[m_pendingFenceReadbackSlot];
         readback.fence = fence;
+        for (std::uint16_t index = 0; index < readback.count; ++index)
+            heightmapManager.markSubmitted(readback.jobs[index], fence);
         m_pendingFenceReadbackSlot = UINT16_MAX;
     }
 
@@ -1406,6 +1423,8 @@ void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedG
         PendingFoliageLiveCountReadback& readback =
             m_pendingFoliageLiveCountReadbacks[m_pendingFoliageLiveCountFenceReadbackSlot];
         readback.fence = fence;
+        for (std::uint16_t index = 0; index < readback.count; ++index)
+            foliageManager.markSubmitted(readback.jobs[index], fence);
         m_pendingFoliageLiveCountFenceReadbackSlot = UINT16_MAX;
     }
 }
@@ -1434,6 +1453,7 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<Generate
                     .minHeight = static_cast<float>(gpuExtents.minHeightCentimeters) * 0.01f,
                     .maxHeight = static_cast<float>(gpuExtents.maxHeightCentimeters) * 0.01f,
                 },
+                .job = readback.jobs[index],
             });
         }
         SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
@@ -1494,6 +1514,8 @@ void QuadtreeMeshRenderer::collectCompletedFoliagePageLiveCounts(
                 .liveCount = static_cast<std::uint16_t>(std::min<std::uint32_t>(
                     mappedCounts[index],
                     FoliageConfig::kCandidateSlotCount)),
+                .pageIndex = readback.pageIndices[index],
+                .job = readback.jobs[index],
             });
         }
 

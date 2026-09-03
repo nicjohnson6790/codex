@@ -56,6 +56,11 @@ exit /b 0
 :ensure_ninja_cache
 set "CACHE_DIR=%~1"
 set "CMAKE_CACHE_STALE=0"
+if exist "%CACHE_DIR%\build.ninja" if not exist "%CACHE_DIR%\CMakeFiles\rules.ninja" (
+    echo Incomplete Ninja configuration in %CACHE_DIR%: CMakeFiles\rules.ninja is missing.
+    echo Refreshing the CMake cache.
+    set "CMAKE_CACHE_STALE=1"
+)
 if exist "%CACHE_DIR%\CMakeCache.txt" (
     findstr /B /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "%CACHE_DIR%\CMakeCache.txt" >nul
     if errorlevel 1 (

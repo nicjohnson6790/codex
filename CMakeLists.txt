@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+option(CODEX_BUILD_TESTS "Build Codex unit tests" ON)
 
 include(FetchContent)
 
@@ -120,12 +121,21 @@ target_link_libraries(imgui_backend
         SDL3::SDL3
 )
 
-set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
+set(APP_OUTPUT_DIR ${CMAKE_BINARY_DIR}/app)
+set(TEST_OUTPUT_DIR ${CMAKE_BINARY_DIR}/tests)
+set(SHADER_OUTPUT_DIR ${APP_OUTPUT_DIR}/shaders)
 set(RUNTIME_ASSET_SOURCE_DIR ${CMAKE_SOURCE_DIR}/assets/runtime)
-set(RUNTIME_ASSET_OUTPUT_DIR ${CMAKE_BINARY_DIR}/assets/runtime)
+set(RUNTIME_ASSET_OUTPUT_DIR ${APP_OUTPUT_DIR}/assets/runtime)
 set(STEAM_INPUT_SOURCE_DIR ${CMAKE_SOURCE_DIR}/steam_input)
-set(STEAM_INPUT_OUTPUT_DIR ${CMAKE_BINARY_DIR}/steam_input)
+set(STEAM_INPUT_OUTPUT_DIR ${APP_OUTPUT_DIR}/steam_input)
 file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+
+if (NOT "${STEAMWORKS_APP_ID}" STREQUAL "")
+    file(GENERATE
+        OUTPUT ${APP_OUTPUT_DIR}/steam_appid.txt
+        CONTENT "${STEAMWORKS_APP_ID}\n"
+    )
+endif()
 
 function(compile_shader SOURCE_FILE OUTPUT_FILE)
     add_custom_command(
@@ -279,10 +289,17 @@ add_executable(terrain_sandbox
     src/WorldGridQuadtree.cpp
     src/WorldGridFoliageManager.cpp
     src/WorldGridFoliageCanopyManager.cpp
+    src/WorldGridNearbyFoliageManager.cpp
     src/WorldGridQuadtreeDebugRenderer.cpp
     src/WorldGridQuadtreeHeightmapManager.cpp
     src/WorldGridQuadtreeWaterManager.cpp
     src/WorldTextRenderer.cpp
+)
+
+set_target_properties(terrain_sandbox PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${APP_OUTPUT_DIR}
+    ARCHIVE_OUTPUT_DIRECTORY ${APP_OUTPUT_DIR}
+    LIBRARY_OUTPUT_DIRECTORY ${APP_OUTPUT_DIR}
 )
 
 add_dependencies(terrain_sandbox shaders)
@@ -359,6 +376,16 @@ target_link_libraries(terrain_sandbox
         SDL3::SDL3
 )
 
+if (CODEX_BUILD_TESTS)
+    enable_testing()
+    add_executable(asset_residency_tests tests/AssetResidencyTests.cpp)
+    set_target_properties(asset_residency_tests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
+    )
+    target_include_directories(asset_residency_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME asset_residency_tests COMMAND $<TARGET_FILE:asset_residency_tests>)
+endif()
+
 if (TERRAIN_SANDBOX_ENABLE_STEAM)
     target_compile_definitions(terrain_sandbox
         PRIVATE
@@ -377,18 +404,6 @@ if (TERRAIN_SANDBOX_ENABLE_STEAM)
         VERBATIM
     )
 
-    if (NOT "${STEAMWORKS_APP_ID}" STREQUAL "")
-        file(GENERATE
-            OUTPUT ${CMAKE_BINARY_DIR}/steam_appid.txt
-            CONTENT "${STEAMWORKS_APP_ID}\n"
-        )
-        add_custom_command(TARGET terrain_sandbox POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_BINARY_DIR}/steam_appid.txt"
-                $<TARGET_FILE_DIR:terrain_sandbox>
-            VERBATIM
-        )
-    endif()
 endif()
 
 if (MSVC)

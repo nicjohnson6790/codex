@@ -7,6 +7,7 @@
 #include "Position.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 #include "WorldGridFoliageManager.hpp"
+#include "WorldGridNearbyFoliageManager.hpp"
 #include "WorldGridQuadtreeHeightmapManager.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
 
@@ -55,6 +56,7 @@ public:
         std::uint64_t frameIndex,
         WorldGridQuadtreeHeightmapManager& heightmapManager,
         WorldGridFoliageManager& foliageManager,
+        WorldGridNearbyFoliageManager& nearbyFoliageManager,
         NearbyFoliageRenderer& nearbyFoliageRenderer,
         QuadtreeMeshRenderer& meshRenderer);
 

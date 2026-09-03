@@ -57,27 +57,34 @@ bool terrainNoiseSettingsEqual(const TerrainNoiseSettings& a, const TerrainNoise
 }
 
 WorldGridFoliageCanopyManager::WorldGridFoliageCanopyManager()
+    : m_cache(kCapacity, FoliageConfig::kCanopyLookupBucketCount, FoliageConfig::kCanopyLookupBucketEntryCount)
+    , m_generationJobs(kCapacity)
 {
     resetCacheState();
 }
 
 void WorldGridFoliageCanopyManager::ageMap()
 {
-    ++m_requestFrame;
-
-    for (std::uint16_t activeIndex = 0; activeIndex < m_residentCount; ++activeIndex)
-    {
-        const std::uint16_t residentIndex = m_activeResidentIndices[activeIndex];
-        FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
-        if (entry.evictionAge < std::numeric_limits<std::uint8_t>::max())
+    m_generationJobs.processSignaled([&](GenerationJobHandle handle, const GenerationJob& job) {
+        if (m_cache.isOpen(job.targetSlot) && m_cache.assetId(job.targetSlot) == job.assetId &&
+            m_cache.activeJob(job.targetSlot) == handle)
         {
-            ++entry.evictionAge;
+            setResidentFlag(m_residentEntries[job.targetSlot], ReadyMask, true);
+            m_cache.markReady(job.targetSlot);
+            m_cache.clearActiveJob(job.targetSlot, handle);
         }
+    });
+    ++m_requestFrame;
+    m_cache.age();
+
+    for (std::uint16_t residentIndex = 0; residentIndex < kCapacity; ++residentIndex)
+    {
+        if (!m_cache.isOpen(residentIndex)) continue;
+        FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
         if (entry.residentFrameAge < std::numeric_limits<std::uint8_t>::max())
         {
             ++entry.residentFrameAge;
         }
-        m_generationLocked[residentIndex] = false;
     }
 }
 
@@ -105,26 +112,55 @@ void WorldGridFoliageCanopyManager::clearCache()
     resetCacheState();
 }
 
-std::uint16_t WorldGridFoliageCanopyManager::makeResident(
+void WorldGridFoliageCanopyManager::shutdownAfterGpuIdle()
+{
+    m_cache.clear();
+    m_generationJobs.clear();
+}
+
+std::uint16_t WorldGridFoliageCanopyManager::requestAsset(
     const WorldGridQuadtreeLeafId& leafId,
     const WorldGridQuadtreeLeafId& terrainLeafId,
-    std::uint16_t terrainSliceIndex)
+    std::uint16_t terrainSliceIndex,
+    std::uint16_t hint)
 {
     const FoliageTerrainSource terrainSource{
         .terrainLeafId = terrainLeafId,
         .terrainSliceIndex = terrainSliceIndex,
     };
 
-    const std::uint16_t residentIndex = findResidentIndex(leafId);
+    std::uint16_t residentIndex = m_cache.validatesHint(hint, leafId) ? hint : findResidentIndex(leafId);
     if (residentIndex != kCapacity)
     {
         FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
-        entry.evictionAge = 0;
+        m_cache.touch(residentIndex);
         m_terrainSources[residentIndex] = terrainSource;
+        const GenerationJobHandle activeJob = m_cache.activeJob(residentIndex);
+        if (activeJob.valid() && m_generationJobs.contains(activeJob))
+        {
+            m_generationJobs.job(activeJob).terrainSource = terrainSource;
+            m_generationJobs.job(activeJob).requestFrame = m_requestFrame;
+        }
         return residentHasFlag(entry, ReadyMask) ? residentIndex : kCapacity;
     }
 
-    (void)enqueueLeaf(leafId, terrainSource);
+    const auto candidate = m_cache.findAllocationCandidate();
+    if (!candidate) return kCapacity;
+    const auto job = m_generationJobs.tryPush({ leafId, *candidate, terrainSource, m_requestFrame });
+    if (!job) return kCapacity;
+    residentIndex = *candidate;
+    const bool wasOpen = m_cache.isOpen(residentIndex);
+    if (wasOpen)
+    {
+        const GenerationJobHandle oldJob = m_cache.activeJob(residentIndex);
+        if (oldJob.valid() && m_generationJobs.contains(oldJob)) m_generationJobs.discard(oldJob);
+        clearResidentCell(residentIndex, false);
+    }
+    m_cache.assign(residentIndex, leafId);
+    m_cache.setActiveJob(residentIndex, *job);
+    assignResidentCell(residentIndex, leafId);
+    m_terrainSources[residentIndex] = terrainSource;
+    if (!wasOpen) ++m_residentCount;
     return kCapacity;
 }
 
@@ -132,79 +168,44 @@ void WorldGridFoliageCanopyManager::scheduleQueuedGenerations(FoliageCanopyRende
 {
     HELLO_PROFILE_SCOPE("WorldGridFoliageCanopyManager::ScheduleQueuedGenerations");
 
-    for (std::uint16_t dispatchIndex = 0; dispatchIndex < FoliageConfig::kCanopyGenerationBudgetPerFrame; ++dispatchIndex)
-    {
-        QueuedLeafRequest request{};
-        if (!dequeueLeaf(request))
+    std::uint16_t dispatched = 0;
+    m_generationJobs.forEachActive([&](GenerationJobHandle handle) {
+        if (dispatched >= FoliageConfig::kCanopyGenerationBudgetPerFrame || m_generationJobs.isCompleted(handle) ||
+            m_generationJobs.isDiscarded(handle) || m_generationJobs.isSubmitted(handle)) return;
+        const GenerationJob job = m_generationJobs.job(handle);
+        if (job.requestFrame != m_requestFrame)
         {
+            m_generationJobs.discard(handle);
+            if (m_cache.isOpen(job.targetSlot) && m_cache.activeJob(job.targetSlot) == handle)
+            {
+                m_cache.clearActiveJob(job.targetSlot, handle);
+                m_cache.release(job.targetSlot);
+                clearResidentCell(job.targetSlot);
+            }
             return;
         }
-
-        if (request.requestFrame != m_requestFrame)
-        {
-            --dispatchIndex;
-            continue;
-        }
-
-        std::uint16_t residentIndex = findResidentIndex(request.leafId);
-        if (residentIndex != kCapacity)
-        {
-            m_residentEntries[residentIndex].evictionAge = 0;
-            m_terrainSources[residentIndex] = request.terrainSource;
-            continue;
-        }
-
-        bool usesFreeSlot = false;
-        if (m_freeResidentIndexCount > 0)
-        {
-            residentIndex = m_freeResidentIndices[--m_freeResidentIndexCount];
-            usesFreeSlot = true;
-        }
-        else
-        {
-            residentIndex = findOldestEvictableResidentIndex();
-            if (residentIndex == kCapacity)
-            {
-                (void)enqueueLeaf(request.leafId, request.terrainSource);
-                return;
-            }
-        }
-
-        if (!usesFreeSlot)
-        {
-            removeResidentLookup(m_residentEntries[residentIndex].leafId, residentIndex);
-            clearResidentCell(residentIndex, false);
-        }
-
-        assignResidentCell(residentIndex, request.leafId);
-        m_terrainSources[residentIndex] = request.terrainSource;
-        insertResidentLookup(request.leafId, residentIndex);
-        if (usesFreeSlot)
-        {
-            ++m_residentCount;
-        }
-
-        m_generationLocked[residentIndex] = true;
+        if (!m_cache.isOpen(job.targetSlot) || m_cache.assetId(job.targetSlot) != job.assetId || m_cache.activeJob(job.targetSlot) != handle)
+        { m_generationJobs.discard(handle); return; }
         if (!renderer.queueCellGeneration(
-            request.leafId,
-            request.terrainSource.terrainLeafId,
-            request.terrainSource.terrainSliceIndex,
-            m_residentEntries[residentIndex].slotIndex,
-            m_waterLevel))
+                job.assetId,
+                job.terrainSource.terrainLeafId,
+                job.terrainSource.terrainSliceIndex,
+                job.targetSlot,
+                m_waterLevel,
+                handle))
         {
-            removeResidentLookup(request.leafId, residentIndex);
-            clearResidentCell(residentIndex);
-            if (usesFreeSlot)
-            {
-                --m_residentCount;
-            }
-            m_freeResidentIndices[m_freeResidentIndexCount++] = residentIndex;
-            (void)enqueueLeaf(request.leafId, request.terrainSource);
             return;
         }
+        ++dispatched;
+    });
+    m_generationJobs.retireCompletedFront();
+}
 
-        setResidentFlag(m_residentEntries[residentIndex], ReadyMask, true);
-    }
+void WorldGridFoliageCanopyManager::markSubmitted(
+    GenerationJobHandle job,
+    const std::shared_ptr<SubmittedGpuFence>& fence)
+{
+    if (m_generationJobs.contains(job)) m_generationJobs.markSubmitted(job, fence);
 }
 
 bool WorldGridFoliageCanopyManager::buildReadyCellInfo(
@@ -212,7 +213,7 @@ bool WorldGridFoliageCanopyManager::buildReadyCellInfo(
     std::uint16_t residentIndex,
     FoliageCanopyReadyCellInfo& cellInfo) const
 {
-    if (residentIndex >= kCapacity || !m_residentUsed[residentIndex])
+    if (residentIndex >= kCapacity || !m_cache.isOpen(residentIndex))
     {
         return false;
     }
@@ -301,16 +302,15 @@ void WorldGridFoliageCanopyManager::noteRenderedCell(const WorldGridQuadtreeLeaf
         return;
     }
 
-    m_residentEntries[residentIndex].evictionAge = 0;
+    m_cache.touch(residentIndex);
 }
 
 std::uint16_t WorldGridFoliageCanopyManager::readyCount() const
 {
     std::uint16_t count = 0;
-    for (std::uint16_t activeIndex = 0; activeIndex < m_residentCount; ++activeIndex)
+    for (std::uint16_t residentIndex = 0; residentIndex < kCapacity; ++residentIndex)
     {
-        const std::uint16_t residentIndex = m_activeResidentIndices[activeIndex];
-        if (residentHasFlag(m_residentEntries[residentIndex], ReadyMask))
+        if (m_cache.isOpen(residentIndex) && residentHasFlag(m_residentEntries[residentIndex], ReadyMask))
         {
             ++count;
         }
@@ -320,146 +320,9 @@ std::uint16_t WorldGridFoliageCanopyManager::readyCount() const
 
 std::uint16_t WorldGridFoliageCanopyManager::findResidentIndex(const WorldGridQuadtreeLeafId& leafId) const
 {
-    const std::uint16_t bucketIndex = bucketIndexForLeafId(leafId);
-    const auto& bucket = m_lookupBuckets[bucketIndex];
-
-    for (const LookupBucketEntry& bucketEntry : bucket)
-    {
-        if (bucketEntry.residentIndex == kCapacity)
-        {
-            continue;
-        }
-
-        const std::uint16_t residentIndex = bucketEntry.residentIndex;
-        if (m_residentUsed[residentIndex] && m_residentEntries[residentIndex].leafId == leafId)
-        {
-            return residentIndex;
-        }
-    }
-
-    if (!m_lookupBucketHasOverflow[bucketIndex])
-    {
-        return kCapacity;
-    }
-
-    for (const LookupOverflowEntry& overflowEntry : m_lookupOverflowEntries)
-    {
-        if (!overflowEntry.used || overflowEntry.bucketIndex != bucketIndex)
-        {
-            continue;
-        }
-
-        if (overflowEntry.leafId == leafId)
-        {
-            return overflowEntry.residentIndex;
-        }
-    }
-
-    return kCapacity;
+    return m_cache.find(leafId).value_or(kCapacity);
 }
 
-void WorldGridFoliageCanopyManager::insertResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex)
-{
-    const std::uint16_t bucketIndex = bucketIndexForLeafId(leafId);
-    auto& bucket = m_lookupBuckets[bucketIndex];
-
-    for (LookupBucketEntry& bucketEntry : bucket)
-    {
-        if (bucketEntry.residentIndex == kCapacity)
-        {
-            bucketEntry.residentIndex = residentIndex;
-            return;
-        }
-    }
-
-    for (LookupOverflowEntry& overflowEntry : m_lookupOverflowEntries)
-    {
-        if (overflowEntry.used)
-        {
-            continue;
-        }
-
-        overflowEntry = {
-            .leafId = leafId,
-            .residentIndex = residentIndex,
-            .bucketIndex = bucketIndex,
-            .used = true,
-        };
-        m_lookupBucketHasOverflow[bucketIndex] = true;
-        ++m_lookupOverflowCount;
-        return;
-    }
-}
-
-void WorldGridFoliageCanopyManager::removeResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex)
-{
-    const std::uint16_t bucketIndex = bucketIndexForLeafId(leafId);
-    auto& bucket = m_lookupBuckets[bucketIndex];
-
-    for (LookupBucketEntry& bucketEntry : bucket)
-    {
-        if (bucketEntry.residentIndex != residentIndex)
-        {
-            continue;
-        }
-
-        bucketEntry.residentIndex = kCapacity;
-        if (!m_lookupBucketHasOverflow[bucketIndex])
-        {
-            return;
-        }
-
-        for (LookupOverflowEntry& overflowEntry : m_lookupOverflowEntries)
-        {
-            if (!overflowEntry.used || overflowEntry.bucketIndex != bucketIndex)
-            {
-                continue;
-            }
-
-            bucketEntry.residentIndex = overflowEntry.residentIndex;
-            overflowEntry = {};
-            --m_lookupOverflowCount;
-
-            bool hasOverflow = false;
-            for (const LookupOverflowEntry& remainingEntry : m_lookupOverflowEntries)
-            {
-                if (remainingEntry.used && remainingEntry.bucketIndex == bucketIndex)
-                {
-                    hasOverflow = true;
-                    break;
-                }
-            }
-            m_lookupBucketHasOverflow[bucketIndex] = hasOverflow;
-            return;
-        }
-
-        m_lookupBucketHasOverflow[bucketIndex] = false;
-        return;
-    }
-
-    for (LookupOverflowEntry& overflowEntry : m_lookupOverflowEntries)
-    {
-        if (!overflowEntry.used || overflowEntry.bucketIndex != bucketIndex || overflowEntry.residentIndex != residentIndex)
-        {
-            continue;
-        }
-
-        overflowEntry = {};
-        --m_lookupOverflowCount;
-
-        bool hasOverflow = false;
-        for (const LookupOverflowEntry& remainingEntry : m_lookupOverflowEntries)
-        {
-            if (remainingEntry.used && remainingEntry.bucketIndex == bucketIndex)
-            {
-                hasOverflow = true;
-                break;
-            }
-        }
-        m_lookupBucketHasOverflow[bucketIndex] = hasOverflow;
-        return;
-    }
-}
 
 std::uint64_t WorldGridFoliageCanopyManager::mix64(std::uint64_t x)
 {
@@ -487,116 +350,17 @@ std::uint64_t WorldGridFoliageCanopyManager::hashLeafId(const WorldGridQuadtreeL
     return hash;
 }
 
-std::uint16_t WorldGridFoliageCanopyManager::bucketIndexForLeafId(const WorldGridQuadtreeLeafId& leafId)
+
+std::size_t WorldGridFoliageCanopyManager::LeafIdHash::operator()(const WorldGridQuadtreeLeafId& leafId) const
 {
-    return static_cast<std::uint16_t>(hashLeafId(leafId) & (FoliageConfig::kCanopyLookupBucketCount - 1u));
-}
-
-bool WorldGridFoliageCanopyManager::enqueueLeaf(
-    const WorldGridQuadtreeLeafId& leafId,
-    const FoliageTerrainSource& terrainSource)
-{
-    for (std::uint16_t offset = 0; offset < m_queueCount; ++offset)
-    {
-        const std::uint16_t queueIndex = static_cast<std::uint16_t>((m_queueStart + offset) % kCapacity);
-        if (m_leafQueue[queueIndex].leafId == leafId)
-        {
-            m_leafQueue[queueIndex].terrainSource = terrainSource;
-            m_leafQueue[queueIndex].requestFrame = m_requestFrame;
-            return true;
-        }
-    }
-
-    if (m_queueCount >= kCapacity)
-    {
-        return false;
-    }
-
-    m_leafQueue[m_queueEnd] = {
-        .leafId = leafId,
-        .terrainSource = terrainSource,
-        .requestFrame = m_requestFrame,
-    };
-    m_queueEnd = static_cast<std::uint16_t>((m_queueEnd + 1u) % kCapacity);
-    ++m_queueCount;
-    return true;
-}
-
-bool WorldGridFoliageCanopyManager::dequeueLeaf(QueuedLeafRequest& request)
-{
-    if (m_queueCount == 0)
-    {
-        return false;
-    }
-
-    request = m_leafQueue[m_queueStart];
-    m_queueStart = static_cast<std::uint16_t>((m_queueStart + 1u) % kCapacity);
-    --m_queueCount;
-    return true;
-}
-
-std::uint16_t WorldGridFoliageCanopyManager::findOldestEvictableResidentIndex() const
-{
-    std::uint16_t oldestResidentIndex = kCapacity;
-    std::uint8_t oldestAge = 0;
-
-    for (std::uint16_t activeIndex = 0; activeIndex < m_residentCount; ++activeIndex)
-    {
-        const std::uint16_t residentIndex = m_activeResidentIndices[activeIndex];
-        if (m_generationLocked[residentIndex])
-        {
-            continue;
-        }
-
-        const FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
-        if (entry.evictionAge == 0)
-        {
-            continue;
-        }
-
-        if (oldestResidentIndex == kCapacity || entry.evictionAge > oldestAge)
-        {
-            oldestResidentIndex = residentIndex;
-            oldestAge = entry.evictionAge;
-        }
-    }
-
-    if (oldestResidentIndex != kCapacity)
-    {
-        return oldestResidentIndex;
-    }
-
-    for (std::uint16_t activeIndex = 0; activeIndex < m_residentCount; ++activeIndex)
-    {
-        const std::uint16_t residentIndex = m_activeResidentIndices[activeIndex];
-        if (m_generationLocked[residentIndex])
-        {
-            continue;
-        }
-
-        const FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
-        if (oldestResidentIndex == kCapacity || entry.evictionAge > oldestAge)
-        {
-            oldestResidentIndex = residentIndex;
-            oldestAge = entry.evictionAge;
-        }
-    }
-
-    return oldestResidentIndex;
+    return static_cast<std::size_t>(WorldGridFoliageCanopyManager::hashLeafId(leafId));
 }
 
 void WorldGridFoliageCanopyManager::assignResidentCell(std::uint16_t residentIndex, const WorldGridQuadtreeLeafId& leafId)
 {
-    if (!m_residentUsed[residentIndex])
-    {
-        m_residentUsed[residentIndex] = true;
-        m_residentActiveSlots[residentIndex] = m_residentCount;
-        m_activeResidentIndices[m_residentCount] = residentIndex;
-    }
     m_residentEntries[residentIndex] = {
         .leafId = leafId,
         .slotIndex = residentIndex,
-        .evictionAge = 0,
         .residentFrameAge = 0,
         .flags = 0,
     };
@@ -606,50 +370,19 @@ void WorldGridFoliageCanopyManager::assignResidentCell(std::uint16_t residentInd
 
 void WorldGridFoliageCanopyManager::clearResidentCell(std::uint16_t residentIndex, bool removeFromActiveSet)
 {
-    if (removeFromActiveSet && m_residentUsed[residentIndex] && m_residentCount > 0)
-    {
-        const std::uint16_t removedActiveIndex = m_residentActiveSlots[residentIndex];
-        const std::uint16_t lastActiveIndex = static_cast<std::uint16_t>(m_residentCount - 1u);
-        const std::uint16_t lastResidentIndex = m_activeResidentIndices[lastActiveIndex];
+    if (removeFromActiveSet && m_residentCount > 0) --m_residentCount;
 
-        m_activeResidentIndices[removedActiveIndex] = lastResidentIndex;
-        m_residentActiveSlots[lastResidentIndex] = removedActiveIndex;
-        m_activeResidentIndices[lastActiveIndex] = kCapacity;
-        m_residentActiveSlots[residentIndex] = kCapacity;
-        --m_residentCount;
-    }
-
-    m_residentUsed[residentIndex] = !removeFromActiveSet && m_residentUsed[residentIndex];
-    m_generationLocked[residentIndex] = false;
     m_residentEntries[residentIndex] = {};
     m_terrainSources[residentIndex] = {};
 }
 
 void WorldGridFoliageCanopyManager::resetCacheState()
 {
-    m_queueStart = 0;
-    m_queueEnd = 0;
-    m_queueCount = 0;
-    m_leafQueue.fill({});
+    m_cache.clear();
+    m_generationJobs.discardAll();
     m_residentEntries.fill({});
-    m_residentUsed.fill(false);
-    m_generationLocked.fill(false);
     m_terrainSources.fill({});
-    m_activeResidentIndices.fill(kCapacity);
-    m_residentActiveSlots.fill(kCapacity);
-    for (auto& bucket : m_lookupBuckets)
-    {
-        bucket.fill({});
-    }
-    m_lookupBucketHasOverflow.fill(false);
-    m_lookupOverflowEntries.fill({});
-    for (std::uint16_t index = 0; index < kCapacity; ++index)
-    {
-        m_freeResidentIndices[index] = static_cast<std::uint16_t>(kCapacity - 1u - index);
-    }
     m_residentCount = 0;
-    m_lookupOverflowCount = 0;
-    m_freeResidentIndexCount = kCapacity;
     m_requestFrame = 0;
 }
 

@@ -286,6 +286,10 @@ void App::shutdown()
 {
     logStartup("wait for device idle");
     m_renderer.waitIdle();
+    m_worldGridQuadtree.heightmapManager().shutdownAfterGpuIdle();
+    m_foliageManager.shutdownAfterGpuIdle();
+    m_foliageCanopyManager.shutdownAfterGpuIdle();
+    m_nearbyFoliageManager.shutdownAfterGpuIdle();
 
     shutdownImGui();
     shutdownRenderers();
@@ -438,6 +442,7 @@ void App::buildUi()
         .foliageCanopyManager = m_foliageCanopyManager,
         .foliageRenderer = m_foliageRenderer,
         .nearbyFoliageRenderer = m_nearbyFoliageRenderer,
+        .nearbyFoliageManager = m_nearbyFoliageManager,
         .foliageManager = m_foliageManager,
         .waterMeshRenderer = m_waterMeshRenderer,
         .waterManager = m_waterManager,
@@ -693,19 +698,21 @@ void App::syncWaterStateForFrame()
 void App::collectFoliageReadbacks()
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::CollectFoliageReadbacks");
-    m_nearbyFoliageRenderer.collectCompletedDecodedPages();
+    m_nearbyFoliageRenderer.collectCompletedDecodedPages(m_nearbyFoliageManager);
+    m_nearbyFoliageManager.age();
     m_nearbyFoliageRenderer.clear();
 
     std::vector<QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount> completedLiveCounts;
     m_quadtreeMeshRenderer.collectCompletedFoliagePageLiveCounts(completedLiveCounts);
 
-    std::vector<std::pair<WorldGridQuadtreeLeafId, std::uint16_t>> generatedLiveCounts;
-    generatedLiveCounts.reserve(completedLiveCounts.size());
     for (const QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount& generated : completedLiveCounts)
     {
-        generatedLiveCounts.emplace_back(generated.leafId, generated.liveCount);
+        m_foliageManager.applyGeneratedPageLiveCount(
+            generated.leafId,
+            generated.pageIndex,
+            generated.liveCount,
+            generated.job);
     }
-    m_foliageManager.applyGeneratedPageLiveCounts(generatedLiveCounts);
 }
 
 void App::updateGameplayForFrame()
@@ -717,6 +724,7 @@ void App::updateGameplayForFrame()
         m_frameIndex,
         m_worldGridQuadtree.heightmapManager(),
         m_foliageManager,
+        m_nearbyFoliageManager,
         m_nearbyFoliageRenderer,
         m_quadtreeMeshRenderer);
     m_characterMotor.update(
@@ -843,6 +851,7 @@ void App::emitWorldDraws()
         AppConfig::Foliage::kEnabled ? &m_foliageManager : nullptr,
         AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyManager : nullptr,
         AppConfig::Foliage::kEnabled ? &m_foliageRenderer : nullptr,
+        AppConfig::Foliage::kEnabled ? &m_nearbyFoliageManager : nullptr,
         AppConfig::Foliage::kEnabled ? &m_nearbyFoliageRenderer : nullptr,
         AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyRenderer : nullptr,
         AppConfig::Water::kEnabled ? &m_waterManager : nullptr);
@@ -875,6 +884,10 @@ void App::renderCurrentFrame()
         m_foliageCanopyRenderer,
         m_foliageRenderer,
         m_nearbyFoliageRenderer,
+        m_worldGridQuadtree.heightmapManager(),
+        m_foliageManager,
+        m_foliageCanopyManager,
+        m_nearbyFoliageManager,
         m_waterMeshRenderer,
         m_lineRenderer,
         m_worldTextRenderer,

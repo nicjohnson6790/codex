@@ -99,7 +99,7 @@ Generation writes, readback copies, render passes, and UI are recorded in a dete
 | CPU heightmap mirrors | Heightmap manager CPU mirrors / readback slots | One mirror per slice when requested; 8 readback slots | On-demand only, for CPU consumers. | Invalid on slice reassignment; stale readback ignored if leaf/slice association changed. |
 | Canonical foliage pages | Foliage manager / FoliageImposterRenderer page pool | 1024 pages; generation budget 4/frame | Compute writes candidate/live instances into shared persistent pool. Imposter draws directly from it. | LRU; cannot evict pending/current-frame entries. Terrain/water-setting changes clear cache. |
 | Canopy cells | Canopy manager / FoliageCanopyRenderer bitset pool | 4096 cells; generation budget 256/frame | Queued per cell; generated into fixed bitset slots; fade age controls visual ramp. | Oldest unlocked resident slot reused. Generation lock protects in-flight slot. Cache invalidates on relevant terrain/water changes. |
-| Nearby decoded pages | NearbyFoliageRenderer | 16-page CPU LRU; decode budget 16/frame; 16 readback slots | Decodes canonical foliage page pool into detailed nearby instances; caches CPU result for draw/gameplay use. | LRU. Source page contentVersion/layoutVersion mismatch makes entry stale. Fence + key/version checks reject obsolete readbacks. |
+| Nearby decoded pages | WorldGridNearbyFoliageManager / NearbyFoliageRenderer | 16-page CPU cache; decode budget 16/frame; 16 readback slots | The manager owns residency/jobs; the renderer decodes the canonical page pool and stores CPU-visible results for draw/gameplay use. | Generic cache aging. Source page contentVersion/layoutVersion mismatch makes entry stale. Fence + job/key/version checks reject obsolete readbacks. |
 | Water simulation | QuadtreeWaterMeshRenderer | 512² maps; 4 cascades; update modulo typically 1/1/2/4 | Persistent FFT working buffers and displacement/slope maps updated over time. | Not LRU. Rebuilt/reset when simulation settings/resources require it; foam history is temporal double-buffered state. |
 | Sky / atmosphere | SkyboxRenderer | 1 cubemap + 32³ atmosphere LUT | Persistent runtime texture assets; sky composite every frame. | Cubemap lives with renderer. LUT persists until explicit regeneration or renderer shutdown. |
 | World text | WorldTextRenderer | Dynamic high-water buffers | CPU text queues rebuilt each frame; MSDF font atlas/metrics persistent; GPU buffer pairs grow as needed. | Frame content clears every frame; backing allocation remains until growth/shutdown. |
@@ -182,11 +182,11 @@ Static canopy geometry, pipelines, bitset pool, and generation buffers are appli
 
 ### 5.3 Nearby detailed foliage and decoded-page cache
 
-NearbyFoliageRenderer converts the canonical foliage page representation into detailed per-tree instances for the near field. Unlike the broad page pool, this dependent cache is deliberately small and CPU-visible.
+WorldGridNearbyFoliageManager owns the semantic decoded-page cache and decode-job queue. NearbyFoliageRenderer converts canonical foliage pages into detailed per-tree instances, owns GPU transfer/decode resources, and stores the accepted CPU payload for rendering and gameplay. Unlike the broad page pool, this dependent cache is deliberately small and CPU-visible.
 
 - The decoded page LRU holds 16 pages; up to 16 decode dispatches can be scheduled per frame, with 16 readback slots.
 
-- Each decoded entry records source page index, live count, contentVersion, layoutVersion, cache key, CPU instances, validity, pending-readback state, and LRU age.
+- Each decoded entry records source page index, live count, contentVersion, layoutVersion, cache key, CPU instances, validity, and pending-readback state. Generic cache age and active-job ownership remain manager-side.
 
 - The source page pool is read by the decode compute stage. Results are copied back so CPU systems can query nearby resident pages as well as render them.
 
@@ -277,7 +277,11 @@ TriangleRenderer and LineRenderer are immediate/debug-oriented paths. App rebuil
 
 ## 11. Cache invalidation and stale-work protection
 
-The codebase uses several complementary mechanisms rather than one global cache protocol. Their shared purpose is to keep fixed-capacity GPU storage reusable without confusing storage identity with world identity.
+Terrain heightmaps, canonical foliage pages, canopy cells, and nearby decoded pages now share the `FixedAssetCache` and `GenerationQueue` protocol. Each owner composes independently configured cache and queue instances while retaining only content-specific metadata. The shared protocol keeps fixed-capacity GPU storage reusable without confusing storage identity with world identity.
+
+`FixedAssetCache` owns bit-packed open/ready state, saturating `uint8_t` eviction age, configurable hash lookup with a full-cache fallback, and the active generation-job handle for every slot. Requests return a usable slot or unavailable; queued assets remain unavailable, and queue admission occurs before any cache reassignment. A supplied slot hint is validated against the semantic asset ID before use.
+
+`GenerationQueue` is a hard-capacity front/count ring. Entries independently track submitted, discarded, and completed state plus a shared submission fence. Completion can be processed out of fence order, but physical storage is reclaimed only by advancing the front across completed entries. Discard immediately severs cache ownership; submitted discarded work retains its fence until signaling and never runs cache completion logic.
 
 | Mechanism | Used for | Effect |
 | --- | --- | --- |

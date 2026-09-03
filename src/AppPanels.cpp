@@ -569,8 +569,8 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::Text("Foliage page-pool capacity: %u", FoliageConfig::kPagePoolCapacity);
 
     ImGui::SeparatorText("Nearby Foliage LRU");
-    ImGui::Text("Decoded CPU-resident pages: %u", context.nearbyFoliageRenderer.decodedResidentCount());
-    ImGui::Text("Decoded-page readbacks pending: %u", context.nearbyFoliageRenderer.decodedPendingCount());
+    ImGui::Text("Decoded CPU-resident pages: %u", context.nearbyFoliageManager.residentCount());
+    ImGui::Text("Decoded-page jobs pending: %u", context.nearbyFoliageManager.pendingCount());
     ImGui::Text("Decoded-page LRU capacity: %u", FoliageConfig::kNearbyDecodedPageLruCapacity);
     ImGui::Text("Nearby radius: %.1f m", FoliageConfig::kNearbyDefaultRadiusMeters);
     ImGui::Text("Candidate slots/page: %u", FoliageConfig::kCandidateSlotCount);

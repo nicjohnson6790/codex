@@ -219,6 +219,10 @@ add_executable(converter
     AssetBinWriter.cpp
 )
 
+set_target_properties(converter PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/converter
+)
+
 add_dependencies(converter converter_shaders)
 
 add_custom_command(TARGET converter POST_BUILD

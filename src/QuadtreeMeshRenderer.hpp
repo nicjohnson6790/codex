@@ -33,6 +33,7 @@ public:
         WorldGridQuadtreeLeafId leafId{};
         std::uint16_t sliceIndex = 0;
         HeightmapExtents extents{};
+        GenerationJobHandle job{};
     };
 
     struct CompletedHeightmapSliceReadback
@@ -46,6 +47,8 @@ public:
     {
         WorldGridQuadtreeLeafId leafId{};
         std::uint16_t liveCount = 0;
+        std::uint16_t pageIndex = 0;
+        GenerationJobHandle job{};
     };
 
     // Per-frame shader constants shared by every terrain draw.
@@ -90,7 +93,8 @@ public:
     [[nodiscard]] bool queueHeightmapGeneration(
         const WorldGridQuadtreeLeafId& leafId,
         std::uint16_t sliceIndex,
-        const TerrainNoiseSettings& settings);
+        const TerrainNoiseSettings& settings,
+        GenerationJobHandle job);
 
     // Queues one quadtree leaf instance for drawing, using the given heightmap slice.
     void addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
@@ -112,10 +116,14 @@ public:
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex,
         std::uint16_t pageIndex,
-        float waterLevel);
+        float waterLevel,
+        GenerationJobHandle job);
     void dispatchFoliageInstanceGenerations(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUBuffer* foliagePagePoolBuffer);
     void queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass* copyPass);
-    void attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence>& fence);
+    void attachSubmittedFence(
+        const std::shared_ptr<SubmittedGpuFence>& fence,
+        WorldGridQuadtreeHeightmapManager& heightmapManager,
+        class WorldGridFoliageManager& foliageManager);
     void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents);
     void collectCompletedHeightmapSliceReadbacks(
         std::vector<CompletedHeightmapSliceReadback>& completedReadbacks);
@@ -191,6 +199,7 @@ private:
         std::shared_ptr<SubmittedGpuFence> fence{};
         std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> leafIds{};
         std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> sliceIndices{};
+        std::array<GenerationJobHandle, AppConfig::Terrain::kHeightmapSliceCapacity> jobs{};
         std::uint16_t count = 0;
     };
 
@@ -216,6 +225,8 @@ private:
         SDL_GPUTransferBuffer* transferBuffer = nullptr;
         std::shared_ptr<SubmittedGpuFence> fence{};
         std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> leafIds{};
+        std::array<std::uint16_t, FoliageConfig::kGenerationBudgetPerFrame> pageIndices{};
+        std::array<GenerationJobHandle, FoliageConfig::kGenerationBudgetPerFrame> jobs{};
         std::uint16_t count = 0;
     };
 
@@ -308,11 +319,17 @@ private:
     std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
     std::array<HeightmapGenerationUniforms, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingHeightmapGenerations{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationLeafIds{};
+    std::array<GenerationJobHandle, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationJobs{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedLeafIds{};
     std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedSlices{};
+    std::array<GenerationJobHandle, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedGenerationJobs{};
     std::array<FoliageInstanceGenerationUniforms, FoliageConfig::kGenerationBudgetPerFrame> m_pendingFoliageInstanceGenerations{};
     std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> m_pendingFoliageInstanceLeafIds{};
     std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> m_lastDispatchedFoliageInstanceLeafIds{};
+    std::array<std::uint16_t, FoliageConfig::kGenerationBudgetPerFrame> m_pendingFoliagePageIndices{};
+    std::array<std::uint16_t, FoliageConfig::kGenerationBudgetPerFrame> m_lastDispatchedFoliagePageIndices{};
+    std::array<GenerationJobHandle, FoliageConfig::kGenerationBudgetPerFrame> m_pendingFoliageJobs{};
+    std::array<GenerationJobHandle, FoliageConfig::kGenerationBudgetPerFrame> m_lastDispatchedFoliageJobs{};
     static constexpr std::size_t kHeightmapReadbackSlotCount = 8;
     std::array<PendingExtentsReadback, kHeightmapReadbackSlotCount> m_pendingExtentsReadbacks{};
     std::array<PendingHeightmapSliceReadback, kHeightmapReadbackSlotCount> m_pendingHeightmapSliceReadbacks{};

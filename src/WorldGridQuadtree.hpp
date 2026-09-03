@@ -18,6 +18,7 @@ class FoliageImposterRenderer;
 class NearbyFoliageRenderer;
 class QuadtreeMeshRenderer;
 class WorldGridFoliageManager;
+class WorldGridNearbyFoliageManager;
 class WorldGridFoliageCanopyManager;
 class WorldGridQuadtreeWaterManager;
 
@@ -74,6 +75,7 @@ public:
         WorldGridFoliageManager* foliageManager,
         WorldGridFoliageCanopyManager* canopyManager,
         FoliageImposterRenderer* foliageRenderer,
+        WorldGridNearbyFoliageManager* nearbyFoliageManager,
         NearbyFoliageRenderer* nearbyFoliageRenderer,
         FoliageCanopyRenderer* canopyRenderer,
         WorldGridQuadtreeWaterManager* waterManager);

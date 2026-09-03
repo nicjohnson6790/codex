@@ -2,9 +2,12 @@
 
 #include "FoliageTypes.hpp"
 #include "HeightmapNoiseGenerator.hpp"
+#include "AssetResidency.hpp"
+#include "SubmittedGpuFence.hpp"
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 class FoliageCanopyRenderer;
 
@@ -19,12 +22,15 @@ public:
     void setTerrainSettings(const TerrainNoiseSettings& settings);
     void setWaterLevel(float waterLevel);
     void clearCache();
+    void shutdownAfterGpuIdle();
 
-    [[nodiscard]] std::uint16_t makeResident(
+    [[nodiscard]] std::uint16_t requestAsset(
         const WorldGridQuadtreeLeafId& leafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
-        std::uint16_t terrainSliceIndex);
+        std::uint16_t terrainSliceIndex,
+        std::uint16_t hint = kCapacity);
     void scheduleQueuedGenerations(FoliageCanopyRenderer& renderer);
+    void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence>& fence);
 
     [[nodiscard]] bool buildReadyCellInfo(
         const WorldGridQuadtreeLeafId& leafId,
@@ -46,7 +52,7 @@ public:
     void noteRenderedCell(const WorldGridQuadtreeLeafId& leafId);
 
     [[nodiscard]] std::uint16_t residentCount() const { return m_residentCount; }
-    [[nodiscard]] std::uint16_t queuedCount() const { return m_queueCount; }
+    [[nodiscard]] std::uint16_t queuedCount() const { return static_cast<std::uint16_t>(m_generationJobs.count()); }
     [[nodiscard]] std::uint16_t readyCount() const;
 
 private:
@@ -55,17 +61,17 @@ private:
         ReadyMask = 1u << 0u,
     };
 
-    struct LookupBucketEntry
+    struct LeafIdHash
     {
-        std::uint16_t residentIndex = kCapacity;
+        [[nodiscard]] std::size_t operator()(const WorldGridQuadtreeLeafId& leafId) const;
     };
 
-    struct LookupOverflowEntry
+    struct GenerationJob
     {
-        WorldGridQuadtreeLeafId leafId{};
-        std::uint16_t residentIndex = kCapacity;
-        std::uint16_t bucketIndex = 0;
-        bool used = false;
+        WorldGridQuadtreeLeafId assetId{};
+        std::uint16_t targetSlot = kCapacity;
+        FoliageTerrainSource terrainSource{};
+        std::uint32_t requestFrame = 0;
     };
 
     struct QueuedLeafRequest
@@ -76,40 +82,21 @@ private:
     };
 
     [[nodiscard]] std::uint16_t findResidentIndex(const WorldGridQuadtreeLeafId& leafId) const;
-    void insertResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex);
-    void removeResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex);
     [[nodiscard]] static std::uint64_t mix64(std::uint64_t x);
     [[nodiscard]] static std::uint64_t hashLeafId(const WorldGridQuadtreeLeafId& leafId);
-    [[nodiscard]] static std::uint16_t bucketIndexForLeafId(const WorldGridQuadtreeLeafId& leafId);
-    bool enqueueLeaf(const WorldGridQuadtreeLeafId& leafId, const FoliageTerrainSource& terrainSource);
-    [[nodiscard]] bool dequeueLeaf(QueuedLeafRequest& request);
-    [[nodiscard]] std::uint16_t findOldestEvictableResidentIndex() const;
     void assignResidentCell(std::uint16_t residentIndex, const WorldGridQuadtreeLeafId& leafId);
     void clearResidentCell(std::uint16_t residentIndex, bool removeFromActiveSet = true);
     void resetCacheState();
     [[nodiscard]] static bool residentHasFlag(const FoliageCanopyResidentCellEntry& entry, std::uint8_t mask);
     static void setResidentFlag(FoliageCanopyResidentCellEntry& entry, std::uint8_t mask, bool enabled);
 
-    std::array<QueuedLeafRequest, kCapacity> m_leafQueue{};
-    std::uint16_t m_queueStart = 0;
-    std::uint16_t m_queueEnd = 0;
-    std::uint16_t m_queueCount = 0;
+    FixedAssetCache<WorldGridQuadtreeLeafId, std::uint16_t, LeafIdHash> m_cache;
+    GenerationQueue<GenerationJob, SubmittedGpuFence> m_generationJobs;
 
     std::array<FoliageCanopyResidentCellEntry, kCapacity> m_residentEntries{};
-    std::array<bool, kCapacity> m_residentUsed{};
-    std::array<bool, kCapacity> m_generationLocked{};
     std::array<FoliageTerrainSource, kCapacity> m_terrainSources{};
-    std::array<std::uint16_t, kCapacity> m_activeResidentIndices{};
-    std::array<std::uint16_t, kCapacity> m_residentActiveSlots{};
-    std::array<std::array<LookupBucketEntry, FoliageConfig::kCanopyLookupBucketEntryCount>, FoliageConfig::kCanopyLookupBucketCount>
-        m_lookupBuckets{};
-    std::array<bool, FoliageConfig::kCanopyLookupBucketCount> m_lookupBucketHasOverflow{};
-    std::array<LookupOverflowEntry, FoliageConfig::kCanopyLookupOverflowCapacity> m_lookupOverflowEntries{};
-    std::array<std::uint16_t, kCapacity> m_freeResidentIndices{};
 
     std::uint16_t m_residentCount = 0;
-    std::uint16_t m_lookupOverflowCount = 0;
-    std::uint16_t m_freeResidentIndexCount = 0;
     std::uint32_t m_requestFrame = 0;
     TerrainNoiseSettings m_terrainSettings = sanitizeTerrainNoiseSettings(TerrainNoiseSettings{});
     float m_waterLevel = AppConfig::Water::kDefaultWaterLevel;

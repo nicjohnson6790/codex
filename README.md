@@ -30,7 +30,7 @@ From a PowerShell or Command Prompt opened at the repository root:
 
 ```powershell
 tools\build.cmd Debug
-.\build\Debug\terrain_sandbox.exe
+.\build\Debug\app\terrain_sandbox.exe
 ```
 
 `tools\build.cmd` configures the requested build directory on its first run, compiles shaders, builds the app, and stages runtime assets. Later builds are incremental.
@@ -39,24 +39,25 @@ Useful launch options:
 
 ```powershell
 # Run locally without initializing Steam
-.\build\Debug\terrain_sandbox.exe --disable-steam
+.\build\Debug\app\terrain_sandbox.exe --disable-steam
 
 # Exercise startup and exit after one rendered frame
-.\build\Debug\terrain_sandbox.exe --verbose-startup --quit-after-first-frame
+.\build\Debug\app\terrain_sandbox.exe --verbose-startup --quit-after-first-frame
 ```
 
 For an optimized build:
 
 ```powershell
 tools\build.cmd Release
-.\build\Release\terrain_sandbox.exe
+.\build\Release\app\terrain_sandbox.exe
 ```
 
-The canonical build directories are `build/Debug`, `build/Release`, and `build/Assets`.
+The canonical build directories are `build/Debug`, `build/Release`, and `build/Assets`. Application runtime files are isolated under `build/<Config>/app`, tests under `build/<Config>/tests`, and the offline converter under `build/Assets/converter`.
+When `STEAMWORKS_APP_ID` is set, CMake generates `steam_appid.txt` directly beside the application executable in `build/<Config>/app`, including configurations where Steamworks support itself is disabled.
 
 ## Runtime assets
 
-The application loads prebuilt runtime packs from `assets/runtime`; the build copies them into `build/<Config>/assets/runtime`. The `assets` tree is intentionally ignored by Git, so a clean clone needs the source/runtime asset set supplied separately before the complete scene can run.
+The application loads prebuilt runtime packs from `assets/runtime`; the build copies them into `build/<Config>/app/assets/runtime`. The `assets` tree is intentionally ignored by Git, so a clean clone needs the source/runtime asset set supplied separately before the complete scene can run.
 
 To rebuild the standard packs after their source files are present:
 

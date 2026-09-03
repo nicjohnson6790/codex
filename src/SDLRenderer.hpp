@@ -19,6 +19,10 @@ class NearbyFoliageRenderer;
 class QuadtreeMeshRenderer;
 class QuadtreeWaterMeshRenderer;
 class SkyboxRenderer;
+class WorldGridQuadtreeHeightmapManager;
+class WorldGridFoliageManager;
+class WorldGridFoliageCanopyManager;
+class WorldGridNearbyFoliageManager;
 class TriangleRenderer;
 class WorldTextRenderer;
 
@@ -55,6 +59,10 @@ public:
         FoliageCanopyRenderer& canopyRenderer,
         FoliageImposterRenderer& foliageRenderer,
         NearbyFoliageRenderer& nearbyFoliageRenderer,
+        WorldGridQuadtreeHeightmapManager& heightmapManager,
+        WorldGridFoliageManager& foliageManager,
+        WorldGridFoliageCanopyManager& canopyManager,
+        WorldGridNearbyFoliageManager& nearbyFoliageManager,
         QuadtreeWaterMeshRenderer& waterMeshRenderer,
         LineRenderer& lineRenderer,
         WorldTextRenderer& worldTextRenderer,

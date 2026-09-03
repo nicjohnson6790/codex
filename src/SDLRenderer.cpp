@@ -12,7 +12,10 @@
 #include "SkyboxRenderer.hpp"
 #include "SubmittedGpuFence.hpp"
 #include "TriangleRenderer.hpp"
+#include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
+#include "WorldGridNearbyFoliageManager.hpp"
+#include "WorldGridQuadtreeHeightmapManager.hpp"
 #include "WorldTextRenderer.hpp"
 
 #include <imgui_impl_sdlgpu3.h>
@@ -207,6 +210,10 @@ void SDLRenderer::renderFrame(
     FoliageCanopyRenderer& canopyRenderer,
     FoliageImposterRenderer& foliageRenderer,
     NearbyFoliageRenderer& nearbyFoliageRenderer,
+    WorldGridQuadtreeHeightmapManager& heightmapManager,
+    WorldGridFoliageManager& foliageManager,
+    WorldGridFoliageCanopyManager& canopyManager,
+    WorldGridNearbyFoliageManager& nearbyFoliageManager,
     QuadtreeWaterMeshRenderer& waterMeshRenderer,
     LineRenderer& lineRenderer,
     WorldTextRenderer& worldTextRenderer,
@@ -492,8 +499,9 @@ void SDLRenderer::renderFrame(
     }
     const std::shared_ptr<SubmittedGpuFence> sharedFence =
         std::make_shared<SubmittedGpuFence>(m_device, submittedFence);
-    quadtreeMeshRenderer.attachSubmittedFence(sharedFence);
-    nearbyFoliageRenderer.attachSubmittedFence(sharedFence);
+    quadtreeMeshRenderer.attachSubmittedFence(sharedFence, heightmapManager, foliageManager);
+    canopyRenderer.attachSubmittedFence(sharedFence, canopyManager);
+    nearbyFoliageRenderer.attachSubmittedFence(sharedFence, nearbyFoliageManager);
 
     // ImGui draw data for this frame may still reference the previous viewport texture,
     // so defer resizing until after the command buffer using it has been submitted.

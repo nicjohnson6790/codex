@@ -29,7 +29,7 @@ The converter currently builds three asset groups:
   - the MSDF atlas is stored as uncompressed `RGBA8_UNORM` texels inside `texbin`; the texel payload is still LZ4-compressed like the other runtime textures
   - font atlas and glyph layout records are stored in `assetbin`
 
-All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/assets/runtime` by the main build.
+All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/app/assets/runtime` by the main build. The converter executable itself is isolated under `build/Assets/converter`.
 
 ## Source Assets
 

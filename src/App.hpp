@@ -25,6 +25,7 @@
 #include "WorldGridQuadtree.hpp"
 #include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
+#include "WorldGridNearbyFoliageManager.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
 #include "WorldTextRenderer.hpp"
 
@@ -125,6 +126,7 @@ private:
     WorldGridQuadtree m_worldGridQuadtree;
     WorldGridFoliageCanopyManager m_foliageCanopyManager;
     WorldGridFoliageManager m_foliageManager;
+    WorldGridNearbyFoliageManager m_nearbyFoliageManager;
     WorldGridQuadtreeWaterManager m_waterManager;
     LightingSystem m_lightingSystem;
 

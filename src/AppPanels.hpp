@@ -16,6 +16,7 @@
 #include "QuadtreeWaterMeshRenderer.hpp"
 #include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
+#include "WorldGridNearbyFoliageManager.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
 #include "WorldGridQuadtree.hpp"
 
@@ -55,6 +56,7 @@ public:
         WorldGridFoliageCanopyManager& foliageCanopyManager;
         FoliageImposterRenderer& foliageRenderer;
         NearbyFoliageRenderer& nearbyFoliageRenderer;
+        WorldGridNearbyFoliageManager& nearbyFoliageManager;
         WorldGridFoliageManager& foliageManager;
         QuadtreeWaterMeshRenderer& waterMeshRenderer;
         WorldGridQuadtreeWaterManager& waterManager;

@@ -2,6 +2,7 @@
 
 #include "EngineRendererBase.hpp"
 #include "FoliageTypes.hpp"
+#include "AssetResidency.hpp"
 #include "RenderTypes.hpp"
 #include "SubmittedGpuFence.hpp"
 #include "assets/RuntimeAssetReader.hpp"
@@ -85,11 +86,21 @@ public:
         const glm::dvec3& cameraUp,
         Extent2D viewportExtent);
     void clear();
-    void collectCompletedDecodedPages();
+    void collectCompletedDecodedPages(class WorldGridNearbyFoliageManager& manager);
 
-    [[nodiscard]] std::uint16_t makeResident(
+    [[nodiscard]] bool queueDecodedPageGeneration(
+        std::uint16_t entryIndex,
+        const WorldGridQuadtreeLeafId& pageKey,
+        const FoliageReadyPageInfo& sourcePageInfo,
+        GenerationJobHandle job);
+    void assignDecodedPageSlot(
+        std::uint16_t entryIndex,
         const WorldGridQuadtreeLeafId& pageKey,
         const FoliageReadyPageInfo& sourcePageInfo);
+    [[nodiscard]] bool decodedSlotMatches(
+        std::uint16_t entryIndex,
+        const WorldGridQuadtreeLeafId& pageKey,
+        const FoliageReadyPageInfo& sourcePageInfo) const;
     void addNearbyInstancesForPage(
         const WorldGridQuadtreeLeafId& pageKey,
         std::uint16_t decodedPageIndex,
@@ -100,7 +111,9 @@ public:
     void upload(SDL_GPUCopyPass* copyPass);
     void dispatchDecodedPageExpansions(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUBuffer* sourcePagePoolBuffer);
     void queueDecodedPageDownloads(SDL_GPUCopyPass* copyPass);
-    void attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence>& fence);
+    void attachSubmittedFence(
+        const std::shared_ptr<SubmittedGpuFence>& fence,
+        WorldGridNearbyFoliageManager& manager);
     void render(
         SDL_GPURenderPass* renderPass,
         SDL_GPUCommandBuffer* commandBuffer,
@@ -112,8 +125,6 @@ public:
     [[nodiscard]] std::uint32_t drawCount() const { return m_drawCount; }
     [[nodiscard]] std::uint32_t drawCallCount() const;
     [[nodiscard]] std::uint32_t emittedInstanceCount() const { return m_drawCount; }
-    [[nodiscard]] std::uint32_t decodedResidentCount() const;
-    [[nodiscard]] std::uint32_t decodedPendingCount() const;
     [[nodiscard]] bool tryGetCpuResidentPage(
         const WorldGridQuadtreeLeafId& pageKey,
         CpuResidentPageView& view) const;
@@ -134,7 +145,6 @@ private:
         std::array<DecodedNearbyFoliageInstance, FoliageConfig::kCandidateSlotCount> instances{};
         bool valid = false;
         bool readbackPending = false;
-        std::uint8_t lruAge = 255u;
     };
 
     struct PendingDecodeRequest
@@ -142,6 +152,7 @@ private:
         std::uint16_t entryIndex = FoliageConfig::kNearbyDecodedPageLruCapacity;
         WorldGridQuadtreeLeafId key{};
         FoliageReadyPageInfo sourcePageInfo{};
+        GenerationJobHandle job{};
     };
 
     struct PendingReadback
@@ -152,7 +163,9 @@ private:
         WorldGridQuadtreeLeafId key{};
         std::uint32_t contentVersion = 0u;
         std::uint16_t liveCount = 0u;
+        GenerationJobHandle job{};
     };
+
 
     static_assert(sizeof(DecodedNearbyFoliageInstance) == 16, "Nearby foliage decoded instance layout must stay 16 bytes.");
     static constexpr std::uint32_t kDecodedPageByteSize =
@@ -187,9 +200,6 @@ private:
         const DecodedPageEntry& entry,
         const WorldGridQuadtreeLeafId& pageKey,
         const FoliageReadyPageInfo& sourcePageInfo) const;
-    [[nodiscard]] bool entryIsHintedThisFrame(const WorldGridQuadtreeLeafId& pageKey) const;
-    void addTopologyHint(const WorldGridQuadtreeLeafId& pageKey);
-    [[nodiscard]] std::uint16_t findReusableEntryIndex() const;
     void loadRuntimeAssets();
     void createMaterialSampler();
     void createDefaultTextures();
@@ -288,7 +298,6 @@ private:
     std::array<DecodeRequestGpu, FoliageConfig::kNearbyDecodeDispatchBudgetPerFrame> m_decodeRequestsGpu{};
     std::array<PendingReadback, FoliageConfig::kNearbyReadbackSlotCount> m_pendingReadbacks{};
     std::array<std::uint16_t, FoliageConfig::kNearbyReadbackSlotCount> m_pendingFenceReadbackSlots{};
-    std::array<WorldGridQuadtreeLeafId, 9> m_topologyHints{};
     std::array<DrawInstanceGpu, AppConfig::Foliage::kNearbyMarkerInstanceCapacity> m_drawInstances{};
     std::array<DrawInstanceGpu, AppConfig::Foliage::kNearbyMarkerInstanceCapacity> m_groupedDrawInstances{};
     std::array<std::uint32_t, kNearbyDrawGroupCount> m_groupFirstInstances{};
@@ -303,7 +312,6 @@ private:
     std::uint16_t m_pendingDecodeCount = 0u;
     std::uint16_t m_lastDispatchedDecodeCount = 0u;
     std::uint16_t m_pendingFenceReadbackCount = 0u;
-    std::uint16_t m_topologyHintCount = 0u;
     std::uint32_t m_drawCount = 0u;
     glm::vec3 m_cameraForward{ 0.0f, 0.0f, -1.0f };
     glm::vec3 m_cameraRight{ 1.0f, 0.0f, 0.0f };

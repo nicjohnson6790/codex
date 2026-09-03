@@ -52,7 +52,6 @@ struct FoliageResidentPageEntry
     std::uint16_t pageIndex = 0;
     std::uint16_t liveCount = 0;
     std::uint32_t contentVersion = 0;
-    std::uint8_t age = 0;
     std::uint8_t flags = 0;
 };
 
@@ -98,7 +97,6 @@ struct FoliageCanopyResidentCellEntry
 {
     WorldGridQuadtreeLeafId leafId{};
     std::uint16_t slotIndex = 0;
-    std::uint8_t evictionAge = 0;
     std::uint8_t residentFrameAge = 0;
     std::uint8_t flags = 0;
 };

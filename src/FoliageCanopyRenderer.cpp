@@ -1,6 +1,7 @@
 #include "FoliageCanopyRenderer.hpp"
 
 #include "PerformanceCapture.hpp"
+#include "WorldGridFoliageCanopyManager.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -129,7 +130,8 @@ bool FoliageCanopyRenderer::queueCellGeneration(
     const WorldGridQuadtreeLeafId& terrainLeafId,
     std::uint16_t terrainSliceIndex,
     std::uint16_t canopySlotIndex,
-    float waterLevel)
+    float waterLevel,
+    GenerationJobHandle job)
 {
     if (m_pendingGenerationCount >= m_pendingGenerations.size() ||
         canopySlotIndex >= FoliageConfig::kCanopyCellPoolCapacity)
@@ -146,7 +148,9 @@ bool FoliageCanopyRenderer::queueCellGeneration(
     const glm::dvec3 terrainWorldMin = terrainOrigin.worldPosition();
     const double terrainLeafSizeMeters = worldGridQuadtreeLeafSize(terrainLeafId);
 
-    CellGenerationParams& params = m_pendingGenerations[m_pendingGenerationCount++];
+    const std::uint32_t generationIndex = m_pendingGenerationCount++;
+    CellGenerationParams& params = m_pendingGenerations[generationIndex];
+    m_pendingGenerationJobs[generationIndex] = job;
     params.dispatchParams = glm::uvec4(
         canopySlotIndex,
         terrainSliceIndex,
@@ -303,7 +307,19 @@ void FoliageCanopyRenderer::dispatchCellGenerations(SDL_GPUCommandBuffer* comman
     SDL_DispatchGPUCompute(computePass, groupCountX, 1u, m_pendingGenerationCount);
     SDL_EndGPUComputePass(computePass);
 
+    m_submittedGenerationCount = m_pendingGenerationCount;
+    for (std::uint32_t index = 0; index < m_pendingGenerationCount; ++index)
+        m_submittedGenerationJobs[index] = m_pendingGenerationJobs[index];
     m_pendingGenerationCount = 0;
+}
+
+void FoliageCanopyRenderer::attachSubmittedFence(
+    const std::shared_ptr<SubmittedGpuFence>& fence,
+    WorldGridFoliageCanopyManager& manager)
+{
+    for (std::uint32_t index = 0; index < m_submittedGenerationCount; ++index)
+        manager.markSubmitted(m_submittedGenerationJobs[index], fence);
+    m_submittedGenerationCount = 0;
 }
 
 void FoliageCanopyRenderer::render(

@@ -3,6 +3,8 @@
 #include "EngineRendererBase.hpp"
 #include "FoliageTypes.hpp"
 #include "LightingSystem.hpp"
+#include "AssetResidency.hpp"
+#include "SubmittedGpuFence.hpp"
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
@@ -11,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 
 class FoliageCanopyRenderer : private EngineRendererBase
 {
@@ -66,10 +69,14 @@ public:
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex,
         std::uint16_t canopySlotIndex,
-        float waterLevel);
+        float waterLevel,
+        GenerationJobHandle job);
     void addCanopyDraw(const FoliageCanopyDrawReference& drawReference);
     void upload(SDL_GPUCopyPass* copyPass);
     void dispatchCellGenerations(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUBuffer* terrainHeightmapBuffer);
+    void attachSubmittedFence(
+        const std::shared_ptr<SubmittedGpuFence>& fence,
+        class WorldGridFoliageCanopyManager& manager);
     void render(
         SDL_GPURenderPass* renderPass,
         SDL_GPUCommandBuffer* commandBuffer,
@@ -110,7 +117,10 @@ private:
 
     std::array<DrawMetadataGpu, AppConfig::Foliage::kCanopyDrawCapacity> m_drawMetadata{};
     std::array<CellGenerationParams, FoliageConfig::kCanopyGenerationBudgetPerFrame> m_pendingGenerations{};
+    std::array<GenerationJobHandle, FoliageConfig::kCanopyGenerationBudgetPerFrame> m_pendingGenerationJobs{};
+    std::array<GenerationJobHandle, FoliageConfig::kCanopyGenerationBudgetPerFrame> m_submittedGenerationJobs{};
     std::uint32_t m_drawCount = 0;
     std::uint32_t m_pendingGenerationCount = 0;
+    std::uint32_t m_submittedGenerationCount = 0;
     std::uint32_t m_indexCount = 0;
 };

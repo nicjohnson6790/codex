@@ -1,7 +1,9 @@
 #pragma once
 
 #include "AppConfig.hpp"
+#include "AssetResidency.hpp"
 #include "HeightmapNoiseGenerator.hpp"
+#include "SubmittedGpuFence.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
 
 #include <array>
@@ -18,13 +20,6 @@ struct HeightmapExtents
     float maxHeight = 0.0f;
 };
 
-struct ResidentMapEntry
-{
-    WorldGridQuadtreeLeafId leafId{};
-    std::uint16_t lruSlice = 0;
-    std::uint8_t age = 0;
-};
-
 struct CpuResidentHeightmapView
 {
     WorldGridQuadtreeLeafId leafId{};
@@ -36,82 +31,60 @@ class WorldGridQuadtreeHeightmapManager
 {
 public:
     static constexpr std::uint16_t kCapacity = static_cast<std::uint16_t>(AppConfig::Terrain::kHeightmapSliceCapacity);
+    static constexpr std::uint16_t kUnavailable = kCapacity;
 
     WorldGridQuadtreeHeightmapManager();
 
     void ageMap();
-    bool makeResident(const WorldGridQuadtreeLeafId& leafId);
+    [[nodiscard]] std::uint16_t requestAsset(
+        const WorldGridQuadtreeLeafId& leafId,
+        std::uint16_t hint = kUnavailable);
     bool makeCpuResident(const WorldGridQuadtreeLeafId& leafId, QuadtreeMeshRenderer& meshRenderer);
     void requestLeaf(const WorldGridQuadtreeLeafId& leafId, QuadtreeMeshRenderer& meshRenderer);
     void scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer);
+    void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence>& fence);
     void collectCompletedCpuReadbacks(QuadtreeMeshRenderer& meshRenderer);
-    void applyGeneratedExtents(
-        const WorldGridQuadtreeLeafId& leafId,
-        std::uint16_t sliceIndex,
-        const HeightmapExtents& extents);
+    void applyGeneratedExtents(const WorldGridQuadtreeLeafId& leafId, std::uint16_t sliceIndex, const HeightmapExtents& extents, GenerationJobHandle job);
     void clearCache();
+    void shutdownAfterGpuIdle();
     [[nodiscard]] bool getExtents(const WorldGridQuadtreeLeafId& leafId, HeightmapExtents& extents) const;
     [[nodiscard]] bool getResidentSliceIndex(const WorldGridQuadtreeLeafId& leafId, std::uint16_t& sliceIndex) const;
-    [[nodiscard]] bool tryGetCpuResidentHeightmap(
-        const WorldGridQuadtreeLeafId& leafId,
-        CpuResidentHeightmapView& view) const;
+    [[nodiscard]] bool tryGetCpuResidentHeightmap(const WorldGridQuadtreeLeafId& leafId, CpuResidentHeightmapView& view) const;
     [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_noiseGenerator.settings(); }
     [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_noiseGenerator.settings(); }
     [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_computeDispatchBudget; }
     void setComputeDispatchBudget(std::uint16_t budget);
     [[nodiscard]] std::uint16_t residentCount() const { return m_residentCount; }
-    [[nodiscard]] std::uint16_t queuedCount() const { return m_queueCount; }
+    [[nodiscard]] std::uint16_t queuedCount() const { return static_cast<std::uint16_t>(m_generationJobs.count()); }
 
 private:
-    static constexpr std::uint16_t kLookupBucketCount = 256;
-    static constexpr std::uint16_t kLookupBucketEntryCount = 8;
-    static constexpr std::uint16_t kLookupOverflowCapacity = 504;
-
-    struct LookupBucketEntry
+    struct LeafIdHash
     {
-        std::uint16_t residentIndex = kCapacity;
+        [[nodiscard]] std::size_t operator()(const WorldGridQuadtreeLeafId& leafId) const;
     };
 
-    struct LookupOverflowEntry
+    struct HeightmapGenerationJob
     {
-        WorldGridQuadtreeLeafId leafId{};
-        std::uint16_t residentIndex = kCapacity;
-        std::uint8_t bucketIndex = 0;
-        bool used = false;
+        WorldGridQuadtreeLeafId assetId{};
+        std::uint16_t targetSlot = kUnavailable;
+        TerrainNoiseSettings settings{};
     };
 
-    [[nodiscard]] std::uint16_t findResidentIndex(const WorldGridQuadtreeLeafId& leafId) const;
-    void insertResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex);
-    void removeResidentLookup(const WorldGridQuadtreeLeafId& leafId, std::uint16_t residentIndex);
-    [[nodiscard]] static std::uint64_t mix64(std::uint64_t x);
-    [[nodiscard]] static std::uint64_t hashLeafId(const WorldGridQuadtreeLeafId& leafId);
-    [[nodiscard]] static std::uint8_t bucketIndexForLeafId(const WorldGridQuadtreeLeafId& leafId);
-    [[nodiscard]] bool queueContains(const WorldGridQuadtreeLeafId& leafId) const;
-    bool enqueueLeaf(const WorldGridQuadtreeLeafId& leafId);
-    [[nodiscard]] bool dequeueLeaf(WorldGridQuadtreeLeafId& leafId);
-    [[nodiscard]] std::uint16_t findOldestResidentIndex() const;
+    using HeightmapCache = FixedAssetCache<WorldGridQuadtreeLeafId, std::uint16_t, LeafIdHash>;
+    using HeightmapQueue = GenerationQueue<HeightmapGenerationJob, SubmittedGpuFence>;
 
-    std::array<WorldGridQuadtreeLeafId, kCapacity> m_leafQueue{};
-    std::uint16_t m_queueStart = 0;
-    std::uint16_t m_queueEnd = 0;
-    std::uint16_t m_queueCount = 0;
+    [[nodiscard]] std::optional<std::uint16_t> findSlot(const WorldGridQuadtreeLeafId& leafId) const;
+    void invalidateSlotMetadata(std::uint16_t slot);
 
-    std::array<ResidentMapEntry, kCapacity> m_residentMap{};
-    std::uint16_t m_residentCount = 0;
-    std::array<std::array<LookupBucketEntry, kLookupBucketEntryCount>, kLookupBucketCount> m_lookupBuckets{};
-    std::array<bool, kLookupBucketCount> m_lookupBucketHasOverflow{};
-    std::array<LookupOverflowEntry, kLookupOverflowCapacity> m_lookupOverflowEntries{};
-    std::uint16_t m_lookupOverflowCount = 0;
-
+    HeightmapCache m_heightmaps;
+    HeightmapQueue m_generationJobs;
     std::array<HeightmapExtents, kCapacity> m_knownExtents{};
     std::array<bool, kCapacity> m_knownExtentsValid{};
     std::array<std::vector<float>, kCapacity> m_cpuHeightmapSamples{};
     std::array<WorldGridQuadtreeLeafId, kCapacity> m_cpuHeightmapLeafIds{};
     std::array<bool, kCapacity> m_cpuHeightmapValid{};
     std::array<bool, kCapacity> m_cpuHeightmapPending{};
-    std::array<std::uint16_t, kCapacity> m_freeSlots{};
-    std::uint16_t m_freeSlotCount = 0;
+    std::uint16_t m_residentCount = 0;
     std::uint16_t m_computeDispatchBudget = 4;
-
     HeightmapNoiseGenerator m_noiseGenerator;
 };

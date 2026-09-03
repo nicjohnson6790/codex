@@ -4,6 +4,7 @@
 #include "LightingSystem.hpp"
 #include "PerformanceCapture.hpp"
 #include "SkyboxRenderer.hpp"
+#include "WorldGridNearbyFoliageManager.hpp"
 #include "assets/RuntimeAssetReader.hpp"
 
 #include <SDL3/SDL_filesystem.h>
@@ -318,18 +319,10 @@ void NearbyFoliageRenderer::setActiveCamera(
 
 void NearbyFoliageRenderer::clear()
 {
-    for (DecodedPageEntry& entry : m_decodedPages)
-    {
-        if (entry.valid || entry.readbackPending)
-        {
-            entry.lruAge = static_cast<std::uint8_t>(std::min<std::uint32_t>(entry.lruAge + 1u, 255u));
-        }
-    }
-
     resetTransientState();
 }
 
-void NearbyFoliageRenderer::collectCompletedDecodedPages()
+void NearbyFoliageRenderer::collectCompletedDecodedPages(WorldGridNearbyFoliageManager& manager)
 {
     HELLO_PROFILE_SCOPE("NearbyFoliageRenderer::CollectCompletedDecodedPages");
 
@@ -340,7 +333,8 @@ void NearbyFoliageRenderer::collectCompletedDecodedPages()
             continue;
         }
 
-        if (readback.entryIndex < m_decodedPages.size())
+        const bool accepted = manager.complete(readback.job, readback.key, readback.entryIndex);
+        if (accepted && readback.entryIndex < m_decodedPages.size())
         {
             DecodedPageEntry& entry = m_decodedPages[readback.entryIndex];
             if (entry.readbackPending &&
@@ -355,10 +349,6 @@ void NearbyFoliageRenderer::collectCompletedDecodedPages()
                 entry.readbackPending = false;
                 entry.liveCount = readback.liveCount;
             }
-            else
-            {
-                SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
-            }
         }
 
         readback.fence.reset();
@@ -366,61 +356,26 @@ void NearbyFoliageRenderer::collectCompletedDecodedPages()
         readback.key = {};
         readback.contentVersion = 0u;
         readback.liveCount = 0u;
+        readback.job = {};
     }
 }
 
-std::uint16_t NearbyFoliageRenderer::makeResident(
+bool NearbyFoliageRenderer::queueDecodedPageGeneration(
+    std::uint16_t entryIndex,
+    const WorldGridQuadtreeLeafId& pageKey,
+    const FoliageReadyPageInfo& sourcePageInfo,
+    GenerationJobHandle job)
+{
+    if (m_pendingDecodeCount >= m_pendingDecodeRequests.size()) return false;
+    m_pendingDecodeRequests[m_pendingDecodeCount++] = { entryIndex, pageKey, sourcePageInfo, job };
+    return true;
+}
+
+void NearbyFoliageRenderer::assignDecodedPageSlot(
+    std::uint16_t entryIndex,
     const WorldGridQuadtreeLeafId& pageKey,
     const FoliageReadyPageInfo& sourcePageInfo)
 {
-    addTopologyHint(pageKey);
-
-    std::uint16_t entryIndex = findEntryIndex(pageKey);
-    if (entryIndex != FoliageConfig::kNearbyDecodedPageLruCapacity)
-    {
-        DecodedPageEntry& entry = m_decodedPages[entryIndex];
-        entry.lruAge = 0u;
-        if (entryMatchesSource(entry, pageKey, sourcePageInfo))
-        {
-            return entry.valid && !entry.readbackPending
-                ? entryIndex
-                : FoliageConfig::kNearbyDecodedPageLruCapacity;
-        }
-
-        if (entry.readbackPending || m_pendingDecodeCount >= m_pendingDecodeRequests.size())
-        {
-            return FoliageConfig::kNearbyDecodedPageLruCapacity;
-        }
-
-        entry = {
-            .key = pageKey,
-            .sourcePageIndex = sourcePageInfo.pageIndex,
-            .liveCount = sourcePageInfo.liveCount,
-            .contentVersion = sourcePageInfo.contentVersion,
-            .layoutVersion = FoliageConfig::kNearbyDecodedInstanceLayoutVersion,
-            .valid = false,
-            .readbackPending = true,
-            .lruAge = 0u,
-        };
-        m_pendingDecodeRequests[m_pendingDecodeCount++] = {
-            .entryIndex = entryIndex,
-            .key = pageKey,
-            .sourcePageInfo = sourcePageInfo,
-        };
-        return FoliageConfig::kNearbyDecodedPageLruCapacity;
-    }
-
-    if (m_pendingDecodeCount >= m_pendingDecodeRequests.size())
-    {
-        return FoliageConfig::kNearbyDecodedPageLruCapacity;
-    }
-
-    entryIndex = findReusableEntryIndex();
-    if (entryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity)
-    {
-        return FoliageConfig::kNearbyDecodedPageLruCapacity;
-    }
-
     m_decodedPages[entryIndex] = {
         .key = pageKey,
         .sourcePageIndex = sourcePageInfo.pageIndex,
@@ -429,14 +384,15 @@ std::uint16_t NearbyFoliageRenderer::makeResident(
         .layoutVersion = FoliageConfig::kNearbyDecodedInstanceLayoutVersion,
         .valid = false,
         .readbackPending = true,
-        .lruAge = 0u,
     };
-    m_pendingDecodeRequests[m_pendingDecodeCount++] = {
-        .entryIndex = entryIndex,
-        .key = pageKey,
-        .sourcePageInfo = sourcePageInfo,
-    };
-    return FoliageConfig::kNearbyDecodedPageLruCapacity;
+}
+
+bool NearbyFoliageRenderer::decodedSlotMatches(
+    std::uint16_t entryIndex,
+    const WorldGridQuadtreeLeafId& pageKey,
+    const FoliageReadyPageInfo& sourcePageInfo) const
+{
+    return entryIndex < m_decodedPages.size() && entryMatchesSource(m_decodedPages[entryIndex], pageKey, sourcePageInfo);
 }
 
 void NearbyFoliageRenderer::addNearbyInstancesForPage(
@@ -701,21 +657,24 @@ void NearbyFoliageRenderer::dispatchDecodedPageExpansions(
         return;
     }
 
+    std::uint16_t dispatchCount = 0;
     for (std::uint16_t requestIndex = 0; requestIndex < m_pendingDecodeCount; ++requestIndex)
     {
         const PendingDecodeRequest& request = m_pendingDecodeRequests[requestIndex];
-        m_decodeRequestsGpu[requestIndex] = {
+        m_decodeRequestsGpu[dispatchCount] = {
             .sourcePageData = glm::uvec4(
                 request.sourcePageInfo.pageIndex,
                 request.sourcePageInfo.liveCount,
                 request.sourcePageInfo.seed,
-                requestIndex),
+                dispatchCount),
         };
-        m_lastDispatchedDecodeRequests[requestIndex] = request;
+        m_lastDispatchedDecodeRequests[dispatchCount++] = request;
     }
 
+    if (dispatchCount == 0u) { m_pendingDecodeCount = 0u; return; }
+
     void* mappedRequests = SDL_MapGPUTransferBuffer(m_device, m_decodeRequestTransferBuffer, true);
-    std::memcpy(mappedRequests, m_decodeRequestsGpu.data(), sizeof(DecodeRequestGpu) * m_pendingDecodeCount);
+    std::memcpy(mappedRequests, m_decodeRequestsGpu.data(), sizeof(DecodeRequestGpu) * dispatchCount);
     SDL_UnmapGPUTransferBuffer(m_device, m_decodeRequestTransferBuffer);
 
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
@@ -728,14 +687,14 @@ void NearbyFoliageRenderer::dispatchDecodedPageExpansions(
     requestSource.transfer_buffer = m_decodeRequestTransferBuffer;
     SDL_GPUBufferRegion requestDestination{};
     requestDestination.buffer = m_decodeRequestBuffer;
-    requestDestination.size = static_cast<Uint32>(sizeof(DecodeRequestGpu) * m_pendingDecodeCount);
+    requestDestination.size = static_cast<Uint32>(sizeof(DecodeRequestGpu) * dispatchCount);
     SDL_UploadToGPUBuffer(copyPass, &requestSource, &requestDestination, false);
 
     SDL_GPUTransferBufferLocation zeroSource{};
     zeroSource.transfer_buffer = m_decodedZeroTransferBuffer;
     SDL_GPUBufferRegion zeroDestination{};
     zeroDestination.buffer = m_decodedOutputBuffer;
-    zeroDestination.size = static_cast<Uint32>(kDecodedPageByteSize * m_pendingDecodeCount);
+    zeroDestination.size = static_cast<Uint32>(kDecodedPageByteSize * dispatchCount);
     SDL_UploadToGPUBuffer(copyPass, &zeroSource, &zeroDestination, false);
 
     SDL_EndGPUCopyPass(copyPass);
@@ -759,10 +718,10 @@ void NearbyFoliageRenderer::dispatchDecodedPageExpansions(
 
     const std::uint32_t groupCountX =
         (FoliageConfig::kCandidateSlotCount + kDecodeComputeThreadCountX - 1u) / kDecodeComputeThreadCountX;
-    SDL_DispatchGPUCompute(computePass, groupCountX, 1u, m_pendingDecodeCount);
+    SDL_DispatchGPUCompute(computePass, groupCountX, 1u, dispatchCount);
     SDL_EndGPUComputePass(computePass);
 
-    m_lastDispatchedDecodeCount = m_pendingDecodeCount;
+    m_lastDispatchedDecodeCount = dispatchCount;
     m_pendingDecodeCount = 0u;
 }
 
@@ -809,18 +768,22 @@ void NearbyFoliageRenderer::queueDecodedPageDownloads(SDL_GPUCopyPass* copyPass)
         readback.key = m_lastDispatchedDecodeRequests[requestIndex].key;
         readback.contentVersion = m_lastDispatchedDecodeRequests[requestIndex].sourcePageInfo.contentVersion;
         readback.liveCount = m_lastDispatchedDecodeRequests[requestIndex].sourcePageInfo.liveCount;
+        readback.job = m_lastDispatchedDecodeRequests[requestIndex].job;
         m_pendingFenceReadbackSlots[m_pendingFenceReadbackCount++] = readbackSlotIndex;
     }
 
     m_lastDispatchedDecodeCount = 0u;
 }
 
-void NearbyFoliageRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence>& fence)
+void NearbyFoliageRenderer::attachSubmittedFence(
+    const std::shared_ptr<SubmittedGpuFence>& fence,
+    WorldGridNearbyFoliageManager& manager)
 {
     for (std::uint16_t fenceSlotIndex = 0; fenceSlotIndex < m_pendingFenceReadbackCount; ++fenceSlotIndex)
     {
         PendingReadback& readback = m_pendingReadbacks[m_pendingFenceReadbackSlots[fenceSlotIndex]];
         readback.fence = fence;
+        manager.markSubmitted(readback.job, fence);
     }
     m_pendingFenceReadbackCount = 0u;
 }
@@ -923,32 +886,6 @@ void NearbyFoliageRenderer::render(
 std::uint32_t NearbyFoliageRenderer::drawCallCount() const
 {
     return m_activeDrawCommandCount;
-}
-
-std::uint32_t NearbyFoliageRenderer::decodedResidentCount() const
-{
-    std::uint32_t count = 0u;
-    for (const DecodedPageEntry& entry : m_decodedPages)
-    {
-        if (entry.valid && !entry.readbackPending)
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-std::uint32_t NearbyFoliageRenderer::decodedPendingCount() const
-{
-    std::uint32_t count = 0u;
-    for (const DecodedPageEntry& entry : m_decodedPages)
-    {
-        if (entry.readbackPending)
-        {
-            ++count;
-        }
-    }
-    return count;
 }
 
 bool NearbyFoliageRenderer::tryGetCpuResidentPage(
@@ -2087,7 +2024,6 @@ void NearbyFoliageRenderer::resetTransientState()
     m_pendingDecodeCount = 0u;
     m_lastDispatchedDecodeCount = 0u;
     m_pendingFenceReadbackCount = 0u;
-    m_topologyHintCount = 0u;
     m_drawCount = 0u;
     m_activeDrawCommandCount = 0u;
     m_groupFirstInstances.fill(0u);
@@ -2100,12 +2036,8 @@ std::uint16_t NearbyFoliageRenderer::findEntryIndex(const WorldGridQuadtreeLeafI
     for (std::uint16_t entryIndex = 0; entryIndex < m_decodedPages.size(); ++entryIndex)
     {
         const DecodedPageEntry& entry = m_decodedPages[entryIndex];
-        if ((entry.valid || entry.readbackPending) && entry.key == pageKey)
-        {
-            return entryIndex;
-        }
+        if ((entry.valid || entry.readbackPending) && entry.key == pageKey) return entryIndex;
     }
-
     return FoliageConfig::kNearbyDecodedPageLruCapacity;
 }
 
@@ -2119,75 +2051,4 @@ bool NearbyFoliageRenderer::entryMatchesSource(
         entry.sourcePageIndex == sourcePageInfo.pageIndex &&
         entry.contentVersion == sourcePageInfo.contentVersion &&
         entry.layoutVersion == FoliageConfig::kNearbyDecodedInstanceLayoutVersion;
-}
-
-bool NearbyFoliageRenderer::entryIsHintedThisFrame(const WorldGridQuadtreeLeafId& pageKey) const
-{
-    for (std::uint16_t hintIndex = 0; hintIndex < m_topologyHintCount; ++hintIndex)
-    {
-        if (m_topologyHints[hintIndex] == pageKey)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-void NearbyFoliageRenderer::addTopologyHint(const WorldGridQuadtreeLeafId& pageKey)
-{
-    if (entryIsHintedThisFrame(pageKey) || m_topologyHintCount >= m_topologyHints.size())
-    {
-        return;
-    }
-
-    m_topologyHints[m_topologyHintCount++] = pageKey;
-}
-
-std::uint16_t NearbyFoliageRenderer::findReusableEntryIndex() const
-{
-    std::uint16_t oldestNonHintedEntryIndex = FoliageConfig::kNearbyDecodedPageLruCapacity;
-    std::uint16_t oldestEntryIndex = FoliageConfig::kNearbyDecodedPageLruCapacity;
-    std::uint8_t oldestNonHintedAge = 0u;
-    std::uint8_t oldestAge = 0u;
-
-    for (std::uint16_t entryIndex = 0; entryIndex < m_decodedPages.size(); ++entryIndex)
-    {
-        const DecodedPageEntry& entry = m_decodedPages[entryIndex];
-        if (entry.readbackPending)
-        {
-            continue;
-        }
-
-        if (!entry.valid)
-        {
-            return entryIndex;
-        }
-
-        if (!entryIsHintedThisFrame(entry.key) &&
-            (oldestNonHintedEntryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity ||
-             entry.lruAge > oldestNonHintedAge))
-        {
-            oldestNonHintedEntryIndex = entryIndex;
-            oldestNonHintedAge = entry.lruAge;
-        }
-
-        if (oldestEntryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity || entry.lruAge > oldestAge)
-        {
-            oldestEntryIndex = entryIndex;
-            oldestAge = entry.lruAge;
-        }
-    }
-
-    if (oldestNonHintedEntryIndex != FoliageConfig::kNearbyDecodedPageLruCapacity)
-    {
-        return oldestNonHintedEntryIndex;
-    }
-
-    if (oldestEntryIndex != FoliageConfig::kNearbyDecodedPageLruCapacity)
-    {
-        return oldestEntryIndex;
-    }
-
-    return FoliageConfig::kNearbyDecodedPageLruCapacity;
 }

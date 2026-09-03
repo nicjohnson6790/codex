@@ -104,6 +104,7 @@ void CollisionManager::updateAroundPlayer(
     std::uint64_t frameIndex,
     WorldGridQuadtreeHeightmapManager& heightmapManager,
     WorldGridFoliageManager& foliageManager,
+    WorldGridNearbyFoliageManager& nearbyFoliageManager,
     NearbyFoliageRenderer& nearbyFoliageRenderer,
     QuadtreeMeshRenderer& meshRenderer)
 {
@@ -131,12 +132,12 @@ void CollisionManager::updateAroundPlayer(
             std::uint16_t terrainSliceIndex = 0;
             if (heightmapManager.getResidentSliceIndex(key, terrainSliceIndex))
             {
-                const std::uint16_t foliageResidentIndex = foliageManager.makeResident(key, key, terrainSliceIndex);
+                const std::uint16_t foliageResidentIndex = foliageManager.requestAsset(key, key, terrainSliceIndex);
                 if (foliageResidentIndex != WorldGridFoliageManager::kCapacity)
                 {
                     FoliageReadyPageInfo pageInfo{};
                     if (foliageManager.buildReadyPageInfo(key, foliageResidentIndex, pageInfo) &&
-                        nearbyFoliageRenderer.makeResident(key, pageInfo) != FoliageConfig::kNearbyDecodedPageLruCapacity)
+                        nearbyFoliageManager.requestAsset(key, pageInfo, nearbyFoliageRenderer) != FoliageConfig::kNearbyDecodedPageLruCapacity)
                     {
                         NearbyFoliageRenderer::CpuResidentPageView foliageView{};
                         if (nearbyFoliageRenderer.tryGetCpuResidentPage(key, foliageView) &&
