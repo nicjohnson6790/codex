@@ -1,7 +1,6 @@
 #pragma once
 
 #include "FoliageTypes.hpp"
-#include "HeightmapNoiseGenerator.hpp"
 #include "AssetResidency.hpp"
 #include "SubmittedGpuFence.hpp"
 
@@ -21,7 +20,6 @@ public:
     WorldGridFoliageManager();
 
     void ageMap();
-    void setTerrainSettings(const TerrainNoiseSettings& settings);
     void setWaterLevel(float waterLevel);
     void clearCache();
     void shutdownAfterGpuIdle();
@@ -106,6 +104,5 @@ private:
 
     std::uint16_t m_residentCount = 0;
     std::uint32_t m_nextContentVersion = 1u;
-    TerrainNoiseSettings m_terrainSettings = sanitizeTerrainNoiseSettings(TerrainNoiseSettings{});
     float m_waterLevel = AppConfig::Water::kDefaultWaterLevel;
 };

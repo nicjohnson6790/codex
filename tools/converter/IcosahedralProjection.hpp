@@ -16,6 +16,7 @@ public:
 
     IcosahedralProjection();
 
+    [[nodiscard]] bool forward(double longitudeDegrees, double latitudeDegrees, double* xMeters, double* yMeters) const;
     [[nodiscard]] bool inverse(double xMeters, double yMeters, double* longitudeDegrees, double* latitudeDegrees) const;
     [[nodiscard]] Bounds bounds() const { return m_bounds; }
     [[nodiscard]] const char* description() const;

@@ -7,55 +7,6 @@
 #include <bit>
 #include <limits>
 
-namespace
-{
-bool terrainLayerSettingsEqual(
-    const TerrainFractalNoiseLayerSettings& a,
-    const TerrainFractalNoiseLayerSettings& b)
-{
-    return
-        a.wavelength == b.wavelength &&
-        a.amplitude == b.amplitude &&
-        a.bias == b.bias &&
-        a.initialFrequency == b.initialFrequency &&
-        a.initialAmplitude == b.initialAmplitude &&
-        a.octaveCount == b.octaveCount &&
-        a.octaveFrequencyScale == b.octaveFrequencyScale &&
-        a.octaveAmplitudeScale == b.octaveAmplitudeScale &&
-        a.gradientDampenStrength == b.gradientDampenStrength &&
-        a.octaveRotationDegrees == b.octaveRotationDegrees;
-}
-
-bool terrainBlendSettingsEqual(
-    const TerrainBlendNoiseSettings& a,
-    const TerrainBlendNoiseSettings& b)
-{
-    return
-        a.wavelength == b.wavelength &&
-        a.initialFrequency == b.initialFrequency &&
-        a.initialAmplitude == b.initialAmplitude &&
-        a.octaveCount == b.octaveCount &&
-        a.octaveFrequencyScale == b.octaveFrequencyScale &&
-        a.octaveAmplitudeScale == b.octaveAmplitudeScale &&
-        a.gradientDampenStrength == b.gradientDampenStrength &&
-        a.octaveRotationDegrees == b.octaveRotationDegrees &&
-        a.lowThreshold == b.lowThreshold &&
-        a.highThreshold == b.highThreshold &&
-        a.lowTransitionWidth == b.lowTransitionWidth &&
-        a.highTransitionWidth == b.highTransitionWidth;
-}
-
-bool terrainNoiseSettingsEqual(const TerrainNoiseSettings& a, const TerrainNoiseSettings& b)
-{
-    return
-        a.baseHeight == b.baseHeight &&
-        terrainLayerSettingsEqual(a.hills, b.hills) &&
-        terrainLayerSettingsEqual(a.mediumDetail, b.mediumDetail) &&
-        terrainLayerSettingsEqual(a.highDetail, b.highDetail) &&
-        terrainBlendSettingsEqual(a.blend, b.blend);
-}
-}
-
 WorldGridFoliageCanopyManager::WorldGridFoliageCanopyManager()
     : m_cache(kCapacity, FoliageConfig::kCanopyLookupBucketCount, FoliageConfig::kCanopyLookupBucketEntryCount)
     , m_generationJobs(kCapacity)
@@ -85,16 +36,6 @@ void WorldGridFoliageCanopyManager::ageMap()
         {
             ++entry.residentFrameAge;
         }
-    }
-}
-
-void WorldGridFoliageCanopyManager::setTerrainSettings(const TerrainNoiseSettings& settings)
-{
-    const TerrainNoiseSettings sanitized = sanitizeTerrainNoiseSettings(settings);
-    if (!terrainNoiseSettingsEqual(m_terrainSettings, sanitized))
-    {
-        m_terrainSettings = sanitized;
-        clearCache();
     }
 }
 

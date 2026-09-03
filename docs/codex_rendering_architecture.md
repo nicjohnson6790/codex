@@ -95,7 +95,7 @@ Generation writes, readback copies, render passes, and UI are recorded in a dete
 
 | System | Owner / storage | Capacity / budget | Fill & use | Eviction / invalidation |
 | --- | --- | --- | --- | --- |
-| Terrain heightmaps | Heightmap manager / QuadtreeMeshRenderer GPU pool | 512 slices; generation budget 4/frame | Leaf → slice residency. GPU-generated; extents read back. Optional CPU copy is separately requested. | LRU reuse; current-frame age 0 protected. Reuse invalidates extents and CPU copy. Full terrain-cache clear resets mappings. |
+| Terrain heightmaps | Heightmap manager / QuadtreeMeshRenderer GPU pool | 512 final slices; 64 source-tile slices; generation budget 4/frame | Leaf → composed final slice residency. Tiled datasets are affinely placed as source heightmaps; contributions are GPU-composed and extents read back. | Final and source LRU caches are separate. Current jobs pin source dependencies; revision changes discard stale work before replacing source GPU data. |
 | CPU heightmap mirrors | Heightmap manager CPU mirrors / readback slots | One mirror per slice when requested; 8 readback slots | On-demand only, for CPU consumers. | Invalid on slice reassignment; stale readback ignored if leaf/slice association changed. |
 | Canonical foliage pages | Foliage manager / FoliageImposterRenderer page pool | 1024 pages; generation budget 4/frame | Compute writes candidate/live instances into shared persistent pool. Imposter draws directly from it. | LRU; cannot evict pending/current-frame entries. Terrain/water-setting changes clear cache. |
 | Canopy cells | Canopy manager / FoliageCanopyRenderer bitset pool | 4096 cells; generation budget 256/frame | Queued per cell; generated into fixed bitset slots; fade age controls visual ramp. | Oldest unlocked resident slot reused. Generation lock protects in-flight slot. Cache invalidates on relevant terrain/water changes. |
@@ -112,11 +112,11 @@ Generation writes, readback copies, render passes, and UI are recorded in a dete
 
 QuadtreeMeshRenderer is both the terrain draw renderer and an important GPU-generation hub. It owns the persistent terrain heightmap pool, terrain graphics pipelines, generation compute pipelines, static terrain/bridge meshes, PBR material arrays, and the per-frame instance/indirect data used to draw the current LOD.
 
-- CPU manager resolves each visible leaf to a heightmap slice. A cache hit resets its LRU age; a miss is queued and the leaf is not treated as fully resident yet.
+- CPU manager resolves each visible leaf to a final heightmap slice. First allocation computes and retains a block of source-heightmap tile contributions. Requests drive shared source-tile residency and queue final composition only after every current source revision is ready.
 
 - Generation scheduling reuses a free slice or the oldest evictable resident slice, then queues a GPU generation descriptor. Slice reuse invalidates cached extents and optional CPU height data immediately.
 
-- During the GPU compute stage, pending heightmaps are generated into the persistent slice pool.
+- During the GPU compute stage, batches of up to 16 final heightmaps are composed into the persistent slice pool. Each Z dispatch layer follows one final descriptor into a permanent contribution-descriptor buffer and samples renderer-owned 256x256 source-tile slices.
 
 - A later copy stage queues extents and requested heightmap-slice readbacks. Those are consumed only after the submission fence completes.
 
@@ -136,7 +136,7 @@ QuadtreeMeshRenderer is both the terrain draw renderer and an important GPU-gene
 
 ### 4.3 Lifetime and cache invariants
 
-The GPU heightmap buffer is application-lifetime storage, but a slice's semantic leaf identity is only resident until the manager reassigns it. The manager's age=0 convention effectively pins resources used by the current scene-emission pass. Readbacks carry leaf/slice metadata and are discarded if that identity no longer matches when the fence completes.
+The GPU final-heightmap buffer is application-lifetime storage, but a slice's semantic leaf identity is only resident until the manager reassigns it. Source tile identity excludes placement, so repeated affine placements share one source slice while retaining independent additive contribution descriptors. The manager pins source slices used by queued or submitted final work and does not replace an old revision until its fence is safe. Readbacks carry leaf/slice metadata and are discarded if that identity no longer matches when the fence completes.
 
 > **Code:** QuadtreeMeshRenderer.hpp; WorldGridQuadtreeHeightmapManager.hpp/.cpp; WorldGridQuadtree.cpp
 

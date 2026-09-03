@@ -6,7 +6,7 @@ Codex is an experimental large-world terrain sandbox and editor built in C++20 w
 
 ## Highlights
 
-- Large-world terrain with GPU-generated heightmaps and quadtree LOD
+- Large-world terrain with GPU-composed tiled ETOPO heightmaps and quadtree LOD
 - Near-detail trees, mid-distance imposters, and far-field procedural canopy
 - Cascaded FFT water with shoreline foam and terrain interaction
 - Skybox, atmosphere, time-of-day lighting, debug drawing, and profiling tools
@@ -43,6 +43,9 @@ Useful launch options:
 
 # Exercise startup and exit after one rendered frame
 .\build\Debug\app\terrain_sandbox.exe --verbose-startup --quit-after-first-frame
+
+# Exercise asynchronous source uploads and composed-heightmap completion
+.\build\Debug\app\terrain_sandbox.exe --disable-steam --quit-after-frames 120 --verify-heightmap-pipeline
 ```
 
 For an optimized build:
@@ -65,7 +68,7 @@ To rebuild the standard packs after their source files are present:
 tools\build.cmd Assets
 ```
 
-The pine source pack is externally licensed and is not part of the repository. Details about expected source directories, individual converter modes, and the optional ETOPO global-heightmap build are in the [asset converter guide](tools/converter/README.md). The ETOPO pack is currently an offline foundation and is not yet consumed by the runtime terrain sampler.
+The pine source pack is externally licensed and is not part of the repository. Details about expected source directories, individual converter modes, and the optional ETOPO global-heightmap build are in the [asset converter guide](tools/converter/README.md). The runtime terrain system consumes the generated ETOPO tile pack through its source-heightmap cache.
 
 ## Optional Steamworks support
 

@@ -2,7 +2,6 @@
 
 #include "EngineRendererBase.hpp"
 #include "FoliageTypes.hpp"
-#include "HeightmapNoiseGenerator.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
@@ -23,10 +22,9 @@
 
 class QuadtreeMeshRenderer : private EngineRendererBase
 {
-public:
-    static constexpr std::size_t kHeightmapSliceSampleCount =
-        static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) *
-        static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
+  public:
+    static constexpr std::size_t kHeightmapSliceSampleCount = static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) *
+                                                              static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
 
     struct GeneratedHeightmapExtents
     {
@@ -57,7 +55,7 @@ public:
         glm::mat4 viewProjection{1.0f};
         glm::vec4 sunDirectionIntensity{0.0f, 1.0f, 0.0f, 1.0f};
         glm::vec4 sunColorAmbient{1.0f, 1.0f, 1.0f, 0.2f};
-        glm::vec4 terrainHeightParams{0.0f, static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude), 0.0f, 0.0f};
+        glm::vec4 reservedTerrainParams{0.0f};
         glm::vec4 cameraWorldAndTime{0.0f};
         glm::vec4 waterCausticsParams{0.0f};
         glm::vec4 waterCascadeWorldSizesA{0.0f};
@@ -75,72 +73,59 @@ public:
     QuadtreeMeshRenderer(const QuadtreeMeshRenderer &) = delete;
     QuadtreeMeshRenderer &operator=(const QuadtreeMeshRenderer &) = delete;
 
-    void initialize(
-        SDL_GPUDevice *device,
-        SDL_GPUTextureFormat colorFormat,
-        SDL_GPUTextureFormat depthFormat,
-        const std::filesystem::path &shaderDirectory);
+    void initialize(SDL_GPUDevice *device, SDL_GPUTextureFormat colorFormat, SDL_GPUTextureFormat depthFormat,
+                    const std::filesystem::path &shaderDirectory);
     void shutdown();
 
     // Clears the queued instance list for the next frame.
     void clear();
 
-    // Sets the camera used to convert world Positions into camera-local coordinates.
-    void setActiveCamera(const Position& cameraPosition);
-    void setTerrainHeightParams(float baseHeight, float heightAmplitude);
-    void setWaterCausticsState(const WaterSettings& settings);
+    // Sets the camera used to convert world Positions into camera-local
+    // coordinates.
+    void setActiveCamera(const Position &cameraPosition);
+    void setWaterCausticsState(const WaterSettings &settings);
 
-    [[nodiscard]] bool queueHeightmapGeneration(
-        const WorldGridQuadtreeLeafId& leafId,
-        std::uint16_t sliceIndex,
-        const TerrainNoiseSettings& settings,
-        GenerationJobHandle job);
+    [[nodiscard]] bool queueSourceHeightmapUpload(std::uint16_t sliceIndex, std::span<const float> samples);
+    [[nodiscard]] bool queueHeightmapGeneration(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex,
+                                                std::span<const HeightmapSourceGpuDescriptor> sources, GenerationJobHandle job);
 
-    // Queues one quadtree leaf instance for drawing, using the given heightmap slice.
+    // Queues one quadtree leaf instance for drawing, using the given heightmap
+    // slice.
     void addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
-    void addBridge(const WorldGridQuadtreeLeafId& leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
-    void addCoarseBridge(const WorldGridQuadtreeLeafId& leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
+    void addBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
+    void addCoarseBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
 
     // Uploads staged instance and indirect draw data into GPU buffers.
     void upload(SDL_GPUCopyPass *copyPass);
 
-    // Dispatches any queued heightmap compute jobs into the heightmap storage buffer.
-    void dispatchHeightmapGenerations(SDL_GPUCommandBuffer* commandBuffer);
-    void queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPass);
-    [[nodiscard]] bool requestHeightmapSliceDownload(
-        const WorldGridQuadtreeLeafId& leafId,
-        std::uint16_t sliceIndex);
-    void queueHeightmapSliceDownloads(SDL_GPUCopyPass* copyPass);
-    [[nodiscard]] bool queueFoliagePageGeneration(
-        const WorldGridQuadtreeLeafId& foliageLeafId,
-        const WorldGridQuadtreeLeafId& terrainLeafId,
-        std::uint16_t terrainSliceIndex,
-        std::uint16_t pageIndex,
-        float waterLevel,
-        GenerationJobHandle job);
-    void dispatchFoliageInstanceGenerations(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUBuffer* foliagePagePoolBuffer);
-    void queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass* copyPass);
-    void attachSubmittedFence(
-        const std::shared_ptr<SubmittedGpuFence>& fence,
-        WorldGridQuadtreeHeightmapManager& heightmapManager,
-        class WorldGridFoliageManager& foliageManager);
-    void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents);
-    void collectCompletedHeightmapSliceReadbacks(
-        std::vector<CompletedHeightmapSliceReadback>& completedReadbacks);
-    void collectCompletedFoliagePageLiveCounts(std::vector<GeneratedFoliagePageLiveCount>& completedLiveCounts);
+    // Dispatches any queued heightmap compute jobs into the heightmap storage
+    // buffer.
+    void dispatchHeightmapGenerations(SDL_GPUCommandBuffer *commandBuffer);
+    void queueHeightmapExtentsDownload(SDL_GPUCopyPass *copyPass);
+    [[nodiscard]] bool requestHeightmapSliceDownload(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
+    void queueHeightmapSliceDownloads(SDL_GPUCopyPass *copyPass);
+    [[nodiscard]] bool queueFoliagePageGeneration(const WorldGridQuadtreeLeafId &foliageLeafId,
+                                                  const WorldGridQuadtreeLeafId &terrainLeafId, std::uint16_t terrainSliceIndex,
+                                                  std::uint16_t pageIndex, float waterLevel, GenerationJobHandle job);
+    void dispatchFoliageInstanceGenerations(SDL_GPUCommandBuffer *commandBuffer, SDL_GPUBuffer *foliagePagePoolBuffer);
+    void queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass *copyPass);
+    void attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence> &fence, WorldGridQuadtreeHeightmapManager &heightmapManager,
+                              class WorldGridFoliageManager &foliageManager);
+    void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents> &completedExtents);
+    void collectCompletedHeightmapSliceReadbacks(std::vector<CompletedHeightmapSliceReadback> &completedReadbacks);
+    void collectCompletedFoliagePageLiveCounts(std::vector<GeneratedFoliagePageLiveCount> &completedLiveCounts);
 
     // Issues the terrain draws for all queued leaf instances.
-    void render(
-        SDL_GPURenderPass *renderPass,
-        SDL_GPUCommandBuffer *commandBuffer,
-        const glm::mat4 &viewProjection,
-        const LightingSystem &lightingSystem,
-        const QuadtreeWaterMeshRenderer& waterRenderer,
-        float timeSeconds) const;
-    [[nodiscard]] SDL_GPUBuffer* heightmapBuffer() const { return m_heightmapBuffer; }
+    void render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection,
+                const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer, float timeSeconds) const;
+    [[nodiscard]] SDL_GPUBuffer *heightmapBuffer() const
+    {
+        return m_heightmapBuffer;
+    }
 
-private:
-    // Static grid vertex data for one terrain patch. localCoord is patch space; sampleCoord is height lookup space.
+  private:
+    // Static grid vertex data for one terrain patch. localCoord is patch space;
+    // sampleCoord is height lookup space.
     struct Vertex
     {
         float localCoord[2];
@@ -156,10 +141,10 @@ private:
 
     struct MeshResources
     {
-        SDL_GPUBuffer* vertexBuffer = nullptr;
-        SDL_GPUTransferBuffer* vertexTransferBuffer = nullptr;
-        SDL_GPUBuffer* indexBuffer = nullptr;
-        SDL_GPUTransferBuffer* indexTransferBuffer = nullptr;
+        SDL_GPUBuffer *vertexBuffer = nullptr;
+        SDL_GPUTransferBuffer *vertexTransferBuffer = nullptr;
+        SDL_GPUBuffer *indexBuffer = nullptr;
+        SDL_GPUTransferBuffer *indexTransferBuffer = nullptr;
         std::uint32_t indexCount = 0;
     };
 
@@ -169,22 +154,9 @@ private:
         std::uint32_t indexCount = 0;
     };
 
-    struct alignas(16) HeightmapGenerationUniforms
+    struct alignas(16) HeightmapGenerationDescriptor
     {
-        glm::vec4 sampleOriginAndStep{ 0.0f };
-        glm::vec4 hillsLayerA{ 0.0f };
-        glm::vec4 hillsLayerB{ 0.0f };
-        glm::vec4 hillsLayerC{ 0.0f };
-        glm::vec4 mediumLayerA{ 0.0f };
-        glm::vec4 mediumLayerB{ 0.0f };
-        glm::vec4 mediumLayerC{ 0.0f };
-        glm::vec4 highLayerA{ 0.0f };
-        glm::vec4 highLayerB{ 0.0f };
-        glm::vec4 highLayerC{ 0.0f };
-        glm::vec4 blendLayerA{ 0.0f };
-        glm::vec4 blendLayerB{ 0.0f };
-        glm::vec4 blendLayerC{ 0.0f };
-        glm::uvec4 dispatchParams{ 0u };
+        glm::uvec4 params{0u}; // target slice, source front, source count
     };
 
     struct alignas(8) GpuHeightmapExtents
@@ -195,7 +167,7 @@ private:
 
     struct PendingExtentsReadback
     {
-        SDL_GPUTransferBuffer* transferBuffer = nullptr;
+        SDL_GPUTransferBuffer *transferBuffer = nullptr;
         std::shared_ptr<SubmittedGpuFence> fence{};
         std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> leafIds{};
         std::array<std::uint16_t, AppConfig::Terrain::kHeightmapSliceCapacity> sliceIndices{};
@@ -205,7 +177,7 @@ private:
 
     struct PendingHeightmapSliceReadback
     {
-        SDL_GPUTransferBuffer* transferBuffer = nullptr;
+        SDL_GPUTransferBuffer *transferBuffer = nullptr;
         std::shared_ptr<SubmittedGpuFence> fence{};
         WorldGridQuadtreeLeafId leafId{};
         std::uint16_t sliceIndex = 0;
@@ -215,14 +187,14 @@ private:
 
     struct alignas(16) FoliageInstanceGenerationUniforms
     {
-        glm::uvec4 dispatchParams{ 0u };
-        glm::vec4 terrainParams{ 0.0f };
-        glm::vec4 worldParams{ 0.0f };
+        glm::uvec4 dispatchParams{0u};
+        glm::vec4 terrainParams{0.0f};
+        glm::vec4 worldParams{0.0f};
     };
 
     struct PendingFoliageLiveCountReadback
     {
-        SDL_GPUTransferBuffer* transferBuffer = nullptr;
+        SDL_GPUTransferBuffer *transferBuffer = nullptr;
         std::shared_ptr<SubmittedGpuFence> fence{};
         std::array<WorldGridQuadtreeLeafId, FoliageConfig::kGenerationBudgetPerFrame> leafIds{};
         std::array<std::uint16_t, FoliageConfig::kGenerationBudgetPerFrame> pageIndices{};
@@ -233,17 +205,15 @@ private:
     static_assert(sizeof(InstanceData) == 16, "Terrain instance data must stay 16 bytes.");
     static_assert(offsetof(InstanceData, position) == 0, "Terrain instance position must start at offset 0.");
     static_assert(offsetof(InstanceData, packedMetadata) == 12, "Terrain packed metadata must stay at offset 12.");
-    static_assert(sizeof(HeightmapGenerationUniforms) == 224, "Heightmap generation uniforms must stay tightly packed.");
+    static_assert(sizeof(HeightmapGenerationDescriptor) == 16);
+    static_assert(sizeof(HeightmapSourceGpuDescriptor) == 64);
 
-    [[nodiscard]] static std::uint32_t packMetadata(
-        std::uint16_t sliceIndex,
-        std::uint8_t scalePow,
-        std::uint8_t edgeIndex = 0);
+    [[nodiscard]] static std::uint32_t packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow, std::uint8_t edgeIndex = 0);
 
     // Creates the terrain graphics pipelines and loads the terrain shaders.
-    void createPipelines(const std::filesystem::path& shaderDirectory);
-    void createHeightmapComputePipeline(const std::filesystem::path& shaderDirectory);
-    void createFoliageInstanceComputePipeline(const std::filesystem::path& shaderDirectory);
+    void createPipelines(const std::filesystem::path &shaderDirectory);
+    void createHeightmapComputePipeline(const std::filesystem::path &shaderDirectory);
+    void createFoliageInstanceComputePipeline(const std::filesystem::path &shaderDirectory);
     void createCausticsTextures();
     void destroyCausticsTextures();
     void createCausticsSampler();
@@ -255,33 +225,27 @@ private:
 
     // Builds the static mesh buffers for the reusable terrain meshes.
     void createStaticMeshResources();
-    void createMeshResources(
-        const std::vector<Vertex>& vertices,
-        const std::vector<std::uint32_t>& indices,
-        MeshResources& meshResources);
-    [[nodiscard]] static float instanceDistanceSquared(const InstanceData& instance);
-    static void sortInstances(InstanceData* instances, std::uint16_t instanceCount);
+    void createMeshResources(const std::vector<Vertex> &vertices, const std::vector<std::uint32_t> &indices, MeshResources &meshResources);
+    [[nodiscard]] static float instanceDistanceSquared(const InstanceData &instance);
+    static void sortInstances(InstanceData *instances, std::uint16_t instanceCount);
 
     // Convenience helper for filling SDL's indexed-indirect draw struct.
-    [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(
-        std::uint32_t indexCount,
-        std::uint32_t instanceCount,
-        std::uint32_t firstIndex,
-        std::int32_t vertexOffset,
-        std::uint32_t firstInstance);
+    [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(std::uint32_t indexCount, std::uint32_t instanceCount,
+                                                                           std::uint32_t firstIndex, std::int32_t vertexOffset,
+                                                                           std::uint32_t firstInstance);
 
     // Pipeline objects for the terrain pass.
-    SDL_GPUGraphicsPipeline* m_mainPipeline = nullptr;
-    SDL_GPUGraphicsPipeline* m_bridgePipeline = nullptr;
-    SDL_GPUComputePipeline* m_heightmapComputePipeline = nullptr;
-    SDL_GPUComputePipeline* m_foliageInstanceComputePipeline = nullptr;
-    SDL_GPUTexture* m_causticsTextureA = nullptr;
-    SDL_GPUSampler* m_causticsSampler = nullptr;
-    SDL_GPUSampler* m_pbrSampler = nullptr;
-    SDL_GPUTexture* m_pbrAlbedoTextureArray = nullptr;
-    SDL_GPUTexture* m_pbrNormalTextureArray = nullptr;
-    SDL_GPUTexture* m_pbrRoughnessTextureArray = nullptr;
-    SDL_GPUTexture* m_pbrAoTextureArray = nullptr;
+    SDL_GPUGraphicsPipeline *m_mainPipeline = nullptr;
+    SDL_GPUGraphicsPipeline *m_bridgePipeline = nullptr;
+    SDL_GPUComputePipeline *m_heightmapComputePipeline = nullptr;
+    SDL_GPUComputePipeline *m_foliageInstanceComputePipeline = nullptr;
+    SDL_GPUTexture *m_causticsTextureA = nullptr;
+    SDL_GPUSampler *m_causticsSampler = nullptr;
+    SDL_GPUSampler *m_pbrSampler = nullptr;
+    SDL_GPUTexture *m_pbrAlbedoTextureArray = nullptr;
+    SDL_GPUTexture *m_pbrNormalTextureArray = nullptr;
+    SDL_GPUTexture *m_pbrRoughnessTextureArray = nullptr;
+    SDL_GPUTexture *m_pbrAoTextureArray = nullptr;
     float m_causticsDecodeScaleA = 1.0f;
 
     // Static reusable terrain meshes plus their one-time upload buffers.
@@ -291,33 +255,41 @@ private:
     MeshRange m_coarseBridgeMeshRange{};
 
     // Per-frame instance data buffer plus staging buffer.
-    SDL_GPUBuffer* m_instanceBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_instanceTransferBuffer = nullptr;
-    SDL_GPUBuffer* m_bridgeInstanceBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_bridgeInstanceTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_instanceBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_instanceTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_bridgeInstanceBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_bridgeInstanceTransferBuffer = nullptr;
 
     // Indirect draw-command buffer plus staging buffer.
-    SDL_GPUBuffer* m_indirectBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_indirectTransferBuffer = nullptr;
-    SDL_GPUBuffer* m_bridgeIndirectBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_bridgeIndirectTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_indirectBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_indirectTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_bridgeIndirectBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_bridgeIndirectTransferBuffer = nullptr;
 
     // GPU heightmap slice storage written directly by the compute shader.
-    SDL_GPUBuffer* m_heightmapGenerationBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_heightmapGenerationTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_heightmapGenerationBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_heightmapGenerationTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_heightmapSourceDescriptorBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_heightmapSourceDescriptorTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_sourceHeightmapBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_sourceHeightmapTransferBuffer = nullptr;
     SDL_GPUBuffer *m_heightmapBuffer = nullptr;
-    SDL_GPUBuffer* m_heightmapExtentsBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_heightmapExtentsInitTransferBuffer = nullptr;
-    SDL_GPUBuffer* m_foliageInstanceGenerationBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_foliageInstanceGenerationTransferBuffer = nullptr;
-    SDL_GPUBuffer* m_foliageInstanceLiveCountBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_foliageInstanceLiveCountInitTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_heightmapExtentsBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_heightmapExtentsInitTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_foliageInstanceGenerationBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_foliageInstanceGenerationTransferBuffer = nullptr;
+    SDL_GPUBuffer *m_foliageInstanceLiveCountBuffer = nullptr;
+    SDL_GPUTransferBuffer *m_foliageInstanceLiveCountInitTransferBuffer = nullptr;
 
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_bridgeInstanceData{};
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_coarseBridgeInstanceData{};
     std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
-    std::array<HeightmapGenerationUniforms, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingHeightmapGenerations{};
+    std::array<HeightmapGenerationDescriptor, WorldGridQuadtreeHeightmapManager::kMaxFinalHeightmapsPerDispatch>
+        m_pendingHeightmapGenerations{};
+    std::array<HeightmapSourceGpuDescriptor, WorldGridQuadtreeHeightmapManager::kSourceDescriptorCapacity>
+        m_pendingHeightmapSourceDescriptors{};
+    std::array<std::uint16_t, WorldGridQuadtreeHeightmapManager::kSourceTileCapacity> m_pendingSourceUploadSlots{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationLeafIds{};
     std::array<GenerationJobHandle, AppConfig::Terrain::kHeightmapSliceCapacity> m_pendingGenerationJobs{};
     std::array<WorldGridQuadtreeLeafId, AppConfig::Terrain::kHeightmapSliceCapacity> m_lastDispatchedLeafIds{};
@@ -339,6 +311,10 @@ private:
     std::uint16_t m_coarseBridgeInstanceCount = 0;
     std::uint16_t m_bridgeIndirectCommandCount = 0;
     std::uint16_t m_pendingHeightmapGenerationCount = 0;
+    std::uint32_t m_pendingHeightmapSourceDescriptorCount = 0;
+    std::uint16_t m_pendingSourceUploadCount = 0;
+    std::array<std::uint16_t, WorldGridQuadtreeHeightmapManager::kSourceTileCapacity> m_submittedSourceUploadSlots{};
+    std::uint16_t m_submittedSourceUploadCount = 0;
     std::uint16_t m_lastDispatchedGenerationCount = 0;
     std::uint16_t m_pendingFoliageInstanceGenerationCount = 0;
     std::uint16_t m_lastDispatchedFoliageInstanceGenerationCount = 0;
@@ -348,7 +324,5 @@ private:
     std::uint16_t m_pendingFoliageLiveCountFenceReadbackSlot = UINT16_MAX;
     std::uint16_t m_nextReadbackSlot = 0;
     std::uint16_t m_nextFoliageLiveCountReadbackSlot = 0;
-    float m_terrainBaseHeight = 0.0f;
-    float m_terrainHeightAmplitude = static_cast<float>(AppConfig::Terrain::kHighDetailAmplitude);
     WaterSettings m_waterSettings{};
 };

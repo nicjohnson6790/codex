@@ -7,14 +7,13 @@
 #include "FreeFlightCameraController.hpp"
 #include "GamepadInput.hpp"
 #include "Gameplay.hpp"
-#include "LineRenderer.hpp"
 #include "LightingSystem.hpp"
+#include "LineRenderer.hpp"
 #include "Multiplayer/MultiplayerManager.hpp"
 #include "Multiplayer/MultiplayerRenderManager.hpp"
 #include "Multiplayer/SteamSocketsTransport.hpp"
 #include "NearbyFoliageRenderer.hpp"
 #include "PerformanceCapture.hpp"
-#include "platform/SteamService.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
 #include "RenderEngines.hpp"
@@ -22,12 +21,13 @@
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
 #include "TriangleRenderer.hpp"
-#include "WorldGridQuadtree.hpp"
 #include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
 #include "WorldGridNearbyFoliageManager.hpp"
+#include "WorldGridQuadtree.hpp"
 #include "WorldGridQuadtreeWaterManager.hpp"
 #include "WorldTextRenderer.hpp"
+#include "platform/SteamService.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -39,19 +39,21 @@
 
 class App
 {
-public:
+  public:
     struct Options
     {
         bool verboseStartupLogging = false;
         bool quitAfterFirstFrame = false;
+        std::uint64_t quitAfterFrameCount = 0;
+        bool verifyHeightmapPipeline = false;
         bool enableSteam = true;
     };
 
-    explicit App(const Options& options = {});
+    explicit App(const Options &options = {});
 
     void run();
 
-private:
+  private:
     void logStartup(std::string_view message) const;
     void initialize();
     void shutdown();
@@ -59,7 +61,7 @@ private:
     void initializeWindowing();
     void initializePlatformServices();
     void initializeGameplayState();
-    void initializeRenderers(const std::filesystem::path& shaderDirectory);
+    void initializeRenderers(const std::filesystem::path &shaderDirectory);
     void initializeImGui();
 
     void shutdownImGui();
@@ -71,7 +73,7 @@ private:
     void pollEvents();
     void tickPlatformServices();
     GamepadState updateInputState();
-    void updateFreeCamera(const GamepadState& gamepadState);
+    void updateFreeCamera(const GamepadState &gamepadState);
     void updateSimulationTime();
     void beginImGuiFrame();
     void buildUi();
@@ -95,7 +97,7 @@ private:
 
     [[nodiscard]] std::vector<std::string> querySdlGpuDrivers() const;
 
-    SDL_Window* m_window = nullptr;
+    SDL_Window *m_window = nullptr;
     bool m_running = true;
 
     SDLRenderer m_renderer;
@@ -131,8 +133,8 @@ private:
     LightingSystem m_lightingSystem;
 
     std::vector<TriangleInstance> m_instances{
-        { .position = Position(-1, 0, { static_cast<double>(Position::kCellSize) - 0.25, 0.0, 0.0 }) },
-        { .position = Position(0, 0, { 0.25, 0.0, 0.0 }) },
+        {.position = Position(-1, 0, {static_cast<double>(Position::kCellSize) - 0.25, 0.0, 0.0})},
+        {.position = Position(0, 0, {0.25, 0.0, 0.0})},
     };
 
     std::vector<std::string> m_gpuDrivers;

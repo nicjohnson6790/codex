@@ -20,7 +20,7 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 - Runtime asset packs are generated into `assets/runtime` and staged into each app build. Do not commit generated packs or externally licensed source assets.
 - Steamworks support is optional. The default SDK location is `../deps/steamworks_sdk_164/sdk`; local runs can use `--disable-steam`.
 - The ETOPO converter is an explicit offline operation, not part of the normal asset build. Its format is version 2 and its fixed Airocean projection is version 3.
-- The ETOPO runtime sampler, terrain integration, user layers, and world-placement transforms have not been implemented yet.
+- ETOPO is the initial runtime terrain source. `WorldGridQuadtreeHeightmapManager` owns tiled source residency, affine source placements, retained final-to-source references, and composed-final scheduling; `QuadtreeMeshRenderer` retains all GPU resource ownership. User-created heightmap layers remain future work.
 - Terrain heightmaps, canonical foliage, canopy, and nearby decoded foliage use the shared `FixedAssetCache` / `GenerationQueue` residency protocol in `src/AssetResidency.hpp`; preserve transactional queue-before-cache admission, ready-only request results, manager-owned shared fences, and handle-based stale-result retirement. Nearby residency is owned by `WorldGridNearbyFoliageManager`, not its renderer.
 - Preserve unrelated working-tree changes and use `apply_patch` for source/text edits.
 
@@ -29,4 +29,5 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 - The offline ETOPO heightmap converter and stale-MSVC-cache recovery are committed on local `main`.
 - The rendering architecture document now also covers the offline asset boundary and multiplayer render-emission boundary.
 - Shared asset-cache/generation-queue infrastructure and migrations are implemented locally; focused coverage is in `tests/AssetResidencyTests.cpp` and built by default as `asset_residency_tests`.
+- Runtime heightmaps now compose cached 256x256 ETOPO source tiles through contribution descriptors; repeated placements share source residency and remain additive.
 - Add concrete unfinished work here only when it must survive into another session; include the relevant file or subsystem and the next useful action.

@@ -164,7 +164,7 @@ Each tile is filtered independently using serpentine spatial traversal, modulo-1
 
 Index records are sorted deterministically by `tileY`, then `tileX`.
 
-Generation validates source dimensions/georeferencing/sample type, exhaustively self-tests the reversible residual transform, round-trips every filtered/compressed tile, compares every emitted shared edge, validates index ranges and uniqueness, then closes and reopens both output files and decodes all blobs. Runtime sampling, world placement transforms, terrain-generator integration, and user heightmap layers are intentionally outside this stage.
+Generation validates source dimensions/georeferencing/sample type, exhaustively self-tests the reversible residual transform, round-trips every filtered/compressed tile, compares every emitted shared edge, validates index ranges and uniqueness, then closes and reopens both output files and decodes all blobs. Runtime sampling, affine world placement, and final terrain composition are implemented by the runtime; user-created heightmap layers remain outside this converter stage.
 
 ## Conversion Pipeline
 

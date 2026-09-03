@@ -82,14 +82,13 @@ public:
     void emitDebugDraws(RenderEngines& renderEngines) const;
     void clearTerrainCache();
     void setWaterVisibilityBounds(float waterMinHeight, float waterMaxHeight, bool enabled);
-    [[nodiscard]] TerrainNoiseSettings& terrainSettings() { return m_heightmapManager.terrainSettings(); }
-    [[nodiscard]] const TerrainNoiseSettings& terrainSettings() const { return m_heightmapManager.terrainSettings(); }
     [[nodiscard]] WorldGridQuadtreeHeightmapManager& heightmapManager() { return m_heightmapManager; }
     [[nodiscard]] const WorldGridQuadtreeHeightmapManager& heightmapManager() const { return m_heightmapManager; }
     [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_heightmapManager.computeDispatchBudget(); }
     void setComputeDispatchBudget(std::uint16_t budget) { m_heightmapManager.setComputeDispatchBudget(budget); }
     [[nodiscard]] std::uint16_t residentCount() const { return m_heightmapManager.residentCount(); }
     [[nodiscard]] std::uint16_t queuedCount() const { return m_heightmapManager.queuedCount(); }
+    [[nodiscard]] WorldGridQuadtreeHeightmapManager::Diagnostics heightmapDiagnostics() const { return m_heightmapManager.diagnostics(); }
 
     TreeData treeData{};
 

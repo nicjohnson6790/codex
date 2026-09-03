@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <string>
 
-void AppPanels::draw(Context& context)
+void AppPanels::draw(Context &context)
 {
     HELLO_PROFILE_SCOPE_GROUPS("AppPanels::Draw", ProfileScopeGroup::ImGui);
     drawDockSpace();
@@ -19,20 +19,14 @@ void AppPanels::draw(Context& context)
 void AppPanels::drawDockSpace()
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawDockSpace");
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
     ImGui::SetNextWindowViewport(viewport->ID);
 
-    constexpr ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoDocking |
-        ImGuiWindowFlags_NoBringToFrontOnFocus |
-        ImGuiWindowFlags_NoNavFocus |
-        ImGuiWindowFlags_NoBackground;
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                       ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -54,7 +48,7 @@ void AppPanels::applyDockLayout()
         return;
     }
 
-    ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+    ImGuiViewport *mainViewport = ImGui::GetMainViewport();
     const ImGuiID dockspaceId = ImGui::GetID("MainDockSpace");
 
     ImGui::DockBuilderRemoveNode(dockspaceId);
@@ -83,7 +77,7 @@ void AppPanels::applyDockLayout()
     m_layoutDirty = false;
 }
 
-void AppPanels::drawInfoPane(Context& context)
+void AppPanels::drawInfoPane(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawInfoPane");
     if (m_leftPaneCollapsed)
@@ -143,16 +137,14 @@ void AppPanels::drawInfoPane(Context& context)
     ImGui::End();
 }
 
-void AppPanels::drawControlsTab(Context& context)
+void AppPanels::drawControlsTab(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawControlsTab");
     ImGui::TextUnformatted("Stack");
     ImGui::Separator();
     ImGui::Text("SDL3 window + SDL GPU renderer + Dear ImGui");
     ImGui::Text("Viewport texture size: %u x %u", m_viewportPanelExtent.width, m_viewportPanelExtent.height);
-    ImGui::Text("Gamepad: %.*s",
-        static_cast<int>(context.gamepadName.size()),
-        context.gamepadName.data());
+    ImGui::Text("Gamepad: %.*s", static_cast<int>(context.gamepadName.size()), context.gamepadName.data());
     ImGui::Checkbox("Show viewport FPS overlay", &m_showViewportFpsCounter);
     bool vsyncEnabled = context.renderer.vsyncEnabled();
     if (ImGui::Checkbox("VSync", &vsyncEnabled))
@@ -163,31 +155,24 @@ void AppPanels::drawControlsTab(Context& context)
     ImGui::Spacing();
     ImGui::TextUnformatted("SDL GPU Drivers");
     ImGui::Separator();
-    for (const std::string& driver : context.gpuDrivers)
+    for (const std::string &driver : context.gpuDrivers)
     {
         ImGui::BulletText("%s", driver.c_str());
     }
 
-    const CameraManager::Camera& activeCamera = context.cameraManager.activeCamera();
+    const CameraManager::Camera &activeCamera = context.cameraManager.activeCamera();
     if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::Text("Active: %s", activeCamera.name.c_str());
-        ImGui::Text(
-            "Camera Cell: (%lld, %lld)",
-            static_cast<long long>(activeCamera.position.gridX()),
-            static_cast<long long>(activeCamera.position.gridY())
-        );
-        const glm::dvec3& cameraLocal = activeCamera.position.localPosition();
+        ImGui::Text("Camera Cell: (%lld, %lld)", static_cast<long long>(activeCamera.position.gridX()),
+                    static_cast<long long>(activeCamera.position.gridY()));
+        const glm::dvec3 &cameraLocal = activeCamera.position.localPosition();
         ImGui::Text("Camera Local: (%.3f, %.3f, %.3f)", cameraLocal.x, cameraLocal.y, cameraLocal.z);
         if (ImGui::Button("Add Camera"))
         {
             const std::size_t newCameraIndex = context.cameraManager.cameraCount() + 1;
-            context.cameraManager.createCamera(
-                "Camera " + std::to_string(newCameraIndex),
-                activeCamera.position,
-                activeCamera.forward,
-                activeCamera.up
-            );
+            context.cameraManager.createCamera("Camera " + std::to_string(newCameraIndex), activeCamera.position, activeCamera.forward,
+                                               activeCamera.up);
         }
         ImGui::SameLine();
         if (ImGui::Button("Next Camera") && context.cameraManager.cameraCount() > 0)
@@ -207,11 +192,7 @@ void AppPanels::drawControlsTab(Context& context)
     {
         ImGui::Checkbox("Use player follow camera", &context.playerFollowCameraEnabled);
         const glm::dvec3 playerWorld = context.playerPawn.position.worldPosition();
-        ImGui::Text(
-            "Player world: (%.2f, %.2f, %.2f)",
-            playerWorld.x,
-            playerWorld.y,
-            playerWorld.z);
+        ImGui::Text("Player world: (%.2f, %.2f, %.2f)", playerWorld.x, playerWorld.y, playerWorld.z);
         ImGui::Text("Grounded: %s", context.playerPawn.grounded ? "yes" : "no");
         ImGui::Text("Collision tiles ready: %u / 16", context.collisionManager.readyTileCount());
         ImGui::SeparatorText("Keyboard");
@@ -225,7 +206,7 @@ void AppPanels::drawControlsTab(Context& context)
 
     if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        LightingSystem::SunLight& sun = context.lightingSystem.sun();
+        LightingSystem::SunLight &sun = context.lightingSystem.sun();
         ImGui::SliderFloat("Azimuth", &sun.azimuthDegrees, -180.0f, 180.0f, "%.1f deg");
         ImGui::SliderFloat("Elevation", &sun.elevationDegrees, 1.0f, 89.0f, "%.1f deg");
         ImGui::SliderFloat("Time of day", &sun.timeOfDayHours, 0.0f, 24.0f, "%.2f h");
@@ -238,7 +219,7 @@ void AppPanels::drawControlsTab(Context& context)
 
     if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        SkyboxRenderer::AtmosphereSettings& atmosphere = context.skyboxRenderer.atmosphereSettings();
+        SkyboxRenderer::AtmosphereSettings &atmosphere = context.skyboxRenderer.atmosphereSettings();
 
         ImGui::InputFloat("Atmosphere height (m)", &atmosphere.atmosphereHeight, 1000.0f, 10000.0f, "%.0f");
         ImGui::InputFloat("Distance range (m)", &atmosphere.atmosphereDistanceRange, 10000.0f, 100000.0f, "%.0f");
@@ -316,7 +297,7 @@ void AppPanels::drawControlsTab(Context& context)
     }
 }
 
-void AppPanels::drawSteamTab(Context& context)
+void AppPanels::drawSteamTab(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawSteamTab");
 
@@ -330,18 +311,13 @@ void AppPanels::drawSteamTab(Context& context)
     ImGui::Text("Input controllers: %d", context.steamService.steamInputControllerCount());
     ImGui::Text("Active input handle: %llu", static_cast<unsigned long long>(context.steamService.activeInputHandle()));
     ImGui::Text("Action data: %s", context.steamService.lastSteamInputStateActive() ? "active" : "inactive");
-    ImGui::Text(
-        "Move: %.3f, %.3f",
-        context.steamService.lastMoveX(),
-        context.steamService.lastMoveY());
-    ImGui::Text(
-        "Look: %.3f, %.3f",
-        context.steamService.lastLookX(),
-        context.steamService.lastLookY());
+    ImGui::Text("Move: %.3f, %.3f", context.steamService.lastMoveX(), context.steamService.lastMoveY());
+    ImGui::Text("Look: %.3f, %.3f", context.steamService.lastLookX(), context.steamService.lastLookY());
 
     if (!context.steamService.initialized())
     {
-        ImGui::TextWrapped("Steam API is optional for local runs. It initializes when Steam is available and the local AppID/runtime setup is valid.");
+        ImGui::TextWrapped("Steam API is optional for local runs. It initializes when Steam is "
+                           "available and the local AppID/runtime setup is valid.");
         return;
     }
 
@@ -351,7 +327,7 @@ void AppPanels::drawSteamTab(Context& context)
     ImGui::Text("Persona: %s", context.steamService.personaName().c_str());
 }
 
-void AppPanels::drawMultiplayerTab(Context& context)
+void AppPanels::drawMultiplayerTab(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawMultiplayerTab");
 
@@ -372,8 +348,7 @@ void AppPanels::drawMultiplayerTab(Context& context)
         ImGui::TextWrapped("Error: %s", debug.error.c_str());
     }
 
-    if (debug.state == MultiplayerManager::SessionState::Offline ||
-        debug.state == MultiplayerManager::SessionState::Error)
+    if (debug.state == MultiplayerManager::SessionState::Offline || debug.state == MultiplayerManager::SessionState::Error)
     {
         if (ImGui::Button("Create Lobby"))
         {
@@ -394,10 +369,8 @@ void AppPanels::drawMultiplayerTab(Context& context)
     ImGui::Text("Host ID: %llu", static_cast<unsigned long long>(debug.hostId));
     ImGui::Text("Connections: %zu", debug.connectionCount);
     ImGui::Text("Remote entities: %zu", debug.remoteEntityCount);
-    ImGui::Text(
-        "Player packets sent/recv: %llu / %llu",
-        static_cast<unsigned long long>(debug.sentPlayerStateCount),
-        static_cast<unsigned long long>(debug.receivedPlayerStateCount));
+    ImGui::Text("Player packets sent/recv: %llu / %llu", static_cast<unsigned long long>(debug.sentPlayerStateCount),
+                static_cast<unsigned long long>(debug.receivedPlayerStateCount));
     ImGui::Text("Packet age: %.2f s", debug.newestPacketAgeSeconds);
     ImGui::Text("Connection: %s", debug.connectionState.c_str());
     ImGui::Text("Time drift: %.4f h", debug.timeSyncDriftHours);
@@ -409,7 +382,7 @@ void AppPanels::drawMultiplayerTab(Context& context)
     {
         ImGui::TextUnformatted("No joinable friends found.");
     }
-    for (const SteamService::FriendLobby& friendLobby : friendLobbies)
+    for (const SteamService::FriendLobby &friendLobby : friendLobbies)
     {
         ImGui::PushID(static_cast<int>(friendLobby.friendSteamId & 0x7fffffffu));
         ImGui::Text("%s", friendLobby.personaName.c_str());
@@ -423,85 +396,24 @@ void AppPanels::drawMultiplayerTab(Context& context)
     }
 
     ImGui::SeparatorText("Members");
-    for (const SteamService::LobbyMember& member : context.steamService.lobbyMembers())
+    for (const SteamService::LobbyMember &member : context.steamService.lobbyMembers())
     {
-        ImGui::BulletText(
-            "%s (%llu)%s",
-            member.personaName.c_str(),
-            static_cast<unsigned long long>(member.steamId),
-            member.steamId == debug.hostId ? " host" : "");
+        ImGui::BulletText("%s (%llu)%s", member.personaName.c_str(), static_cast<unsigned long long>(member.steamId),
+                          member.steamId == debug.hostId ? " host" : "");
     }
 }
 
-void AppPanels::drawTerrainTab(Context& context)
+void AppPanels::drawTerrainTab(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawTerrainTab");
 
-    TerrainNoiseSettings& settings = context.worldGridQuadtree.terrainSettings();
     int computeDispatchBudget = static_cast<int>(context.worldGridQuadtree.computeDispatchBudget());
 
-    ImGui::TextWrapped("Terrain slices keep their generated heightmaps in the LRU cache. After changing these values, regenerate the cache to rebuild terrain with the new noise settings.");
+    ImGui::TextWrapped("Terrain height is composed from tiled ETOPO source heightmaps.");
     ImGui::Spacing();
-
-    ImGui::InputDouble("Base height", &settings.baseHeight, 100.0, 500.0, "%.1f");
-    ImGui::TextWrapped("Blend channel steers which terrain family wins: low values favor hills, mid values favor the 12k layer, and high values favor the 4k layer.");
-    ImGui::Spacing();
-
-    auto drawFractalLayerEditor = [](const char* label, TerrainFractalNoiseLayerSettings& layer)
-    {
-        int octaveCount = static_cast<int>(layer.octaveCount);
-        if (!ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            return;
-        }
-
-        ImGui::InputDouble("Wavelength", &layer.wavelength, 100.0, 500.0, "%.1f");
-        ImGui::InputDouble("Amplitude", &layer.amplitude, 100.0, 500.0, "%.1f");
-        ImGui::InputDouble("Height bias", &layer.bias, 100.0, 500.0, "%.1f");
-        ImGui::InputDouble("Initial frequency", &layer.initialFrequency, 0.05, 0.25, "%.3f");
-        ImGui::InputDouble("Initial amplitude", &layer.initialAmplitude, 0.05, 0.25, "%.3f");
-        ImGui::SliderInt("Octaves", &octaveCount, 1, 12);
-        layer.octaveCount = static_cast<std::uint32_t>(std::max(octaveCount, 1));
-        ImGui::InputDouble("Octave frequency scale", &layer.octaveFrequencyScale, 0.05, 0.25, "%.2f");
-        ImGui::InputDouble("Octave amplitude scale", &layer.octaveAmplitudeScale, 0.02, 0.10, "%.2f");
-        ImGui::InputDouble("Gradient dampening k", &layer.gradientDampenStrength, 0.05, 0.25, "%.2f");
-        ImGui::InputDouble("Octave rotation deg", &layer.octaveRotationDegrees, 1.0, 5.0, "%.1f");
-    };
-
-    if (ImGui::CollapsingHeader("Blend Channel", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        int blendOctaveCount = static_cast<int>(settings.blend.octaveCount);
-        ImGui::InputDouble("Blend wavelength", &settings.blend.wavelength, 100.0, 500.0, "%.1f");
-        ImGui::InputDouble("Blend initial frequency", &settings.blend.initialFrequency, 0.05, 0.25, "%.3f");
-        ImGui::InputDouble("Blend initial amplitude", &settings.blend.initialAmplitude, 0.05, 0.25, "%.3f");
-        ImGui::SliderInt("Blend octaves", &blendOctaveCount, 1, 12);
-        settings.blend.octaveCount = static_cast<std::uint32_t>(std::max(blendOctaveCount, 1));
-        ImGui::InputDouble("Blend octave frequency scale", &settings.blend.octaveFrequencyScale, 0.05, 0.25, "%.2f");
-        ImGui::InputDouble("Blend octave amplitude scale", &settings.blend.octaveAmplitudeScale, 0.02, 0.10, "%.2f");
-        ImGui::InputDouble("Blend gradient dampening k", &settings.blend.gradientDampenStrength, 0.05, 0.25, "%.2f");
-        ImGui::InputDouble("Blend octave rotation deg", &settings.blend.octaveRotationDegrees, 1.0, 5.0, "%.1f");
-        ImGui::InputDouble("Low threshold", &settings.blend.lowThreshold, 0.01, 0.05, "%.2f");
-        ImGui::InputDouble("High threshold", &settings.blend.highThreshold, 0.01, 0.05, "%.2f");
-        ImGui::InputDouble("Low transition width", &settings.blend.lowTransitionWidth, 0.01, 0.05, "%.2f");
-        ImGui::InputDouble("High transition width", &settings.blend.highTransitionWidth, 0.01, 0.05, "%.2f");
-    }
-
-    ImGui::PushID("HillsLayer");
-    drawFractalLayerEditor("Rolling Hills", settings.hills);
-    ImGui::PopID();
-
-    ImGui::PushID("MediumLayer");
-    drawFractalLayerEditor("12k Layer", settings.mediumDetail);
-    ImGui::PopID();
-
-    ImGui::PushID("HighLayer");
-    drawFractalLayerEditor("4k Layer", settings.highDetail);
-    ImGui::PopID();
-
-    ImGui::SliderInt("Compute dispatches/frame", &computeDispatchBudget, 1, 64);
+    ImGui::SliderInt("Final generations/frame", &computeDispatchBudget, 1,
+                     static_cast<int>(AppConfig::Terrain::kMaxFinalHeightmapsPerDispatch));
     context.worldGridQuadtree.setComputeDispatchBudget(static_cast<std::uint16_t>(std::max(computeDispatchBudget, 1)));
-
-    settings = sanitizeTerrainNoiseSettings(settings);
 
     ImGui::Spacing();
     if (ImGui::Button("Regenerate Terrain Cache"))
@@ -514,10 +426,10 @@ void AppPanels::drawTerrainTab(Context& context)
     ImGui::Text("Queued leaves: %u", context.worldGridQuadtree.queuedCount());
 }
 
-void AppPanels::drawDebugTab(Context& context)
+void AppPanels::drawDebugTab(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawDebugTab");
-    const WorldGridQuadtree::TreeData& treeData = context.worldGridQuadtree.treeData;
+    const WorldGridQuadtree::TreeData &treeData = context.worldGridQuadtree.treeData;
 
     ImGui::SeparatorText("Quadtree");
     ImGui::Checkbox("Show quadtree borders", &m_showQuadtreeBorders);
@@ -539,8 +451,7 @@ void AppPanels::drawDebugTab(Context& context)
             continue;
         }
 
-        const double drawSizeMeters =
-            AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(std::uint64_t{1} << scalePow);
+        const double drawSizeMeters = AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(std::uint64_t{1} << scalePow);
         ImGui::Text("%.0f m: %u/%u", drawSizeMeters, drawCount, totalLeafCount);
         showedTerrainDrawSize = true;
     }
@@ -552,6 +463,28 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::SeparatorText("Heightmap Cache");
     ImGui::Text("Resident slices: %u", context.worldGridQuadtree.residentCount());
     ImGui::Text("Queued leaves: %u", context.worldGridQuadtree.queuedCount());
+    const auto heightmaps = context.worldGridQuadtree.heightmapDiagnostics();
+    ImGui::Text("Source Tile Cache: %u / %u", heightmaps.sourceOccupied, WorldGridQuadtreeHeightmapManager::kSourceTileCapacity);
+    ImGui::Text("Ready / loading / age-0: %u / %u / %u", heightmaps.sourceReady, heightmaps.sourceLoading, heightmaps.sourceAgeZero);
+    ImGui::Text("Hash LUT: %u / %u, depth %u, collisions %u", heightmaps.sourceHashOccupied, heightmaps.sourceHashCapacity,
+                AppConfig::Terrain::kSourceHeightmapHashLookupDepth, heightmaps.sourceHashCollisions);
+    ImGui::Text("Hits / misses: %llu / %llu", static_cast<unsigned long long>(heightmaps.sourceHits),
+                static_cast<unsigned long long>(heightmaps.sourceMisses));
+    ImGui::Text("Loads / uploads / evictions: %llu / %llu / %llu", static_cast<unsigned long long>(heightmaps.sourceLoads),
+                static_cast<unsigned long long>(heightmaps.sourceUploads), static_cast<unsigned long long>(heightmaps.sourceEvictions));
+    ImGui::Text("Source References: %u / %u (high-water %u)", heightmaps.referenceCount, heightmaps.referenceCapacity,
+                heightmaps.referenceHighWater);
+    ImGui::Text("Waiting finals / contributions: %u / %u", heightmaps.waitingFinals, heightmaps.pendingContributions);
+    ImGui::Text("Source Descriptors: %u / %u", heightmaps.lastSourceDescriptors,
+                WorldGridQuadtreeHeightmapManager::kSourceDescriptorCapacity);
+    ImGui::Text("Final Generations: %u / %u", heightmaps.lastFinalGenerations,
+                WorldGridQuadtreeHeightmapManager::kMaxFinalHeightmapsPerDispatch);
+    ImGui::Text("Queued / submitted generation jobs: %u / %u", heightmaps.queuedGenerationJobs, heightmaps.submittedJobs);
+    ImGui::Text("Submitted / discarded / descriptor errors: %u / %u / %u", heightmaps.submittedJobs, heightmaps.discardedJobs,
+                heightmaps.descriptorOverflows);
+    ImGui::Text("Completed final generations: %llu", static_cast<unsigned long long>(heightmaps.completedFinalGenerations));
+    ImGui::Text("Completed with source contributions: %llu",
+                static_cast<unsigned long long>(heightmaps.completedFinalGenerationsWithSources));
 
     ImGui::SeparatorText("Foliage Overview");
     ImGui::Text("Canopy draws: %u", context.foliageCanopyRenderer.drawCount());
@@ -583,20 +516,19 @@ void AppPanels::drawDebugTab(Context& context)
     ImGui::SeparatorText("Water");
     ImGui::Text("Queued water instances: %u", context.waterManager.queuedCount());
     ImGui::Text("Water mesh instances: %u", context.waterMeshRenderer.instanceCount());
-    ImGui::Text(
-        "Water mesh resolution: %u x %u vertices",
-        AppConfig::Water::kMeshVertexResolution,
-        AppConfig::Water::kMeshVertexResolution);
+    ImGui::Text("Water mesh resolution: %u x %u vertices", AppConfig::Water::kMeshVertexResolution,
+                AppConfig::Water::kMeshVertexResolution);
 
     ImGui::SeparatorText("Notes");
-    ImGui::TextWrapped("The quadtree is rebuilt around the active camera and includes the current grid cell plus the eight surrounding cells.");
+    ImGui::TextWrapped("The quadtree is rebuilt around the active camera and includes the "
+                       "current grid cell plus the eight surrounding cells.");
 }
 
-void AppPanels::drawWaterTab(Context& context)
+void AppPanels::drawWaterTab(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawWaterTab");
 
-    WaterSettings& settings = context.waterManager.settings();
+    WaterSettings &settings = context.waterManager.settings();
     ImGui::Checkbox("Enabled", &settings.enabled);
     ImGui::Checkbox("Show LOD tint", &settings.showLodTint);
     ImGui::Checkbox("Draw foam", &settings.drawFoam);
@@ -607,12 +539,7 @@ void AppPanels::drawWaterTab(Context& context)
     ImGui::InputFloat("Depth (m)", &settings.depthMeters, 1.0f, 10.0f, "%.2f");
     ImGui::InputFloat("Low cutoff", &settings.lowCutoff, 0.0001f, 0.001f, "%.4f");
     ImGui::InputFloat("High cutoff", &settings.highCutoff, 0.1f, 1.0f, "%.2f");
-    ImGui::InputFloat(
-        "Dry terrain cutoff above water (m)",
-        &settings.maxTerrainMinHeightAboveWaterToDraw,
-        1.0f,
-        10.0f,
-        "%.2f");
+    ImGui::InputFloat("Dry terrain cutoff above water (m)", &settings.maxTerrainMinHeightAboveWaterToDraw, 1.0f, 10.0f, "%.2f");
 
     int cascadeCount = static_cast<int>(settings.cascadeCount);
     ImGui::SliderInt("Cascade count", &cascadeCount, 0, static_cast<int>(AppConfig::Water::kMaxCascadeCount));
@@ -622,7 +549,7 @@ void AppPanels::drawWaterTab(Context& context)
     {
         for (std::uint32_t index = 0; index < settings.cascadeCount; ++index)
         {
-            WaterCascadeSettings& cascade = settings.cascades[index];
+            WaterCascadeSettings &cascade = settings.cascades[index];
             ImGui::PushID(static_cast<int>(index));
             ImGui::SeparatorText(("Cascade " + std::to_string(index)).c_str());
             ImGui::InputFloat("World size (m)", &cascade.worldSizeMeters, 1.0f, 10.0f, "%.1f");
@@ -657,7 +584,9 @@ void AppPanels::drawWaterTab(Context& context)
 
     if (ImGui::CollapsingHeader("Foam Detail", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::TextWrapped("Merged foam history picks the fresh-to-decayed ridge shape. A world-space smooth-noise sample drives small offsets in both the foam history lookup and the foam detail lookup.");
+        ImGui::TextWrapped("Merged foam history picks the fresh-to-decayed ridge shape. A "
+                           "world-space smooth-noise sample drives small offsets in both the foam "
+                           "history lookup and the foam detail lookup.");
         ImGui::Spacing();
         ImGui::InputFloat("Foam cell size##FoamDetail", &settings.foamSdfSampleScaleA, 0.05f, 0.2f, "%.3f");
         ImGui::InputFloat("Fresh foam ridge min##FoamDetail", &settings.foamSdfRidgeMinA, 0.005f, 0.02f, "%.3f");
@@ -720,14 +649,11 @@ void AppPanels::drawWaterTab(Context& context)
 
     ImGui::SeparatorText("Mesh");
     ImGui::TextWrapped("Water now uses one reusable mesh for all visible quadtree leaves.");
-    ImGui::Text(
-        "Mesh resolution: %u x %u vertices",
-        AppConfig::Water::kMeshVertexResolution,
-        AppConfig::Water::kMeshVertexResolution);
+    ImGui::Text("Mesh resolution: %u x %u vertices", AppConfig::Water::kMeshVertexResolution, AppConfig::Water::kMeshVertexResolution);
     ImGui::Text("Active instances: %u", context.waterMeshRenderer.instanceCount());
 }
 
-void AppPanels::drawViewportPane(Context& context)
+void AppPanels::drawViewportPane(Context &context)
 {
     HELLO_PROFILE_SCOPE("AppPanels::DrawViewportPane");
     if (m_viewportDockId != 0)
@@ -744,10 +670,8 @@ void AppPanels::drawViewportPane(Context& context)
     if (context.viewportTextureId != 0)
     {
         const ImVec2 imageMin = ImGui::GetCursorScreenPos();
-        ImGui::Image(
-            context.viewportTextureId,
-            ImVec2(static_cast<float>(m_viewportPanelExtent.width), static_cast<float>(m_viewportPanelExtent.height))
-        );
+        ImGui::Image(context.viewportTextureId,
+                     ImVec2(static_cast<float>(m_viewportPanelExtent.width), static_cast<float>(m_viewportPanelExtent.height)));
 
         if (m_showViewportFpsCounter)
         {
@@ -756,29 +680,18 @@ void AppPanels::drawViewportPane(Context& context)
             const ImVec2 textPadding(8.0f, 4.0f);
             const ImVec2 textSize = ImGui::CalcTextSize(fpsLabel.c_str());
             const ImVec2 overlayMin(imageMin.x + 10.0f, imageMin.y + 10.0f);
-            const ImVec2 overlayMax(
-                overlayMin.x + textSize.x + (textPadding.x * 2.0f),
-                overlayMin.y + textSize.y + (textPadding.y * 2.0f));
+            const ImVec2 overlayMax(overlayMin.x + textSize.x + (textPadding.x * 2.0f), overlayMin.y + textSize.y + (textPadding.y * 2.0f));
 
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(
-                overlayMin,
-                overlayMax,
-                IM_COL32(12, 16, 20, 185),
-                6.0f);
-            drawList->AddText(
-                ImVec2(overlayMin.x + textPadding.x, overlayMin.y + textPadding.y),
-                IM_COL32(240, 248, 255, 255),
-                fpsLabel.c_str());
+            ImDrawList *drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(overlayMin, overlayMax, IM_COL32(12, 16, 20, 185), 6.0f);
+            drawList->AddText(ImVec2(overlayMin.x + textPadding.x, overlayMin.y + textPadding.y), IM_COL32(240, 248, 255, 255),
+                              fpsLabel.c_str());
         }
     }
 
     if (m_viewportPaused)
     {
-        ImGui::SetCursorScreenPos(ImVec2(
-            ImGui::GetWindowPos().x + 12.0f,
-            ImGui::GetWindowPos().y + 12.0f
-        ));
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + 12.0f, ImGui::GetWindowPos().y + 12.0f));
         ImGui::TextUnformatted("Viewport paused");
     }
 

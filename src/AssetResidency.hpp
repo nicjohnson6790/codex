@@ -22,66 +22,94 @@ struct GenerationJobHandle
         return index != std::numeric_limits<std::uint32_t>::max();
     }
 
-    friend constexpr bool operator==(const GenerationJobHandle&, const GenerationJobHandle&) = default;
+    friend constexpr bool operator==(const GenerationJobHandle &, const GenerationJobHandle &) = default;
 };
 
 namespace AssetResidencyDetail
 {
 class BitArray
 {
-public:
+  public:
     BitArray() = default;
-    explicit BitArray(std::size_t size)
-        : m_size(size)
-        , m_words((size + 63u) / 64u, 0)
+    explicit BitArray(std::size_t size) : m_size(size), m_words((size + 63u) / 64u, 0)
     {
     }
 
     [[nodiscard]] bool test(std::size_t index) const
     {
-        return (m_words.at(index / 64u) & (std::uint64_t{ 1 } << (index % 64u))) != 0;
+        return (m_words.at(index / 64u) & (std::uint64_t{1} << (index % 64u))) != 0;
     }
 
     void set(std::size_t index, bool value = true)
     {
-        std::uint64_t& word = m_words.at(index / 64u);
-        const std::uint64_t mask = std::uint64_t{ 1 } << (index % 64u);
+        std::uint64_t &word = m_words.at(index / 64u);
+        const std::uint64_t mask = std::uint64_t{1} << (index % 64u);
         word = value ? (word | mask) : (word & ~mask);
     }
 
-    void clear() { std::fill(m_words.begin(), m_words.end(), 0); }
-    [[nodiscard]] std::size_t size() const { return m_size; }
+    void clear()
+    {
+        std::fill(m_words.begin(), m_words.end(), 0);
+    }
+    [[nodiscard]] std::size_t size() const
+    {
+        return m_size;
+    }
 
-private:
+  private:
     std::size_t m_size = 0;
     std::vector<std::uint64_t> m_words;
 };
-}
+} // namespace AssetResidencyDetail
 
-template<typename AssetId, typename SlotIndex = std::uint16_t, typename Hash = std::hash<AssetId>, typename Equal = std::equal_to<AssetId>>
+template <typename AssetId, typename SlotIndex = std::uint16_t, typename Hash = std::hash<AssetId>, typename Equal = std::equal_to<AssetId>>
 class FixedAssetCache
 {
-public:
+  public:
     static constexpr SlotIndex kInvalidSlot = std::numeric_limits<SlotIndex>::max();
 
     FixedAssetCache(std::size_t capacity, std::size_t hashTableSize, std::size_t lookupDepth, Hash hash = {}, Equal equal = {})
-        : m_assetIds(capacity)
-        , m_open(capacity)
-        , m_ready(capacity)
-        , m_ages(capacity, 0)
-        , m_activeJobs(capacity)
-        , m_hashTable(hashTableSize, kInvalidSlot)
-        , m_lookupDepth(lookupDepth)
-        , m_hash(std::move(hash))
-        , m_equal(std::move(equal))
+        : m_assetIds(capacity), m_open(capacity), m_ready(capacity), m_ages(capacity, 0), m_activeJobs(capacity),
+          m_hashTable(hashTableSize, kInvalidSlot), m_lookupDepth(lookupDepth), m_hash(std::move(hash)), m_equal(std::move(equal))
     {
         if (capacity == 0 || capacity > static_cast<std::size_t>(kInvalidSlot) || hashTableSize == 0 || lookupDepth == 0)
-            throw std::invalid_argument("FixedAssetCache requires non-zero representable capacity, hash size, and lookup depth.");
+            throw std::invalid_argument("FixedAssetCache requires non-zero representable capacity, hash "
+                                        "size, and lookup depth.");
     }
 
-    [[nodiscard]] std::size_t capacity() const { return m_assetIds.size(); }
+    [[nodiscard]] std::size_t capacity() const
+    {
+        return m_assetIds.size();
+    }
+    [[nodiscard]] std::size_t hashTableSize() const
+    {
+        return m_hashTable.size();
+    }
+    [[nodiscard]] std::size_t lookupDepth() const
+    {
+        return m_lookupDepth;
+    }
+    [[nodiscard]] std::size_t hashOccupiedCount() const
+    {
+        return static_cast<std::size_t>(
+            std::count_if(m_hashTable.begin(), m_hashTable.end(), [](SlotIndex slot) { return slot != kInvalidSlot; }));
+    }
+    [[nodiscard]] std::size_t hashCollisionCount() const
+    {
+        std::size_t collisions = 0;
+        for (std::size_t index = 0; index < capacity(); ++index)
+        {
+            const SlotIndex slot = static_cast<SlotIndex>(index);
+            if (!isOpen(slot))
+                continue;
+            const std::size_t start = m_hash(m_assetIds[index]) % m_hashTable.size();
+            if (m_hashTable[start] != slot)
+                ++collisions;
+        }
+        return collisions;
+    }
 
-    [[nodiscard]] std::optional<SlotIndex> find(const AssetId& id) const
+    [[nodiscard]] std::optional<SlotIndex> find(const AssetId &id) const
     {
         const std::size_t start = m_hash(id) % m_hashTable.size();
         for (std::size_t probe = 0; probe < std::min(m_lookupDepth, m_hashTable.size()); ++probe)
@@ -99,7 +127,7 @@ public:
         return std::nullopt;
     }
 
-    [[nodiscard]] bool validatesHint(SlotIndex slot, const AssetId& id) const
+    [[nodiscard]] bool validatesHint(SlotIndex slot, const AssetId &id) const
     {
         return validSlot(slot) && isOpen(slot) && m_equal(m_assetIds[slot], id);
     }
@@ -121,7 +149,7 @@ public:
         return oldest;
     }
 
-    void assign(SlotIndex slot, const AssetId& id)
+    void assign(SlotIndex slot, const AssetId &id)
     {
         requireSlot(slot);
         removeLookup(slot);
@@ -133,7 +161,11 @@ public:
         insertLookup(slot);
     }
 
-    void touch(SlotIndex slot) { requireOpen(slot); m_ages[slot] = 0; }
+    void touch(SlotIndex slot)
+    {
+        requireOpen(slot);
+        m_ages[slot] = 0;
+    }
 
     void age()
     {
@@ -142,19 +174,56 @@ public:
                 ++m_ages[index];
     }
 
-    [[nodiscard]] bool isOpen(SlotIndex slot) const { return validSlot(slot) && m_open.test(slot); }
-    [[nodiscard]] bool isReady(SlotIndex slot) const { return validSlot(slot) && m_ready.test(slot); }
-    [[nodiscard]] std::uint8_t ageOf(SlotIndex slot) const { requireOpen(slot); return m_ages[slot]; }
-    [[nodiscard]] const AssetId& assetId(SlotIndex slot) const { requireOpen(slot); return m_assetIds[slot]; }
-    [[nodiscard]] GenerationJobHandle activeJob(SlotIndex slot) const { requireOpen(slot); return m_activeJobs[slot]; }
-    void setActiveJob(SlotIndex slot, GenerationJobHandle job) { requireOpen(slot); m_activeJobs[slot] = job; }
-    void clearActiveJob(SlotIndex slot, GenerationJobHandle expected) { requireOpen(slot); if (m_activeJobs[slot] == expected) m_activeJobs[slot] = {}; }
-    void markReady(SlotIndex slot) { requireOpen(slot); m_ready.set(slot); }
+    [[nodiscard]] bool isOpen(SlotIndex slot) const
+    {
+        return validSlot(slot) && m_open.test(slot);
+    }
+    [[nodiscard]] bool isReady(SlotIndex slot) const
+    {
+        return validSlot(slot) && m_ready.test(slot);
+    }
+    [[nodiscard]] std::uint8_t ageOf(SlotIndex slot) const
+    {
+        requireOpen(slot);
+        return m_ages[slot];
+    }
+    [[nodiscard]] const AssetId &assetId(SlotIndex slot) const
+    {
+        requireOpen(slot);
+        return m_assetIds[slot];
+    }
+    [[nodiscard]] GenerationJobHandle activeJob(SlotIndex slot) const
+    {
+        requireOpen(slot);
+        return m_activeJobs[slot];
+    }
+    void setActiveJob(SlotIndex slot, GenerationJobHandle job)
+    {
+        requireOpen(slot);
+        m_activeJobs[slot] = job;
+    }
+    void clearActiveJob(SlotIndex slot, GenerationJobHandle expected)
+    {
+        requireOpen(slot);
+        if (m_activeJobs[slot] == expected)
+            m_activeJobs[slot] = {};
+    }
+    void markReady(SlotIndex slot)
+    {
+        requireOpen(slot);
+        m_ready.set(slot);
+    }
+    void markNotReady(SlotIndex slot)
+    {
+        requireOpen(slot);
+        m_ready.set(slot, false);
+    }
 
     void release(SlotIndex slot)
     {
         requireSlot(slot);
-        if (!m_open.test(slot)) return;
+        if (!m_open.test(slot))
+            return;
         removeLookup(slot);
         m_open.set(slot, false);
         m_ready.set(slot, false);
@@ -171,25 +240,41 @@ public:
         std::fill(m_hashTable.begin(), m_hashTable.end(), kInvalidSlot);
     }
 
-private:
-    [[nodiscard]] bool validSlot(SlotIndex slot) const { return static_cast<std::size_t>(slot) < capacity(); }
-    void requireSlot(SlotIndex slot) const { if (!validSlot(slot)) throw std::out_of_range("cache slot"); }
-    void requireOpen(SlotIndex slot) const { if (!isOpen(slot)) throw std::out_of_range("open cache slot"); }
+  private:
+    [[nodiscard]] bool validSlot(SlotIndex slot) const
+    {
+        return static_cast<std::size_t>(slot) < capacity();
+    }
+    void requireSlot(SlotIndex slot) const
+    {
+        if (!validSlot(slot))
+            throw std::out_of_range("cache slot");
+    }
+    void requireOpen(SlotIndex slot) const
+    {
+        if (!isOpen(slot))
+            throw std::out_of_range("open cache slot");
+    }
 
     void insertLookup(SlotIndex slot)
     {
         const std::size_t start = m_hash(m_assetIds[slot]) % m_hashTable.size();
         for (std::size_t probe = 0; probe < std::min(m_lookupDepth, m_hashTable.size()); ++probe)
         {
-            SlotIndex& candidate = m_hashTable[(start + probe) % m_hashTable.size()];
-            if (candidate == kInvalidSlot) { candidate = slot; return; }
+            SlotIndex &candidate = m_hashTable[(start + probe) % m_hashTable.size()];
+            if (candidate == kInvalidSlot)
+            {
+                candidate = slot;
+                return;
+            }
         }
     }
 
     void removeLookup(SlotIndex slot)
     {
-        for (SlotIndex& candidate : m_hashTable)
-            if (candidate == slot) candidate = kInvalidSlot;
+        for (SlotIndex &candidate : m_hashTable)
+            if (candidate == slot)
+                candidate = kInvalidSlot;
     }
 
     std::vector<AssetId> m_assetIds;
@@ -203,29 +288,34 @@ private:
     Equal m_equal;
 };
 
-template<typename Job, typename Fence>
-class GenerationQueue
+template <typename Job, typename Fence> class GenerationQueue
 {
-public:
+  public:
     explicit GenerationQueue(std::size_t capacity)
-        : m_jobs(capacity)
-        , m_discarded(capacity)
-        , m_completed(capacity)
-        , m_submitted(capacity)
-        , m_fences(capacity)
-        , m_generations(capacity, 0)
+        : m_jobs(capacity), m_discarded(capacity), m_completed(capacity), m_submitted(capacity), m_fences(capacity),
+          m_generations(capacity, 0)
     {
         if (capacity == 0 || capacity > std::numeric_limits<std::uint32_t>::max())
             throw std::invalid_argument("GenerationQueue requires non-zero representable capacity.");
     }
 
-    [[nodiscard]] std::size_t capacity() const { return m_jobs.size(); }
-    [[nodiscard]] std::size_t count() const { return m_count; }
-    [[nodiscard]] bool full() const { return m_count == capacity(); }
+    [[nodiscard]] std::size_t capacity() const
+    {
+        return m_jobs.size();
+    }
+    [[nodiscard]] std::size_t count() const
+    {
+        return m_count;
+    }
+    [[nodiscard]] bool full() const
+    {
+        return m_count == capacity();
+    }
 
     [[nodiscard]] std::optional<GenerationJobHandle> tryPush(Job job)
     {
-        if (full()) return std::nullopt;
+        if (full())
+            return std::nullopt;
         const std::size_t index = (m_front + m_count) % capacity();
         m_jobs[index] = std::move(job);
         m_discarded.set(index, false);
@@ -233,9 +323,10 @@ public:
         m_submitted.set(index, false);
         m_fences[index].reset();
         ++m_generations[index];
-        if (m_generations[index] == 0) ++m_generations[index];
+        if (m_generations[index] == 0)
+            ++m_generations[index];
         ++m_count;
-        return GenerationJobHandle{ static_cast<std::uint32_t>(index), m_generations[index] };
+        return GenerationJobHandle{static_cast<std::uint32_t>(index), m_generations[index]};
     }
 
     [[nodiscard]] bool contains(GenerationJobHandle handle) const
@@ -243,12 +334,36 @@ public:
         return handle.valid() && handle.index < capacity() && m_generations[handle.index] == handle.generation && isAllocated(handle.index);
     }
 
-    [[nodiscard]] Job& job(GenerationJobHandle handle) { require(handle); return m_jobs[handle.index]; }
-    [[nodiscard]] const Job& job(GenerationJobHandle handle) const { require(handle); return m_jobs[handle.index]; }
-    [[nodiscard]] bool isDiscarded(GenerationJobHandle handle) const { require(handle); return m_discarded.test(handle.index); }
-    [[nodiscard]] bool isCompleted(GenerationJobHandle handle) const { require(handle); return m_completed.test(handle.index); }
-    [[nodiscard]] bool isSubmitted(GenerationJobHandle handle) const { require(handle); return m_submitted.test(handle.index); }
-    [[nodiscard]] const std::shared_ptr<Fence>& fence(GenerationJobHandle handle) const { require(handle); return m_fences[handle.index]; }
+    [[nodiscard]] Job &job(GenerationJobHandle handle)
+    {
+        require(handle);
+        return m_jobs[handle.index];
+    }
+    [[nodiscard]] const Job &job(GenerationJobHandle handle) const
+    {
+        require(handle);
+        return m_jobs[handle.index];
+    }
+    [[nodiscard]] bool isDiscarded(GenerationJobHandle handle) const
+    {
+        require(handle);
+        return m_discarded.test(handle.index);
+    }
+    [[nodiscard]] bool isCompleted(GenerationJobHandle handle) const
+    {
+        require(handle);
+        return m_completed.test(handle.index);
+    }
+    [[nodiscard]] bool isSubmitted(GenerationJobHandle handle) const
+    {
+        require(handle);
+        return m_submitted.test(handle.index);
+    }
+    [[nodiscard]] const std::shared_ptr<Fence> &fence(GenerationJobHandle handle) const
+    {
+        require(handle);
+        return m_fences[handle.index];
+    }
 
     void markSubmitted(GenerationJobHandle handle, std::shared_ptr<Fence> fence)
     {
@@ -261,10 +376,15 @@ public:
     {
         require(handle);
         m_discarded.set(handle.index);
-        if (!m_submitted.test(handle.index)) m_completed.set(handle.index);
+        if (!m_submitted.test(handle.index))
+            m_completed.set(handle.index);
     }
 
-    void markCompleted(GenerationJobHandle handle) { require(handle); m_completed.set(handle.index); }
+    void markCompleted(GenerationJobHandle handle)
+    {
+        require(handle);
+        m_completed.set(handle.index);
+    }
 
     void discardAll()
     {
@@ -275,33 +395,45 @@ public:
     void retireSignaledDiscarded()
     {
         forEachActive([&](GenerationJobHandle handle) {
-            if (!isDiscarded(handle) || isCompleted(handle) || !isSubmitted(handle)) return;
-            const std::shared_ptr<Fence>& submittedFence = fence(handle);
-            if (submittedFence && submittedFence->isSignaled()) markCompleted(handle);
+            if (!isDiscarded(handle) || isCompleted(handle) || !isSubmitted(handle))
+                return;
+            const std::shared_ptr<Fence> &submittedFence = fence(handle);
+            if (submittedFence && submittedFence->isSignaled())
+                markCompleted(handle);
         });
         retireCompletedFront();
     }
 
-    template<typename CompletionFunction>
-    void processSignaled(CompletionFunction&& processCompletion)
+    template <typename CompletionFunction> void processSignaled(CompletionFunction &&processCompletion)
     {
         forEachActive([&](GenerationJobHandle handle) {
-            if (isCompleted(handle) || !isSubmitted(handle)) return;
-            const std::shared_ptr<Fence>& submittedFence = fence(handle);
-            if (!submittedFence || !submittedFence->isSignaled()) return;
-            if (!isDiscarded(handle)) std::invoke(processCompletion, handle, job(handle));
+            if (isCompleted(handle) || !isSubmitted(handle))
+                return;
+            const std::shared_ptr<Fence> &submittedFence = fence(handle);
+            if (!submittedFence || !submittedFence->isSignaled())
+                return;
+            if (!isDiscarded(handle))
+                std::invoke(processCompletion, handle, job(handle));
             markCompleted(handle);
         });
         retireCompletedFront();
     }
 
-    template<typename Function>
-    void forEachActive(Function&& function)
+    template <typename Function> void forEachActive(Function &&function)
     {
         for (std::size_t offset = 0; offset < m_count; ++offset)
         {
             const std::size_t index = (m_front + offset) % capacity();
-            std::invoke(function, GenerationJobHandle{ static_cast<std::uint32_t>(index), m_generations[index] });
+            std::invoke(function, GenerationJobHandle{static_cast<std::uint32_t>(index), m_generations[index]});
+        }
+    }
+
+    template <typename Function> void forEachActive(Function &&function) const
+    {
+        for (std::size_t offset = 0; offset < m_count; ++offset)
+        {
+            const std::size_t index = (m_front + offset) % capacity();
+            std::invoke(function, GenerationJobHandle{static_cast<std::uint32_t>(index), m_generations[index]});
         }
     }
 
@@ -328,14 +460,19 @@ public:
         std::fill(m_fences.begin(), m_fences.end(), nullptr);
     }
 
-private:
+  private:
     [[nodiscard]] bool isAllocated(std::size_t index) const
     {
         for (std::size_t offset = 0; offset < m_count; ++offset)
-            if ((m_front + offset) % capacity() == index) return true;
+            if ((m_front + offset) % capacity() == index)
+                return true;
         return false;
     }
-    void require(GenerationJobHandle handle) const { if (!contains(handle)) throw std::out_of_range("generation job handle"); }
+    void require(GenerationJobHandle handle) const
+    {
+        if (!contains(handle))
+            throw std::out_of_range("generation job handle");
+    }
 
     std::vector<Job> m_jobs;
     AssetResidencyDetail::BitArray m_discarded;

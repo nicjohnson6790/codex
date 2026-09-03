@@ -5,9 +5,6 @@
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_gpu.h>
 
-#include <imgui.h>
-#include <imgui_impl_sdl3.h>
-#include <imgui_impl_sdlgpu3.h>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -15,15 +12,18 @@
 #include <glm/geometric.hpp>
 #include <glm/matrix.hpp>
 #include <glm/vec3.hpp>
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_sdlgpu3.h>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
 
 namespace
 {
-std::filesystem::path executableRelativePath(const std::filesystem::path& relativePath)
+std::filesystem::path executableRelativePath(const std::filesystem::path &relativePath)
 {
-    const char* basePath = SDL_GetBasePath();
+    const char *basePath = SDL_GetBasePath();
     if (basePath == nullptr)
     {
         throw std::runtime_error(std::string("Failed to resolve executable base path: ") + SDL_GetError());
@@ -31,11 +31,9 @@ std::filesystem::path executableRelativePath(const std::filesystem::path& relati
 
     return std::filesystem::path(basePath) / relativePath;
 }
-}
+} // namespace
 
-App::App(const Options& options)
-    : m_steamTransport(m_steamService)
-    , m_options(options)
+App::App(const Options &options) : m_steamTransport(m_steamService), m_options(options)
 {
 }
 
@@ -120,12 +118,7 @@ void App::initializeWindowing()
     }
 
     logStartup("create window");
-    m_window = SDL_CreateWindow(
-        "Terrain Sandbox",
-        1780,
-        900,
-        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
-    );
+    m_window = SDL_CreateWindow("Terrain Sandbox", 1780, 900, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (m_window == nullptr)
     {
         throw std::runtime_error(SDL_GetError());
@@ -146,9 +139,7 @@ void App::initializeWindowing()
 void App::initializePlatformServices()
 {
     logStartup("init Steam service");
-    m_steamService.initialize(
-        m_options.enableSteam,
-        executableRelativePath("steam_input/steam_input_manifest.vdf"));
+    m_steamService.initialize(m_options.enableSteam, executableRelativePath("steam_input/steam_input_manifest.vdf"));
     if (!m_options.enableSteam)
     {
         logStartup("Steam service disabled by launch option");
@@ -162,98 +153,53 @@ void App::initializePlatformServices()
 void App::initializeGameplayState()
 {
     logStartup("create default camera");
-    m_freeCameraIndex = m_cameraManager.createCamera(
-        "Camera 1",
-        Position(0, 0, { 0.0, 300.0, 2.8 })
-    );
-    m_playerCameraIndex = m_cameraManager.createCamera(
-        "Player Follow",
-        Position(0, 0, { 0.0, 308.0, 8.0 }),
-        { 0.0, -0.35, -1.0 },
-        AppConfig::Camera::kWorldUp
-    );
+    const Position startPosition(0, 0,
+                                 {AppConfig::Camera::kStartWorldX, AppConfig::Camera::kStartAltitude,
+                                  AppConfig::Camera::kStartWorldZ});
+    m_playerPawn.position = startPosition;
+    m_freeCameraIndex = m_cameraManager.createCamera("Camera 1", startPosition.translated({0.0, 0.0, 2.8}));
+    m_playerCameraIndex = m_cameraManager.createCamera("Player Follow", startPosition.translated({0.0, 8.0, 8.0}),
+                                                       {0.0, -0.35, -1.0}, AppConfig::Camera::kWorldUp);
     m_cameraManager.setActiveCamera(m_freeCameraIndex);
     logStartup("default camera created");
 }
 
-void App::initializeRenderers(const std::filesystem::path& shaderDirectory)
+void App::initializeRenderers(const std::filesystem::path &shaderDirectory)
 {
     logStartup("init SDL GPU renderer");
     m_renderer.initialize(m_window);
     logStartup("SDL GPU renderer initialized");
 
     logStartup("init triangle renderer");
-    m_triangleRenderer.initialize(
-        m_renderer.device(),
-        m_renderer.swapchainFormat(),
-        m_renderer.viewportDepthFormat(),
-        shaderDirectory
-    );
+    m_triangleRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
     logStartup("init line renderer");
-    m_lineRenderer.initialize(
-        m_renderer.device(),
-        m_renderer.swapchainFormat(),
-        m_renderer.viewportDepthFormat(),
-        shaderDirectory
-    );
+    m_lineRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
     logStartup("init world text renderer");
-    m_worldTextRenderer.initialize(
-        m_renderer.device(),
-        m_renderer.swapchainFormat(),
-        m_renderer.viewportDepthFormat(),
-        shaderDirectory
-    );
+    m_worldTextRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
     logStartup("init quadtree mesh renderer");
-    m_quadtreeMeshRenderer.initialize(
-        m_renderer.device(),
-        m_renderer.swapchainFormat(),
-        m_renderer.viewportDepthFormat(),
-        shaderDirectory
-    );
+    m_quadtreeMeshRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
     if constexpr (AppConfig::Foliage::kCanopyEnabled)
     {
         logStartup("init foliage canopy renderer");
-        m_foliageCanopyRenderer.initialize(
-            m_renderer.device(),
-            m_renderer.swapchainFormat(),
-            m_renderer.viewportDepthFormat(),
-            shaderDirectory
-        );
+        m_foliageCanopyRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(),
+                                           shaderDirectory);
     }
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         logStartup("init foliage renderer");
-        m_foliageRenderer.initialize(
-            m_renderer.device(),
-            m_renderer.swapchainFormat(),
-            m_renderer.viewportDepthFormat(),
-            shaderDirectory
-        );
+        m_foliageRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
         logStartup("init nearby foliage renderer");
-        m_nearbyFoliageRenderer.initialize(
-            m_renderer.device(),
-            m_renderer.swapchainFormat(),
-            m_renderer.viewportDepthFormat(),
-            shaderDirectory
-        );
+        m_nearbyFoliageRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(),
+                                           shaderDirectory);
     }
     if constexpr (AppConfig::Water::kEnabled)
     {
         logStartup("init water mesh renderer");
-        m_waterMeshRenderer.initialize(
-            m_renderer.device(),
-            m_renderer.swapchainFormat(),
-            m_renderer.viewportDepthFormat(),
-            shaderDirectory
-        );
+        m_waterMeshRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(),
+                                       shaderDirectory);
     }
     logStartup("init skybox renderer");
-    m_skyboxRenderer.initialize(
-        m_renderer.device(),
-        m_renderer.swapchainFormat(),
-        m_renderer.viewportDepthFormat(),
-        shaderDirectory
-    );
+    m_skyboxRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
 }
 
 void App::initializeImGui()
@@ -262,7 +208,7 @@ void App::initializeImGui()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
@@ -353,8 +299,8 @@ void App::updateFrameTiming()
 {
     const std::uint64_t frameStartTsc = PerformanceCapture::readTimestamp();
     m_deltaTimeSeconds = m_lastFrameTsc == 0
-        ? (1.0f / 60.0f)
-        : (PerformanceCapture::instance().cyclesToMilliseconds(frameStartTsc - m_lastFrameTsc) / 1000.0f);
+                             ? (1.0f / 60.0f)
+                             : (PerformanceCapture::instance().cyclesToMilliseconds(frameStartTsc - m_lastFrameTsc) / 1000.0f);
     m_lastFrameTsc = frameStartTsc;
 }
 
@@ -389,9 +335,7 @@ GamepadState App::updateInputState()
         gamepadState = m_gamepadInput.pollState();
     }
     m_playerMoveIntent = m_playerController.poll(gamepadState);
-    if (!m_playerFollowCameraEnabled &&
-        m_cameraManager.hasActiveCamera() &&
-        m_cameraManager.activeCameraIndex() == m_playerCameraIndex)
+    if (!m_playerFollowCameraEnabled && m_cameraManager.hasActiveCamera() && m_cameraManager.activeCameraIndex() == m_playerCameraIndex)
     {
         m_cameraManager.setActiveCamera(m_freeCameraIndex);
     }
@@ -399,7 +343,7 @@ GamepadState App::updateInputState()
     return gamepadState;
 }
 
-void App::updateFreeCamera(const GamepadState& gamepadState)
+void App::updateFreeCamera(const GamepadState &gamepadState)
 {
     HELLO_PROFILE_SCOPE("App::UpdateCamera");
     if (!m_panels.viewportPaused() && m_cameraManager.hasActiveCamera() && !m_playerFollowCameraEnabled)
@@ -474,15 +418,14 @@ void App::handleMultiplayerPanelCommands()
 
 void App::syncCameraModeTransition()
 {
-    if (m_playerFollowCameraEnabled == m_previousPlayerFollowCameraEnabled ||
-        !m_cameraManager.hasActiveCamera())
+    if (m_playerFollowCameraEnabled == m_previousPlayerFollowCameraEnabled || !m_cameraManager.hasActiveCamera())
     {
         return;
     }
 
     if (m_playerFollowCameraEnabled)
     {
-        const CameraManager::Camera& freeCamera = m_cameraManager.camera(m_freeCameraIndex);
+        const CameraManager::Camera &freeCamera = m_cameraManager.camera(m_freeCameraIndex);
         m_followCameraController.snapToCamera(freeCamera, m_playerPawn);
         m_cameraManager.camera(m_playerCameraIndex) = freeCamera;
         m_cameraManager.setActiveCamera(m_playerCameraIndex);
@@ -542,11 +485,7 @@ void App::updateSceneForFrame()
 
     {
         HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::UpdateQuadtree");
-        m_worldGridQuadtree.updateTree(
-            m_cameraManager.activeCamera(),
-            viewportExtent,
-            m_quadtreeMeshRenderer,
-            m_frameIndex);
+        m_worldGridQuadtree.updateTree(m_cameraManager.activeCamera(), viewportExtent, m_quadtreeMeshRenderer, m_frameIndex);
     }
 
     emitWorldDraws();
@@ -561,9 +500,7 @@ void App::updateSceneForFrame()
             .quadtreeMeshRenderer = &m_quadtreeMeshRenderer,
             .worldTextRenderer = &m_worldTextRenderer,
         };
-        HELLO_PROFILE_SCOPE_GROUPS(
-            "App::UpdateSceneForFrame::EmitDebugDraws",
-            ProfileScopeGroup::TreeUpdate);
+        HELLO_PROFILE_SCOPE_GROUPS("App::UpdateSceneForFrame::EmitDebugDraws", ProfileScopeGroup::TreeUpdate);
         m_worldGridQuadtree.emitDebugDraws(renderEngines);
     }
 }
@@ -572,13 +509,8 @@ void App::updateMultiplayerForFrame()
 {
     HELLO_PROFILE_SCOPE("App::UpdateMultiplayer");
     m_multiplayerLocalPawnSnapshot = buildMultiplayerLocalPawnSnapshot();
-    m_multiplayerManager.update(
-        m_steamService,
-        m_steamTransport,
-        m_multiplayerLocalPawnSnapshot,
-        m_lightingSystem,
-        m_deltaTimeSeconds,
-        static_cast<double>(m_elapsedTimeSeconds));
+    m_multiplayerManager.update(m_steamService, m_steamTransport, m_multiplayerLocalPawnSnapshot, m_lightingSystem, m_deltaTimeSeconds,
+                                static_cast<double>(m_elapsedTimeSeconds));
 }
 
 PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
@@ -592,7 +524,7 @@ PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
     PlayerPawn snapshot = m_playerPawn;
     snapshot.position = m_cameraManager.activeCameraPosition();
     const glm::dvec3 forward = m_cameraManager.activeCamera().forward;
-    const glm::dvec3 horizontalForward{ forward.x, 0.0, forward.z };
+    const glm::dvec3 horizontalForward{forward.x, 0.0, forward.z};
     if (glm::length(horizontalForward) > 0.0001)
     {
         snapshot.yawRadians = std::atan2(horizontalForward.x, horizontalForward.z);
@@ -600,9 +532,8 @@ PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
 
     if (m_hasPreviousMultiplayerSnapshot && m_deltaTimeSeconds > 0.00001f)
     {
-        snapshot.velocity =
-            (snapshot.position.worldPosition() - m_multiplayerLocalPawnSnapshot.position.worldPosition()) /
-            static_cast<double>(m_deltaTimeSeconds);
+        snapshot.velocity = (snapshot.position.worldPosition() - m_multiplayerLocalPawnSnapshot.position.worldPosition()) /
+                            static_cast<double>(m_deltaTimeSeconds);
     }
     else
     {
@@ -616,38 +547,20 @@ PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
 void App::syncRenderStateForActiveCamera(Extent2D viewportExtent)
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncRenderState");
-    const Position& cameraPosition = m_cameraManager.activeCameraPosition();
+    const Position &cameraPosition = m_cameraManager.activeCameraPosition();
     m_renderer.setViewportSize(viewportExtent);
-    m_renderer.setActiveCamera(
-        cameraPosition,
-        m_triangleRenderer,
-        m_quadtreeMeshRenderer,
-        m_foliageCanopyRenderer,
-        m_foliageRenderer,
-        m_nearbyFoliageRenderer,
-        m_waterMeshRenderer,
-        m_lineRenderer);
-    m_worldTextRenderer.setActiveCamera(
-        cameraPosition,
-        m_cameraManager.activeCamera().forward,
-        m_cameraManager.activeCamera().up);
-    m_quadtreeMeshRenderer.setTerrainHeightParams(
-        static_cast<float>(m_worldGridQuadtree.terrainSettings().baseHeight),
-        static_cast<float>(terrainNoiseMaxAmplitude(m_worldGridQuadtree.terrainSettings())));
+    m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_foliageCanopyRenderer, m_foliageRenderer,
+                               m_nearbyFoliageRenderer, m_waterMeshRenderer, m_lineRenderer);
+    m_worldTextRenderer.setActiveCamera(cameraPosition, m_cameraManager.activeCamera().forward, m_cameraManager.activeCamera().up);
     if constexpr (AppConfig::Foliage::kCanopyEnabled)
     {
         m_foliageCanopyRenderer.setActiveCamera(cameraPosition);
-        m_foliageCanopyManager.setTerrainSettings(m_worldGridQuadtree.terrainSettings());
     }
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         m_foliageRenderer.setActiveCamera(cameraPosition);
-        m_nearbyFoliageRenderer.setActiveCamera(
-            cameraPosition,
-            m_cameraManager.activeCamera().forward,
-            m_cameraManager.activeCamera().up,
-            viewportExtent);
-        m_foliageManager.setTerrainSettings(m_worldGridQuadtree.terrainSettings());
+        m_nearbyFoliageRenderer.setActiveCamera(cameraPosition, m_cameraManager.activeCamera().forward, m_cameraManager.activeCamera().up,
+                                                viewportExtent);
     }
 
     syncWaterStateForFrame();
@@ -659,15 +572,12 @@ void App::syncWaterStateForFrame()
     {
         m_waterManager.beginFrame();
         m_waterManager.setActiveCamera(m_cameraManager.activeCameraPosition());
-        const WaterSettings& waterSettings = m_waterManager.settings();
+        const WaterSettings &waterSettings = m_waterManager.settings();
         m_quadtreeMeshRenderer.setWaterCausticsState(waterSettings);
         const float expectedWaveHeight =
-            (waterSettings.globalAmplitude * AppConfig::Water::kExpectedWaveHeight) +
-            AppConfig::Water::kVisibilityHeightPadding;
-        m_worldGridQuadtree.setWaterVisibilityBounds(
-            waterSettings.waterLevel - expectedWaveHeight,
-            waterSettings.waterLevel + expectedWaveHeight,
-            waterSettings.enabled);
+            (waterSettings.globalAmplitude * AppConfig::Water::kExpectedWaveHeight) + AppConfig::Water::kVisibilityHeightPadding;
+        m_worldGridQuadtree.setWaterVisibilityBounds(waterSettings.waterLevel - expectedWaveHeight,
+                                                     waterSettings.waterLevel + expectedWaveHeight, waterSettings.enabled);
         if constexpr (AppConfig::Foliage::kEnabled)
         {
             m_foliageManager.setWaterLevel(waterSettings.waterLevel);
@@ -705,13 +615,9 @@ void App::collectFoliageReadbacks()
     std::vector<QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount> completedLiveCounts;
     m_quadtreeMeshRenderer.collectCompletedFoliagePageLiveCounts(completedLiveCounts);
 
-    for (const QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount& generated : completedLiveCounts)
+    for (const QuadtreeMeshRenderer::GeneratedFoliagePageLiveCount &generated : completedLiveCounts)
     {
-        m_foliageManager.applyGeneratedPageLiveCount(
-            generated.leafId,
-            generated.pageIndex,
-            generated.liveCount,
-            generated.job);
+        m_foliageManager.applyGeneratedPageLiveCount(generated.leafId, generated.pageIndex, generated.liveCount, generated.job);
     }
 }
 
@@ -719,45 +625,20 @@ void App::updateGameplayForFrame()
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::UpdateGameplay");
     m_cameraManager.setActiveCamera(m_playerCameraIndex);
-    m_collisionManager.updateAroundPlayer(
-        m_playerPawn.position,
-        m_frameIndex,
-        m_worldGridQuadtree.heightmapManager(),
-        m_foliageManager,
-        m_nearbyFoliageManager,
-        m_nearbyFoliageRenderer,
-        m_quadtreeMeshRenderer);
-    m_characterMotor.update(
-        m_playerPawn,
-        m_playerMoveIntent,
-        m_cameraManager.activeCamera(),
-        m_collisionManager,
-        m_deltaTimeSeconds);
-    m_followCameraController.update(
-        m_cameraManager.activeCamera(),
-        m_playerPawn,
-        m_collisionManager,
-        m_playerMoveIntent,
-        m_deltaTimeSeconds);
+    m_collisionManager.updateAroundPlayer(m_playerPawn.position, m_frameIndex, m_worldGridQuadtree.heightmapManager(), m_foliageManager,
+                                          m_nearbyFoliageManager, m_nearbyFoliageRenderer, m_quadtreeMeshRenderer);
+    m_characterMotor.update(m_playerPawn, m_playerMoveIntent, m_cameraManager.activeCamera(), m_collisionManager, m_deltaTimeSeconds);
+    m_followCameraController.update(m_cameraManager.activeCamera(), m_playerPawn, m_collisionManager, m_playerMoveIntent,
+                                    m_deltaTimeSeconds);
 }
 
 void App::syncFollowCameraRenderState(Extent2D viewportExtent)
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncFollowCameraRenderState");
-    const Position& cameraPosition = m_cameraManager.activeCameraPosition();
-    m_renderer.setActiveCamera(
-        cameraPosition,
-        m_triangleRenderer,
-        m_quadtreeMeshRenderer,
-        m_foliageCanopyRenderer,
-        m_foliageRenderer,
-        m_nearbyFoliageRenderer,
-        m_waterMeshRenderer,
-        m_lineRenderer);
-    m_worldTextRenderer.setActiveCamera(
-        cameraPosition,
-        m_cameraManager.activeCamera().forward,
-        m_cameraManager.activeCamera().up);
+    const Position &cameraPosition = m_cameraManager.activeCameraPosition();
+    m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_foliageCanopyRenderer, m_foliageRenderer,
+                               m_nearbyFoliageRenderer, m_waterMeshRenderer, m_lineRenderer);
+    m_worldTextRenderer.setActiveCamera(cameraPosition, m_cameraManager.activeCamera().forward, m_cameraManager.activeCamera().up);
     if constexpr (AppConfig::Foliage::kCanopyEnabled)
     {
         m_foliageCanopyRenderer.setActiveCamera(cameraPosition);
@@ -765,11 +646,8 @@ void App::syncFollowCameraRenderState(Extent2D viewportExtent)
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         m_foliageRenderer.setActiveCamera(cameraPosition);
-        m_nearbyFoliageRenderer.setActiveCamera(
-            cameraPosition,
-            m_cameraManager.activeCamera().forward,
-            m_cameraManager.activeCamera().up,
-            viewportExtent);
+        m_nearbyFoliageRenderer.setActiveCamera(cameraPosition, m_cameraManager.activeCamera().forward, m_cameraManager.activeCamera().up,
+                                                viewportExtent);
     }
     if constexpr (AppConfig::Water::kEnabled)
     {
@@ -791,46 +669,38 @@ void App::buildPrimitiveDraws()
     {
         m_foliageRenderer.clear();
     }
-    for (const TriangleInstance& instance : m_instances)
+    for (const TriangleInstance &instance : m_instances)
     {
         m_triangleRenderer.addTriangle(instance.position);
     }
     if (m_playerFollowCameraEnabled)
     {
-        m_triangleRenderer.addTriangle(
-            m_playerPawn.position.translated({ 0.0, 1.0, 0.0 }),
-            static_cast<float>(m_playerPawn.yawRadians));
+        m_triangleRenderer.addTriangle(m_playerPawn.position.translated({0.0, 1.0, 0.0}), static_cast<float>(m_playerPawn.yawRadians));
     }
-    m_multiplayerRenderManager.emitDraws(
-        m_multiplayerManager,
-        m_triangleRenderer,
-        m_worldTextRenderer);
+    m_multiplayerRenderManager.emitDraws(m_multiplayerManager, m_triangleRenderer, m_worldTextRenderer);
 
-    m_worldTextRenderer.addMultilineCentered(
-        Position(0, -1, { 1257.0, 265.0, 523566.0 }),
-        glm::vec3(1.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 18.0f, 0.0f),
-        "Terrain Sandbox\nTest Text",
-        WorldTextRenderer::HorizontalJustify::Center,
-        WorldTextRenderer::Style{
-            .lineSpacing = 1.15f,
-            .baseColor = glm::vec4(1.0f, 0.92f, 0.18f, 1.0f),
-            .strokeColor = glm::vec4(0.02f, 0.015f, 0.005f, 1.0f),
-            .strokeWidth = 2.0f,
-            .glowColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.65f),
-            .glowWidth = 4.0f,
-            .glowOffset = glm::vec2(5.0f, -5.0f),
-        });
+    m_worldTextRenderer.addMultilineCentered(Position(0, -1, {1257.0, 265.0, 523566.0}), glm::vec3(1.0f, 0.0f, 0.0f),
+                                             glm::vec3(0.0f, 18.0f, 0.0f), "Terrain Sandbox\nTest Text",
+                                             WorldTextRenderer::HorizontalJustify::Center,
+                                             WorldTextRenderer::Style{
+                                                 .lineSpacing = 1.15f,
+                                                 .baseColor = glm::vec4(1.0f, 0.92f, 0.18f, 1.0f),
+                                                 .strokeColor = glm::vec4(0.02f, 0.015f, 0.005f, 1.0f),
+                                                 .strokeWidth = 2.0f,
+                                                 .glowColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.65f),
+                                                 .glowWidth = 4.0f,
+                                                 .glowOffset = glm::vec2(5.0f, -5.0f),
+                                             });
 }
 
 void App::buildDebugAxes()
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::BuildDebugAxes");
     m_lineRenderer.clear();
-    const Position origin(0, 0, { 0.0, 0.0, 0.0 });
-    const Position axisX(0, 0, { 1.0, 0.0, 0.0 });
-    const Position axisY(0, 0, { 0.0, 1.0, 0.0 });
-    const Position axisZ(0, 0, { 0.0, 0.0, 1.0 });
+    const Position origin(0, 0, {0.0, 0.0, 0.0});
+    const Position axisX(0, 0, {1.0, 0.0, 0.0});
+    const Position axisY(0, 0, {0.0, 1.0, 0.0});
+    const Position axisZ(0, 0, {0.0, 0.0, 1.0});
     m_lineRenderer.addLine(origin, axisX, glm::vec3(1.0f, 0.25f, 0.25f));
     m_lineRenderer.addLine(origin, axisY, glm::vec3(0.25f, 1.0f, 0.25f));
     m_lineRenderer.addLine(origin, axisZ, glm::vec3(0.35f, 0.6f, 1.0f));
@@ -847,14 +717,10 @@ void App::emitWorldDraws()
         .worldTextRenderer = &m_worldTextRenderer,
     };
     m_worldGridQuadtree.emitSceneDraws(
-        renderEngines,
-        AppConfig::Foliage::kEnabled ? &m_foliageManager : nullptr,
-        AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyManager : nullptr,
-        AppConfig::Foliage::kEnabled ? &m_foliageRenderer : nullptr,
-        AppConfig::Foliage::kEnabled ? &m_nearbyFoliageManager : nullptr,
-        AppConfig::Foliage::kEnabled ? &m_nearbyFoliageRenderer : nullptr,
-        AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyRenderer : nullptr,
-        AppConfig::Water::kEnabled ? &m_waterManager : nullptr);
+        renderEngines, AppConfig::Foliage::kEnabled ? &m_foliageManager : nullptr,
+        AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyManager : nullptr, AppConfig::Foliage::kEnabled ? &m_foliageRenderer : nullptr,
+        AppConfig::Foliage::kEnabled ? &m_nearbyFoliageManager : nullptr, AppConfig::Foliage::kEnabled ? &m_nearbyFoliageRenderer : nullptr,
+        AppConfig::Foliage::kCanopyEnabled ? &m_foliageCanopyRenderer : nullptr, AppConfig::Water::kEnabled ? &m_waterManager : nullptr);
     if constexpr (AppConfig::Water::kEnabled)
     {
         m_waterManager.flushToRenderer(m_waterMeshRenderer);
@@ -878,28 +744,10 @@ void App::renderCurrentFrame()
 {
     ImGui::Render();
     const glm::mat4 viewProjection = m_cameraManager.buildActiveViewProjectionMatrix(m_panels.viewportExtent());
-    m_renderer.renderFrame(
-        m_triangleRenderer,
-        m_quadtreeMeshRenderer,
-        m_foliageCanopyRenderer,
-        m_foliageRenderer,
-        m_nearbyFoliageRenderer,
-        m_worldGridQuadtree.heightmapManager(),
-        m_foliageManager,
-        m_foliageCanopyManager,
-        m_nearbyFoliageManager,
-        m_waterMeshRenderer,
-        m_lineRenderer,
-        m_worldTextRenderer,
-        m_skyboxRenderer,
-        viewProjection,
-        m_lightingSystem,
-        m_panels.viewportExtent(),
-        ImGui::GetDrawData(),
-        !m_panels.viewportPaused(),
-        m_elapsedTimeSeconds,
-        m_frameIndex
-    );
+    m_renderer.renderFrame(m_triangleRenderer, m_quadtreeMeshRenderer, m_foliageCanopyRenderer, m_foliageRenderer, m_nearbyFoliageRenderer,
+                           m_worldGridQuadtree.heightmapManager(), m_foliageManager, m_foliageCanopyManager, m_nearbyFoliageManager,
+                           m_waterMeshRenderer, m_lineRenderer, m_worldTextRenderer, m_skyboxRenderer, viewProjection, m_lightingSystem,
+                           m_panels.viewportExtent(), ImGui::GetDrawData(), !m_panels.viewportPaused(), m_elapsedTimeSeconds, m_frameIndex);
 }
 
 void App::finishFrame()
@@ -917,6 +765,18 @@ void App::finishFrame()
             m_running = false;
         }
     }
+    if (m_options.quitAfterFrameCount != 0 && m_frameIndex >= m_options.quitAfterFrameCount)
+    {
+        if (m_options.verifyHeightmapPipeline)
+        {
+            const auto diagnostics = m_worldGridQuadtree.heightmapDiagnostics();
+            if (diagnostics.sourceUploads == 0 || diagnostics.completedFinalGenerationsWithSources == 0 || diagnostics.descriptorOverflows != 0)
+                throw std::runtime_error("Heightmap pipeline verification did not "
+                                         "observe a completed composed heightmap.");
+        }
+        logStartup("requested frame count submitted");
+        m_running = false;
+    }
 }
 
 std::vector<std::string> App::querySdlGpuDrivers() const
@@ -927,7 +787,7 @@ std::vector<std::string> App::querySdlGpuDrivers() const
 
     for (int index = 0; index < count; ++index)
     {
-        const char* name = SDL_GetGPUDriver(index);
+        const char *name = SDL_GetGPUDriver(index);
         if (name != nullptr)
         {
             drivers.emplace_back(name);

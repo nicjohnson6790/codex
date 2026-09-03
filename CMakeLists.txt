@@ -272,7 +272,7 @@ add_executable(terrain_sandbox
     src/FreeFlightCameraController.cpp
     src/GamepadInput.cpp
     src/Gameplay.cpp
-    src/HeightmapNoiseGenerator.cpp
+    src/HeightmapDataset.cpp
     src/LineRenderer.cpp
     src/LightingSystem.cpp
     src/Multiplayer/MultiplayerManager.cpp
@@ -384,6 +384,15 @@ if (CODEX_BUILD_TESTS)
     )
     target_include_directories(asset_residency_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME asset_residency_tests COMMAND $<TARGET_FILE:asset_residency_tests>)
+
+    add_executable(heightmap_dataset_tests
+        tests/HeightmapDatasetTests.cpp
+        src/HeightmapDataset.cpp
+        src/assets/RuntimeAssetCompression.cpp)
+    set_target_properties(heightmap_dataset_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
+    target_include_directories(heightmap_dataset_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
+    target_link_libraries(heightmap_dataset_tests PRIVATE lz4_local SDL3::Headers)
+    add_test(NAME heightmap_dataset_tests COMMAND $<TARGET_FILE:heightmap_dataset_tests>)
 endif()
 
 if (TERRAIN_SANDBOX_ENABLE_STEAM)

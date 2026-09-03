@@ -10,8 +10,8 @@
 
 #include <algorithm>
 #include <bit>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <limits>
 #include <span>
@@ -27,11 +27,10 @@ constexpr std::uint32_t kMainGridVertexResolution =
     AppConfig::Terrain::kHeightmapLeafResolution - (AppConfig::Terrain::kRenderedPatchInset * 2);
 constexpr std::uint32_t kMainGridQuadResolution = kMainGridVertexResolution - 1;
 constexpr float kRenderedLocalCoordOffset = static_cast<float>(AppConfig::Terrain::kRenderedPatchInset);
-constexpr float kRenderedSampleCoordOffset = static_cast<float>(
-    AppConfig::Terrain::kHeightmapLeafHalo + AppConfig::Terrain::kRenderedPatchInset);
+constexpr float kRenderedSampleCoordOffset =
+    static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + AppConfig::Terrain::kRenderedPatchInset);
 constexpr std::size_t kHeightmapSliceFloatCount =
-    static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) *
-    static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
+    static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) * static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
 constexpr std::size_t kHeightmapExtentsCount = AppConfig::Terrain::kHeightmapSliceCapacity;
 constexpr std::uint32_t kHeightmapComputeThreadCountX = 16;
 constexpr std::uint32_t kHeightmapComputeThreadCountY = 16;
@@ -135,10 +134,14 @@ std::pair<float, float> worleyF1F2(float x, float y, std::uint32_t cellCount, fl
     {
         for (int ox = -1; ox <= 1; ++ox)
         {
-            const std::uint32_t cx = static_cast<std::uint32_t>((baseCellX + ox + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
-            const std::uint32_t cy = static_cast<std::uint32_t>((baseCellY + oy + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
-            const float featureX = (static_cast<float>(cx) + hash11(static_cast<float>(cx), static_cast<float>(cy), seed)) / static_cast<float>(cellCount);
-            const float featureY = (static_cast<float>(cy) + hash11(static_cast<float>(cy), static_cast<float>(cx), seed + 19.0f)) / static_cast<float>(cellCount);
+            const std::uint32_t cx =
+                static_cast<std::uint32_t>((baseCellX + ox + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
+            const std::uint32_t cy =
+                static_cast<std::uint32_t>((baseCellY + oy + static_cast<int>(cellCount)) % static_cast<int>(cellCount));
+            const float featureX =
+                (static_cast<float>(cx) + hash11(static_cast<float>(cx), static_cast<float>(cy), seed)) / static_cast<float>(cellCount);
+            const float featureY = (static_cast<float>(cy) + hash11(static_cast<float>(cy), static_cast<float>(cx), seed + 19.0f)) /
+                                   static_cast<float>(cellCount);
             const float dx = wrapDistance(x, featureX);
             const float dy = wrapDistance(y, featureY);
             const float distanceSquared = (dx * dx) + (dy * dy);
@@ -154,7 +157,7 @@ std::pair<float, float> worleyF1F2(float x, float y, std::uint32_t cellCount, fl
         }
     }
 
-    return { std::sqrt(f1), std::sqrt(f2) };
+    return {std::sqrt(f1), std::sqrt(f2)};
 }
 
 GeneratedImage buildCausticsTexture(bool streaks)
@@ -231,7 +234,7 @@ std::uint64_t mixLeafHash64(std::uint64_t x)
     return x;
 }
 
-std::uint64_t hashLeafId(const WorldGridQuadtreeLeafId& leafId)
+std::uint64_t hashLeafId(const WorldGridQuadtreeLeafId &leafId)
 {
     const std::uint64_t word0 = std::bit_cast<std::uint64_t>(leafId.gridX);
     const std::uint64_t word1 = std::bit_cast<std::uint64_t>(leafId.gridY);
@@ -275,9 +278,9 @@ SDL_GPUTextureFormat textureFormatFromRuntimeFormat(RuntimeAssets::TextureFormat
     }
 }
 
-std::filesystem::path executableRelativePath(const std::filesystem::path& relativePath)
+std::filesystem::path executableRelativePath(const std::filesystem::path &relativePath)
 {
-    const char* basePath = SDL_GetBasePath();
+    const char *basePath = SDL_GetBasePath();
     if (basePath == nullptr)
     {
         throw std::runtime_error(std::string("Failed to resolve executable base path: ") + SDL_GetError());
@@ -285,14 +288,10 @@ std::filesystem::path executableRelativePath(const std::filesystem::path& relati
 
     return std::filesystem::path(basePath) / relativePath;
 }
-}
+} // namespace
 
-void QuadtreeMeshRenderer::initialize(
-    SDL_GPUDevice* device,
-    SDL_GPUTextureFormat colorFormat,
-    SDL_GPUTextureFormat depthFormat,
-    const std::filesystem::path& shaderDirectory
-)
+void QuadtreeMeshRenderer::initialize(SDL_GPUDevice *device, SDL_GPUTextureFormat colorFormat, SDL_GPUTextureFormat depthFormat,
+                                      const std::filesystem::path &shaderDirectory)
 {
     initializeRendererBase(device, colorFormat, depthFormat);
     createStaticMeshResources();
@@ -324,8 +323,7 @@ void QuadtreeMeshRenderer::initialize(
 
     SDL_GPUBufferCreateInfo bridgeInstanceInfo{};
     bridgeInstanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-    bridgeInstanceInfo.size = static_cast<Uint32>(
-        sizeof(InstanceData) * (m_bridgeInstanceData.size() + m_coarseBridgeInstanceData.size()));
+    bridgeInstanceInfo.size = static_cast<Uint32>(sizeof(InstanceData) * (m_bridgeInstanceData.size() + m_coarseBridgeInstanceData.size()));
     m_bridgeInstanceBuffer = SDL_CreateGPUBuffer(m_device, &bridgeInstanceInfo);
     if (m_bridgeInstanceBuffer == nullptr)
     {
@@ -379,9 +377,7 @@ void QuadtreeMeshRenderer::initialize(
 
     SDL_GPUBufferCreateInfo heightmapInfo{};
     heightmapInfo.usage =
-        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
-        SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ |
-        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
     heightmapInfo.size = static_cast<Uint32>(sizeof(float) * kHeightmapSliceFloatCount * AppConfig::Terrain::kHeightmapSliceCapacity);
     m_heightmapBuffer = SDL_CreateGPUBuffer(m_device, &heightmapInfo);
     if (m_heightmapBuffer == nullptr)
@@ -391,7 +387,7 @@ void QuadtreeMeshRenderer::initialize(
 
     SDL_GPUBufferCreateInfo heightmapGenerationInfo{};
     heightmapGenerationInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
-    heightmapGenerationInfo.size = static_cast<Uint32>(sizeof(HeightmapGenerationUniforms) * m_pendingHeightmapGenerations.size());
+    heightmapGenerationInfo.size = static_cast<Uint32>(sizeof(HeightmapGenerationDescriptor) * m_pendingHeightmapGenerations.size());
     m_heightmapGenerationBuffer = SDL_CreateGPUBuffer(m_device, &heightmapGenerationInfo);
     if (m_heightmapGenerationBuffer == nullptr)
     {
@@ -406,6 +402,29 @@ void QuadtreeMeshRenderer::initialize(
     {
         throwSdlError("Failed to create quadtree mesh generation transfer buffer.");
     }
+
+    SDL_GPUBufferCreateInfo sourceDescriptorInfo{};
+    sourceDescriptorInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    sourceDescriptorInfo.size = static_cast<Uint32>(sizeof(HeightmapSourceGpuDescriptor) * m_pendingHeightmapSourceDescriptors.size());
+    m_heightmapSourceDescriptorBuffer = SDL_CreateGPUBuffer(m_device, &sourceDescriptorInfo);
+    SDL_GPUTransferBufferCreateInfo sourceDescriptorTransferInfo{};
+    sourceDescriptorTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    sourceDescriptorTransferInfo.size = sourceDescriptorInfo.size;
+    m_heightmapSourceDescriptorTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &sourceDescriptorTransferInfo);
+    if (!m_heightmapSourceDescriptorBuffer || !m_heightmapSourceDescriptorTransferBuffer)
+        throwSdlError("Failed to create heightmap source descriptor buffers.");
+
+    SDL_GPUBufferCreateInfo sourceHeightmapInfo{};
+    sourceHeightmapInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    sourceHeightmapInfo.size = static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount *
+                                                   WorldGridQuadtreeHeightmapManager::kSourceTileCapacity);
+    m_sourceHeightmapBuffer = SDL_CreateGPUBuffer(m_device, &sourceHeightmapInfo);
+    SDL_GPUTransferBufferCreateInfo sourceHeightmapTransferInfo{};
+    sourceHeightmapTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    sourceHeightmapTransferInfo.size = sourceHeightmapInfo.size;
+    m_sourceHeightmapTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &sourceHeightmapTransferInfo);
+    if (!m_sourceHeightmapBuffer || !m_sourceHeightmapTransferBuffer)
+        throwSdlError("Failed to create source heightmap tile buffers.");
 
     SDL_GPUBufferCreateInfo extentsInfo{};
     extentsInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
@@ -428,7 +447,7 @@ void QuadtreeMeshRenderer::initialize(
     SDL_GPUTransferBufferCreateInfo extentsDownloadInfo{};
     extentsDownloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
     extentsDownloadInfo.size = extentsInfo.size;
-    for (PendingExtentsReadback& readback : m_pendingExtentsReadbacks)
+    for (PendingExtentsReadback &readback : m_pendingExtentsReadbacks)
     {
         readback.transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &extentsDownloadInfo);
         if (readback.transferBuffer == nullptr)
@@ -440,19 +459,20 @@ void QuadtreeMeshRenderer::initialize(
     SDL_GPUTransferBufferCreateInfo heightmapSliceDownloadInfo{};
     heightmapSliceDownloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
     heightmapSliceDownloadInfo.size = static_cast<Uint32>(sizeof(float) * kHeightmapSliceFloatCount);
-    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    for (PendingHeightmapSliceReadback &readback : m_pendingHeightmapSliceReadbacks)
     {
         readback.transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &heightmapSliceDownloadInfo);
         if (readback.transferBuffer == nullptr)
         {
-            throwSdlError("Failed to create quadtree mesh heightmap-slice download transfer buffer.");
+            throwSdlError("Failed to create quadtree mesh heightmap-slice download "
+                          "transfer buffer.");
         }
     }
 
     SDL_GPUBufferCreateInfo foliageInstanceGenerationInfo{};
     foliageInstanceGenerationInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
-    foliageInstanceGenerationInfo.size = static_cast<Uint32>(
-        sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerations.size());
+    foliageInstanceGenerationInfo.size =
+        static_cast<Uint32>(sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerations.size());
     m_foliageInstanceGenerationBuffer = SDL_CreateGPUBuffer(m_device, &foliageInstanceGenerationInfo);
     if (m_foliageInstanceGenerationBuffer == nullptr)
     {
@@ -462,19 +482,15 @@ void QuadtreeMeshRenderer::initialize(
     SDL_GPUTransferBufferCreateInfo foliageInstanceGenerationTransferInfo{};
     foliageInstanceGenerationTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     foliageInstanceGenerationTransferInfo.size = foliageInstanceGenerationInfo.size;
-    m_foliageInstanceGenerationTransferBuffer =
-        SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceGenerationTransferInfo);
+    m_foliageInstanceGenerationTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceGenerationTransferInfo);
     if (m_foliageInstanceGenerationTransferBuffer == nullptr)
     {
         throwSdlError("Failed to create foliage instance generation transfer buffer.");
     }
 
     SDL_GPUBufferCreateInfo foliageInstanceLiveCountInfo{};
-    foliageInstanceLiveCountInfo.usage =
-        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
-        SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
-    foliageInstanceLiveCountInfo.size = static_cast<Uint32>(
-        sizeof(std::uint32_t) * m_pendingFoliageInstanceGenerations.size());
+    foliageInstanceLiveCountInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    foliageInstanceLiveCountInfo.size = static_cast<Uint32>(sizeof(std::uint32_t) * m_pendingFoliageInstanceGenerations.size());
     m_foliageInstanceLiveCountBuffer = SDL_CreateGPUBuffer(m_device, &foliageInstanceLiveCountInfo);
     if (m_foliageInstanceLiveCountBuffer == nullptr)
     {
@@ -484,8 +500,7 @@ void QuadtreeMeshRenderer::initialize(
     SDL_GPUTransferBufferCreateInfo foliageInstanceLiveCountInitTransferInfo{};
     foliageInstanceLiveCountInitTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     foliageInstanceLiveCountInitTransferInfo.size = foliageInstanceLiveCountInfo.size;
-    m_foliageInstanceLiveCountInitTransferBuffer =
-        SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceLiveCountInitTransferInfo);
+    m_foliageInstanceLiveCountInitTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceLiveCountInitTransferInfo);
     if (m_foliageInstanceLiveCountInitTransferBuffer == nullptr)
     {
         throwSdlError("Failed to create foliage instance live-count init transfer buffer.");
@@ -494,19 +509,40 @@ void QuadtreeMeshRenderer::initialize(
     SDL_GPUTransferBufferCreateInfo foliageInstanceLiveCountDownloadInfo{};
     foliageInstanceLiveCountDownloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
     foliageInstanceLiveCountDownloadInfo.size = foliageInstanceLiveCountInfo.size;
-    for (PendingFoliageLiveCountReadback& readback : m_pendingFoliageLiveCountReadbacks)
+    for (PendingFoliageLiveCountReadback &readback : m_pendingFoliageLiveCountReadbacks)
     {
         readback.transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &foliageInstanceLiveCountDownloadInfo);
         if (readback.transferBuffer == nullptr)
         {
-            throwSdlError("Failed to create foliage instance live-count download transfer buffer.");
+            throwSdlError("Failed to create foliage instance live-count download "
+                          "transfer buffer.");
         }
     }
 }
 
 void QuadtreeMeshRenderer::shutdown()
 {
-    for (PendingFoliageLiveCountReadback& readback : m_pendingFoliageLiveCountReadbacks)
+    if (m_sourceHeightmapTransferBuffer)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_sourceHeightmapTransferBuffer);
+        m_sourceHeightmapTransferBuffer = nullptr;
+    }
+    if (m_sourceHeightmapBuffer)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_sourceHeightmapBuffer);
+        m_sourceHeightmapBuffer = nullptr;
+    }
+    if (m_heightmapSourceDescriptorTransferBuffer)
+    {
+        SDL_ReleaseGPUTransferBuffer(m_device, m_heightmapSourceDescriptorTransferBuffer);
+        m_heightmapSourceDescriptorTransferBuffer = nullptr;
+    }
+    if (m_heightmapSourceDescriptorBuffer)
+    {
+        SDL_ReleaseGPUBuffer(m_device, m_heightmapSourceDescriptorBuffer);
+        m_heightmapSourceDescriptorBuffer = nullptr;
+    }
+    for (PendingFoliageLiveCountReadback &readback : m_pendingFoliageLiveCountReadbacks)
     {
         if (readback.fence != nullptr)
         {
@@ -519,7 +555,7 @@ void QuadtreeMeshRenderer::shutdown()
         }
         readback.count = 0;
     }
-    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    for (PendingHeightmapSliceReadback &readback : m_pendingHeightmapSliceReadbacks)
     {
         if (readback.fence != nullptr)
         {
@@ -537,7 +573,7 @@ void QuadtreeMeshRenderer::shutdown()
     destroyPbrSampler();
     destroyPbrTextures();
     destroyCausticsTextures();
-    for (PendingExtentsReadback& readback : m_pendingExtentsReadbacks)
+    for (PendingExtentsReadback &readback : m_pendingExtentsReadbacks)
     {
         if (readback.fence != nullptr)
         {
@@ -655,8 +691,7 @@ void QuadtreeMeshRenderer::shutdown()
         SDL_ReleaseGPUBuffer(m_device, m_bridgeInstanceBuffer);
         m_bridgeInstanceBuffer = nullptr;
     }
-    auto releaseMeshResources = [this](MeshResources& meshResources)
-    {
+    auto releaseMeshResources = [this](MeshResources &meshResources) {
         if (meshResources.indexTransferBuffer != nullptr)
         {
             SDL_ReleaseGPUTransferBuffer(m_device, meshResources.indexTransferBuffer);
@@ -699,124 +734,49 @@ void QuadtreeMeshRenderer::clear()
     m_bridgeIndirectCommandCount = 0;
 }
 
-void QuadtreeMeshRenderer::setActiveCamera(const Position& cameraPosition)
+void QuadtreeMeshRenderer::setActiveCamera(const Position &cameraPosition)
 {
     setActiveCameraPosition(cameraPosition);
 }
 
-void QuadtreeMeshRenderer::setTerrainHeightParams(float baseHeight, float heightAmplitude)
-{
-    m_terrainBaseHeight = baseHeight;
-    m_terrainHeightAmplitude = heightAmplitude;
-}
-
-void QuadtreeMeshRenderer::setWaterCausticsState(const WaterSettings& settings)
+void QuadtreeMeshRenderer::setWaterCausticsState(const WaterSettings &settings)
 {
     m_waterSettings = settings;
 }
 
-bool QuadtreeMeshRenderer::queueHeightmapGeneration(
-    const WorldGridQuadtreeLeafId& leafId,
-    std::uint16_t sliceIndex,
-    const TerrainNoiseSettings& settings,
-    GenerationJobHandle job)
+bool QuadtreeMeshRenderer::queueSourceHeightmapUpload(std::uint16_t sliceIndex, std::span<const float> samples)
 {
-    if (m_pendingHeightmapGenerationCount >= m_pendingHeightmapGenerations.size())
-    {
+    if (sliceIndex >= WorldGridQuadtreeHeightmapManager::kSourceTileCapacity ||
+        samples.size() != RuntimeAssets::kHeightmapTileSampleCount || m_pendingSourceUploadCount >= m_pendingSourceUploadSlots.size())
         return false;
-    }
-
-    const TerrainNoiseSettings sanitized = sanitizeTerrainNoiseSettings(settings);
-
-    const auto [a, b] = worldGridQuadtreeLeafBounds(leafId);
-    const double leafIntervalCount = static_cast<double>(AppConfig::Terrain::kHeightmapLeafIntervalCount);
-    const double leafWorldMinX = a.worldPosition().x;
-    const double leafWorldMinZ = a.worldPosition().z;
-    const double leafWorldMaxX = b.worldPosition().x;
-    const double leafWorldMaxZ = b.worldPosition().z;
-    const double stepX = (leafWorldMaxX - leafWorldMinX) / leafIntervalCount;
-    const double stepZ = (leafWorldMaxZ - leafWorldMinZ) / leafIntervalCount;
-    const double worldMinX = leafWorldMinX - (stepX * static_cast<double>(AppConfig::Terrain::kHeightmapLeafHalo));
-    const double worldMinZ = leafWorldMinZ - (stepZ * static_cast<double>(AppConfig::Terrain::kHeightmapLeafHalo));
-
-    HeightmapGenerationUniforms& uniforms = m_pendingHeightmapGenerations[m_pendingHeightmapGenerationCount++];
-    m_pendingGenerationLeafIds[m_pendingHeightmapGenerationCount - 1] = leafId;
-    m_pendingGenerationJobs[m_pendingHeightmapGenerationCount - 1] = job;
-    uniforms.sampleOriginAndStep = glm::vec4(
-        static_cast<float>(worldMinX),
-        static_cast<float>(worldMinZ),
-        static_cast<float>(stepX),
-        static_cast<float>(stepZ));
-    uniforms.hillsLayerA = glm::vec4(
-        static_cast<float>(sanitized.hills.wavelength),
-        static_cast<float>(sanitized.hills.amplitude),
-        static_cast<float>(sanitized.hills.bias),
-        static_cast<float>(sanitized.hills.initialFrequency));
-    uniforms.hillsLayerB = glm::vec4(
-        static_cast<float>(sanitized.hills.initialAmplitude),
-        static_cast<float>(sanitized.hills.octaveFrequencyScale),
-        static_cast<float>(sanitized.hills.octaveAmplitudeScale),
-        static_cast<float>(sanitized.hills.octaveCount));
-    uniforms.hillsLayerC = glm::vec4(
-        static_cast<float>(sanitized.hills.gradientDampenStrength),
-        static_cast<float>(sanitized.hills.octaveRotationDegrees),
-        0.0f,
-        0.0f);
-    uniforms.mediumLayerA = glm::vec4(
-        static_cast<float>(sanitized.mediumDetail.wavelength),
-        static_cast<float>(sanitized.mediumDetail.amplitude),
-        static_cast<float>(sanitized.mediumDetail.bias),
-        static_cast<float>(sanitized.mediumDetail.initialFrequency));
-    uniforms.mediumLayerB = glm::vec4(
-        static_cast<float>(sanitized.mediumDetail.initialAmplitude),
-        static_cast<float>(sanitized.mediumDetail.octaveFrequencyScale),
-        static_cast<float>(sanitized.mediumDetail.octaveAmplitudeScale),
-        static_cast<float>(sanitized.mediumDetail.octaveCount));
-    uniforms.mediumLayerC = glm::vec4(
-        static_cast<float>(sanitized.mediumDetail.gradientDampenStrength),
-        static_cast<float>(sanitized.mediumDetail.octaveRotationDegrees),
-        0.0f,
-        0.0f);
-    uniforms.highLayerA = glm::vec4(
-        static_cast<float>(sanitized.highDetail.wavelength),
-        static_cast<float>(sanitized.highDetail.amplitude),
-        static_cast<float>(sanitized.highDetail.bias),
-        static_cast<float>(sanitized.highDetail.initialFrequency));
-    uniforms.highLayerB = glm::vec4(
-        static_cast<float>(sanitized.highDetail.initialAmplitude),
-        static_cast<float>(sanitized.highDetail.octaveFrequencyScale),
-        static_cast<float>(sanitized.highDetail.octaveAmplitudeScale),
-        static_cast<float>(sanitized.highDetail.octaveCount));
-    uniforms.highLayerC = glm::vec4(
-        static_cast<float>(sanitized.highDetail.gradientDampenStrength),
-        static_cast<float>(sanitized.highDetail.octaveRotationDegrees),
-        0.0f,
-        0.0f);
-    uniforms.blendLayerA = glm::vec4(
-        static_cast<float>(sanitized.blend.wavelength),
-        static_cast<float>(sanitized.blend.initialFrequency),
-        static_cast<float>(sanitized.blend.initialAmplitude),
-        static_cast<float>(sanitized.blend.octaveFrequencyScale));
-    uniforms.blendLayerB = glm::vec4(
-        static_cast<float>(sanitized.blend.octaveAmplitudeScale),
-        static_cast<float>(sanitized.blend.octaveCount),
-        static_cast<float>(sanitized.blend.gradientDampenStrength),
-        static_cast<float>(sanitized.blend.octaveRotationDegrees));
-    uniforms.blendLayerC = glm::vec4(
-        static_cast<float>(sanitized.blend.lowThreshold),
-        static_cast<float>(sanitized.blend.highThreshold),
-        static_cast<float>(sanitized.blend.lowTransitionWidth),
-        static_cast<float>(sanitized.baseHeight));
-    uniforms.highLayerC.z = static_cast<float>(sanitized.blend.highTransitionWidth);
-    uniforms.dispatchParams = glm::uvec4(
-        static_cast<std::uint32_t>(sliceIndex),
-        AppConfig::Terrain::kHeightmapResolution,
-        0u,
-        0u);
+    float *mapped = static_cast<float *>(SDL_MapGPUTransferBuffer(m_device, m_sourceHeightmapTransferBuffer, true));
+    std::memcpy(mapped + static_cast<std::size_t>(sliceIndex) * RuntimeAssets::kHeightmapTileSampleCount, samples.data(),
+                samples.size_bytes());
+    SDL_UnmapGPUTransferBuffer(m_device, m_sourceHeightmapTransferBuffer);
+    m_pendingSourceUploadSlots[m_pendingSourceUploadCount++] = sliceIndex;
     return true;
 }
 
-void QuadtreeMeshRenderer::addLeaf(const WorldGridQuadtreeLeafId& leafId, std::uint16_t sliceIndex)
+bool QuadtreeMeshRenderer::queueHeightmapGeneration(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex,
+                                                     std::span<const HeightmapSourceGpuDescriptor> sources, GenerationJobHandle job)
+{
+    for (std::uint16_t index = 0; index < m_pendingHeightmapGenerationCount; ++index)
+        if (m_pendingGenerationJobs[index] == job)
+            return true;
+    if (m_pendingHeightmapGenerationCount >= m_pendingHeightmapGenerations.size() ||
+        m_pendingHeightmapSourceDescriptorCount + sources.size() > m_pendingHeightmapSourceDescriptors.size())
+        return false;
+    const std::uint32_t front = m_pendingHeightmapSourceDescriptorCount;
+    std::copy(sources.begin(), sources.end(), m_pendingHeightmapSourceDescriptors.begin() + front);
+    m_pendingHeightmapSourceDescriptorCount += static_cast<std::uint32_t>(sources.size());
+    const std::uint16_t index = m_pendingHeightmapGenerationCount++;
+    m_pendingHeightmapGenerations[index].params = glm::uvec4(sliceIndex, front, static_cast<std::uint32_t>(sources.size()), 0u);
+    m_pendingGenerationLeafIds[index] = leafId;
+    m_pendingGenerationJobs[index] = job;
+    return true;
+}
+
+void QuadtreeMeshRenderer::addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex)
 {
     if (m_instanceCount >= m_instanceData.size())
     {
@@ -837,10 +797,7 @@ void QuadtreeMeshRenderer::addLeaf(const WorldGridQuadtreeLeafId& leafId, std::u
     };
 }
 
-void QuadtreeMeshRenderer::addBridge(
-    const WorldGridQuadtreeLeafId& leafId,
-    std::uint16_t sliceIndex,
-    std::uint8_t edgeIndex)
+void QuadtreeMeshRenderer::addBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex)
 {
     if (m_bridgeInstanceCount >= m_bridgeInstanceData.size())
     {
@@ -861,10 +818,7 @@ void QuadtreeMeshRenderer::addBridge(
     };
 }
 
-void QuadtreeMeshRenderer::addCoarseBridge(
-    const WorldGridQuadtreeLeafId& leafId,
-    std::uint16_t sliceIndex,
-    std::uint8_t edgeIndex)
+void QuadtreeMeshRenderer::addCoarseBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex)
 {
     if (m_coarseBridgeInstanceCount >= m_coarseBridgeInstanceData.size())
     {
@@ -885,31 +839,54 @@ void QuadtreeMeshRenderer::addCoarseBridge(
     };
 }
 
-void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
+void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::Upload");
 
+    m_submittedSourceUploadCount = m_pendingSourceUploadCount;
+    for (std::uint16_t index = 0; index < m_pendingSourceUploadCount; ++index)
+    {
+        const std::uint16_t slot = m_pendingSourceUploadSlots[index];
+        SDL_GPUTransferBufferLocation source{m_sourceHeightmapTransferBuffer,
+                                             static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount * slot)};
+        SDL_GPUBufferRegion destination{m_sourceHeightmapBuffer,
+                                        static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount * slot),
+                                        static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount)};
+        SDL_UploadToGPUBuffer(copyPass, &source, &destination, false);
+        m_submittedSourceUploadSlots[index] = slot;
+    }
+    m_pendingSourceUploadCount = 0;
+
     if (m_pendingHeightmapGenerationCount > 0)
     {
-        void* mappedGenerationUniforms = SDL_MapGPUTransferBuffer(m_device, m_heightmapGenerationTransferBuffer, true);
-        std::memcpy(
-            mappedGenerationUniforms,
-            m_pendingHeightmapGenerations.data(),
-            sizeof(HeightmapGenerationUniforms) * m_pendingHeightmapGenerationCount);
+        void *mappedGenerationUniforms = SDL_MapGPUTransferBuffer(m_device, m_heightmapGenerationTransferBuffer, true);
+        std::memcpy(mappedGenerationUniforms, m_pendingHeightmapGenerations.data(),
+                    sizeof(HeightmapGenerationDescriptor) * m_pendingHeightmapGenerationCount);
         SDL_UnmapGPUTransferBuffer(m_device, m_heightmapGenerationTransferBuffer);
 
         SDL_GPUTransferBufferLocation generationSource{};
         generationSource.transfer_buffer = m_heightmapGenerationTransferBuffer;
         SDL_GPUBufferRegion generationDestination{};
         generationDestination.buffer = m_heightmapGenerationBuffer;
-        generationDestination.size = static_cast<Uint32>(sizeof(HeightmapGenerationUniforms) * m_pendingHeightmapGenerationCount);
+        generationDestination.size = static_cast<Uint32>(sizeof(HeightmapGenerationDescriptor) * m_pendingHeightmapGenerationCount);
         SDL_UploadToGPUBuffer(copyPass, &generationSource, &generationDestination, false);
 
-        GpuHeightmapExtents* mappedExtents = static_cast<GpuHeightmapExtents*>(
-            SDL_MapGPUTransferBuffer(m_device, m_heightmapExtentsInitTransferBuffer, true));
+        void *mappedSources = SDL_MapGPUTransferBuffer(m_device, m_heightmapSourceDescriptorTransferBuffer, true);
+        std::memcpy(mappedSources, m_pendingHeightmapSourceDescriptors.data(),
+                    sizeof(HeightmapSourceGpuDescriptor) * m_pendingHeightmapSourceDescriptorCount);
+        SDL_UnmapGPUTransferBuffer(m_device, m_heightmapSourceDescriptorTransferBuffer);
+        SDL_GPUTransferBufferLocation sourceDescriptorSource{m_heightmapSourceDescriptorTransferBuffer, 0};
+        SDL_GPUBufferRegion sourceDescriptorDestination{
+            m_heightmapSourceDescriptorBuffer, 0,
+            static_cast<Uint32>(sizeof(HeightmapSourceGpuDescriptor) * m_pendingHeightmapSourceDescriptorCount)};
+        if (m_pendingHeightmapSourceDescriptorCount > 0)
+            SDL_UploadToGPUBuffer(copyPass, &sourceDescriptorSource, &sourceDescriptorDestination, false);
+
+        GpuHeightmapExtents *mappedExtents =
+            static_cast<GpuHeightmapExtents *>(SDL_MapGPUTransferBuffer(m_device, m_heightmapExtentsInitTransferBuffer, true));
         for (std::uint16_t index = 0; index < m_pendingHeightmapGenerationCount; ++index)
         {
-            const std::uint16_t sliceIndex = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].dispatchParams.x);
+            const std::uint16_t sliceIndex = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].params.x);
             mappedExtents[sliceIndex] = {
                 .minHeightCentimeters = kInitialMinHeightCentimeters,
                 .maxHeightCentimeters = kInitialMaxHeightCentimeters,
@@ -919,7 +896,7 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
 
         for (std::uint16_t index = 0; index < m_pendingHeightmapGenerationCount; ++index)
         {
-            const std::uint16_t sliceIndex = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].dispatchParams.x);
+            const std::uint16_t sliceIndex = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].params.x);
             const Uint32 byteOffset = static_cast<Uint32>(sizeof(GpuHeightmapExtents) * sliceIndex);
 
             SDL_GPUTransferBufferLocation extentsSource{};
@@ -938,7 +915,7 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
     {
         sortInstances(m_instanceData.data(), m_instanceCount);
 
-        void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_instanceTransferBuffer, true);
+        void *mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_instanceTransferBuffer, true);
         std::memcpy(mappedInstances, m_instanceData.data(), sizeof(InstanceData) * m_instanceCount);
         SDL_UnmapGPUTransferBuffer(m_device, m_instanceTransferBuffer);
 
@@ -949,15 +926,9 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
         instanceDestination.size = static_cast<Uint32>(sizeof(InstanceData) * m_instanceCount);
         SDL_UploadToGPUBuffer(copyPass, &instanceSource, &instanceDestination, true);
 
-        const SDL_GPUIndexedIndirectDrawCommand drawCommand = makeDrawCommand(
-            m_mainMesh.indexCount,
-            m_instanceCount,
-            0,
-            0,
-            0
-        );
+        const SDL_GPUIndexedIndirectDrawCommand drawCommand = makeDrawCommand(m_mainMesh.indexCount, m_instanceCount, 0, 0, 0);
 
-        void* mappedIndirect = SDL_MapGPUTransferBuffer(m_device, m_indirectTransferBuffer, true);
+        void *mappedIndirect = SDL_MapGPUTransferBuffer(m_device, m_indirectTransferBuffer, true);
         std::memcpy(mappedIndirect, &drawCommand, sizeof(drawCommand));
         SDL_UnmapGPUTransferBuffer(m_device, m_indirectTransferBuffer);
 
@@ -981,8 +952,8 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
 
     if (m_bridgeInstanceCount > 0 || m_coarseBridgeInstanceCount > 0)
     {
-        void* mappedBridgeInstances = SDL_MapGPUTransferBuffer(m_device, m_bridgeInstanceTransferBuffer, true);
-        std::byte* mappedBridgeBytes = static_cast<std::byte*>(mappedBridgeInstances);
+        void *mappedBridgeInstances = SDL_MapGPUTransferBuffer(m_device, m_bridgeInstanceTransferBuffer, true);
+        std::byte *mappedBridgeBytes = static_cast<std::byte *>(mappedBridgeInstances);
         std::size_t bridgeBytes = 0;
         if (m_bridgeInstanceCount > 0)
         {
@@ -993,10 +964,8 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
         if (m_coarseBridgeInstanceCount > 0)
         {
             const std::size_t coarseBridgeOffset = bridgeBytes;
-            std::memcpy(
-                mappedBridgeBytes + coarseBridgeOffset,
-                m_coarseBridgeInstanceData.data(),
-                sizeof(InstanceData) * m_coarseBridgeInstanceCount);
+            std::memcpy(mappedBridgeBytes + coarseBridgeOffset, m_coarseBridgeInstanceData.data(),
+                        sizeof(InstanceData) * m_coarseBridgeInstanceCount);
         }
         SDL_UnmapGPUTransferBuffer(m_device, m_bridgeInstanceTransferBuffer);
 
@@ -1004,50 +973,38 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
         bridgeInstanceSource.transfer_buffer = m_bridgeInstanceTransferBuffer;
         SDL_GPUBufferRegion bridgeInstanceDestination{};
         bridgeInstanceDestination.buffer = m_bridgeInstanceBuffer;
-        bridgeInstanceDestination.size = static_cast<Uint32>(
-            sizeof(InstanceData) * (m_bridgeInstanceCount + m_coarseBridgeInstanceCount));
+        bridgeInstanceDestination.size = static_cast<Uint32>(sizeof(InstanceData) * (m_bridgeInstanceCount + m_coarseBridgeInstanceCount));
         SDL_UploadToGPUBuffer(copyPass, &bridgeInstanceSource, &bridgeInstanceDestination, true);
 
         m_bridgeIndirectCommandCount = 0;
         std::uint32_t firstInstance = 0;
         if (m_bridgeInstanceCount > 0)
         {
-            m_bridgeIndirectCommands[m_bridgeIndirectCommandCount++] = makeDrawCommand(
-                m_bridgeMeshRange.indexCount,
-                m_bridgeInstanceCount,
-                m_bridgeMeshRange.firstIndex,
-                0,
-                firstInstance);
+            m_bridgeIndirectCommands[m_bridgeIndirectCommandCount++] =
+                makeDrawCommand(m_bridgeMeshRange.indexCount, m_bridgeInstanceCount, m_bridgeMeshRange.firstIndex, 0, firstInstance);
             firstInstance += m_bridgeInstanceCount;
         }
         if (m_coarseBridgeInstanceCount > 0)
         {
             m_bridgeIndirectCommands[m_bridgeIndirectCommandCount++] = makeDrawCommand(
-                m_coarseBridgeMeshRange.indexCount,
-                m_coarseBridgeInstanceCount,
-                m_coarseBridgeMeshRange.firstIndex,
-                0,
-                firstInstance);
+                m_coarseBridgeMeshRange.indexCount, m_coarseBridgeInstanceCount, m_coarseBridgeMeshRange.firstIndex, 0, firstInstance);
         }
 
-        void* mappedBridgeIndirect = SDL_MapGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer, true);
-        std::memcpy(
-            mappedBridgeIndirect,
-            m_bridgeIndirectCommands.data(),
-            sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_bridgeIndirectCommandCount);
+        void *mappedBridgeIndirect = SDL_MapGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer, true);
+        std::memcpy(mappedBridgeIndirect, m_bridgeIndirectCommands.data(),
+                    sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_bridgeIndirectCommandCount);
         SDL_UnmapGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer);
 
         SDL_GPUTransferBufferLocation bridgeIndirectSource{};
         bridgeIndirectSource.transfer_buffer = m_bridgeIndirectTransferBuffer;
         SDL_GPUBufferRegion bridgeIndirectDestination{};
         bridgeIndirectDestination.buffer = m_bridgeIndirectBuffer;
-        bridgeIndirectDestination.size =
-            sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_bridgeIndirectCommandCount;
+        bridgeIndirectDestination.size = sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_bridgeIndirectCommandCount;
         SDL_UploadToGPUBuffer(copyPass, &bridgeIndirectSource, &bridgeIndirectDestination, true);
     }
 }
 
-void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* commandBuffer)
+void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer *commandBuffer)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::DispatchHeightmapGenerations");
 
@@ -1066,7 +1023,7 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
     storageBindings[1].buffer = m_heightmapExtentsBuffer;
     storageBindings[1].cycle = false;
 
-    SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, nullptr, 0, storageBindings, 2);
+    SDL_GPUComputePass *computePass = SDL_BeginGPUComputePass(commandBuffer, nullptr, 0, storageBindings, 2);
     if (computePass == nullptr)
     {
         throwSdlError("Failed to begin terrain heightmap compute pass.");
@@ -1074,8 +1031,8 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
 
     SDL_BindGPUComputePipeline(computePass, m_heightmapComputePipeline);
 
-    SDL_GPUBuffer* readonlyStorageBuffers[]{ m_heightmapGenerationBuffer };
-    SDL_BindGPUComputeStorageBuffers(computePass, 0, readonlyStorageBuffers, 1);
+    SDL_GPUBuffer *readonlyStorageBuffers[]{m_heightmapGenerationBuffer, m_heightmapSourceDescriptorBuffer, m_sourceHeightmapBuffer};
+    SDL_BindGPUComputeStorageBuffers(computePass, 0, readonlyStorageBuffers, 3);
 
     const std::uint32_t groupCountX =
         (AppConfig::Terrain::kHeightmapResolution + kHeightmapComputeThreadCountX - 1) / kHeightmapComputeThreadCountX;
@@ -1085,7 +1042,7 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
     for (std::uint16_t index = 0; index < m_pendingHeightmapGenerationCount; ++index)
     {
         m_lastDispatchedLeafIds[index] = m_pendingGenerationLeafIds[index];
-        m_lastDispatchedSlices[index] = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].dispatchParams.x);
+        m_lastDispatchedSlices[index] = static_cast<std::uint16_t>(m_pendingHeightmapGenerations[index].params.x);
         m_lastDispatchedGenerationJobs[index] = m_pendingGenerationJobs[index];
     }
 
@@ -1094,9 +1051,10 @@ void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer* co
     SDL_EndGPUComputePass(computePass);
     m_lastDispatchedGenerationCount = m_pendingHeightmapGenerationCount;
     m_pendingHeightmapGenerationCount = 0;
+    m_pendingHeightmapSourceDescriptorCount = 0;
 }
 
-void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPass)
+void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass *copyPass)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::QueueHeightmapExtentsDownload");
 
@@ -1109,7 +1067,7 @@ void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPa
     for (std::size_t offset = 0; offset < m_pendingExtentsReadbacks.size(); ++offset)
     {
         const std::size_t slotIndex = (m_nextReadbackSlot + offset) % m_pendingExtentsReadbacks.size();
-        PendingExtentsReadback& readback = m_pendingExtentsReadbacks[slotIndex];
+        PendingExtentsReadback &readback = m_pendingExtentsReadbacks[slotIndex];
         if (readback.fence != nullptr)
         {
             continue;
@@ -1144,21 +1102,18 @@ void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass* copyPa
     }
 }
 
-bool QuadtreeMeshRenderer::requestHeightmapSliceDownload(
-    const WorldGridQuadtreeLeafId& leafId,
-    std::uint16_t sliceIndex)
+bool QuadtreeMeshRenderer::requestHeightmapSliceDownload(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex)
 {
-    for (const PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    for (const PendingHeightmapSliceReadback &readback : m_pendingHeightmapSliceReadbacks)
     {
-        if ((readback.requested || readback.queued || readback.fence != nullptr) &&
-            readback.leafId == leafId &&
+        if ((readback.requested || readback.queued || readback.fence != nullptr) && readback.leafId == leafId &&
             readback.sliceIndex == sliceIndex)
         {
             return true;
         }
     }
 
-    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    for (PendingHeightmapSliceReadback &readback : m_pendingHeightmapSliceReadbacks)
     {
         if (readback.requested || readback.queued || readback.fence != nullptr)
         {
@@ -1175,7 +1130,7 @@ bool QuadtreeMeshRenderer::requestHeightmapSliceDownload(
     return false;
 }
 
-void QuadtreeMeshRenderer::queueHeightmapSliceDownloads(SDL_GPUCopyPass* copyPass)
+void QuadtreeMeshRenderer::queueHeightmapSliceDownloads(SDL_GPUCopyPass *copyPass)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::QueueHeightmapSliceDownloads");
 
@@ -1183,7 +1138,7 @@ void QuadtreeMeshRenderer::queueHeightmapSliceDownloads(SDL_GPUCopyPass* copyPas
 
     for (std::uint16_t slotIndex = 0; slotIndex < m_pendingHeightmapSliceReadbacks.size(); ++slotIndex)
     {
-        PendingHeightmapSliceReadback& readback = m_pendingHeightmapSliceReadbacks[slotIndex];
+        PendingHeightmapSliceReadback &readback = m_pendingHeightmapSliceReadbacks[slotIndex];
         if (!readback.requested || readback.queued || readback.fence != nullptr)
         {
             continue;
@@ -1208,13 +1163,9 @@ void QuadtreeMeshRenderer::queueHeightmapSliceDownloads(SDL_GPUCopyPass* copyPas
     }
 }
 
-bool QuadtreeMeshRenderer::queueFoliagePageGeneration(
-    const WorldGridQuadtreeLeafId& foliageLeafId,
-    const WorldGridQuadtreeLeafId& terrainLeafId,
-    std::uint16_t terrainSliceIndex,
-    std::uint16_t pageIndex,
-    float waterLevel,
-    GenerationJobHandle job)
+bool QuadtreeMeshRenderer::queueFoliagePageGeneration(const WorldGridQuadtreeLeafId &foliageLeafId,
+                                                      const WorldGridQuadtreeLeafId &terrainLeafId, std::uint16_t terrainSliceIndex,
+                                                      std::uint16_t pageIndex, float waterLevel, GenerationJobHandle job)
 {
     if (m_pendingFoliageInstanceGenerationCount >= m_pendingFoliageInstanceGenerations.size())
     {
@@ -1232,51 +1183,36 @@ bool QuadtreeMeshRenderer::queueFoliagePageGeneration(
     m_pendingFoliagePageIndices[generationIndex] = pageIndex;
     m_pendingFoliageJobs[generationIndex] = job;
     m_pendingFoliageInstanceGenerations[generationIndex] = {
-        .dispatchParams = glm::uvec4(
-            pageIndex,
-            terrainSliceIndex,
-            static_cast<std::uint32_t>(hashLeafId(foliageLeafId)),
-            0u),
-        .terrainParams = glm::vec4(
-            static_cast<float>(terrainLeafSizeMeters),
-            static_cast<float>(foliageOffsetXMeters),
-            static_cast<float>(foliageOffsetZMeters),
-            waterLevel),
-        .worldParams = glm::vec4(
-            static_cast<float>(foliageMinCorner.worldPosition().x),
-            static_cast<float>(foliageMinCorner.worldPosition().z),
-            0.0f,
-            0.0f),
+        .dispatchParams = glm::uvec4(pageIndex, terrainSliceIndex, static_cast<std::uint32_t>(hashLeafId(foliageLeafId)), 0u),
+        .terrainParams = glm::vec4(static_cast<float>(terrainLeafSizeMeters), static_cast<float>(foliageOffsetXMeters),
+                                   static_cast<float>(foliageOffsetZMeters), waterLevel),
+        .worldParams = glm::vec4(static_cast<float>(foliageMinCorner.worldPosition().x),
+                                 static_cast<float>(foliageMinCorner.worldPosition().z), 0.0f, 0.0f),
     };
     return true;
 }
 
-void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(
-    SDL_GPUCommandBuffer* commandBuffer,
-    SDL_GPUBuffer* foliagePagePoolBuffer)
+void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(SDL_GPUCommandBuffer *commandBuffer, SDL_GPUBuffer *foliagePagePoolBuffer)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::DispatchFoliageInstanceGenerations");
 
-    if (foliagePagePoolBuffer == nullptr ||
-        m_lastDispatchedFoliageInstanceGenerationCount != 0 ||
+    if (foliagePagePoolBuffer == nullptr || m_lastDispatchedFoliageInstanceGenerationCount != 0 ||
         m_pendingFoliageInstanceGenerationCount == 0)
     {
         return;
     }
 
-    void* mappedGenerationUniforms = SDL_MapGPUTransferBuffer(m_device, m_foliageInstanceGenerationTransferBuffer, true);
-    std::memcpy(
-        mappedGenerationUniforms,
-        m_pendingFoliageInstanceGenerations.data(),
-        sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerationCount);
+    void *mappedGenerationUniforms = SDL_MapGPUTransferBuffer(m_device, m_foliageInstanceGenerationTransferBuffer, true);
+    std::memcpy(mappedGenerationUniforms, m_pendingFoliageInstanceGenerations.data(),
+                sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerationCount);
     SDL_UnmapGPUTransferBuffer(m_device, m_foliageInstanceGenerationTransferBuffer);
 
     const std::array<std::uint32_t, FoliageConfig::kGenerationBudgetPerFrame> zeroCounts{};
-    void* mappedLiveCountInit = SDL_MapGPUTransferBuffer(m_device, m_foliageInstanceLiveCountInitTransferBuffer, true);
+    void *mappedLiveCountInit = SDL_MapGPUTransferBuffer(m_device, m_foliageInstanceLiveCountInitTransferBuffer, true);
     std::memcpy(mappedLiveCountInit, zeroCounts.data(), sizeof(zeroCounts));
     SDL_UnmapGPUTransferBuffer(m_device, m_foliageInstanceLiveCountInitTransferBuffer);
 
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
     if (copyPass == nullptr)
     {
         throwSdlError("Failed to begin foliage instance-generation upload copy pass.");
@@ -1286,8 +1222,7 @@ void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(
     generationSource.transfer_buffer = m_foliageInstanceGenerationTransferBuffer;
     SDL_GPUBufferRegion generationDestination{};
     generationDestination.buffer = m_foliageInstanceGenerationBuffer;
-    generationDestination.size = static_cast<Uint32>(
-        sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerationCount);
+    generationDestination.size = static_cast<Uint32>(sizeof(FoliageInstanceGenerationUniforms) * m_pendingFoliageInstanceGenerationCount);
     SDL_UploadToGPUBuffer(copyPass, &generationSource, &generationDestination, false);
 
     SDL_GPUTransferBufferLocation liveCountInitSource{};
@@ -1304,14 +1239,14 @@ void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(
     storageBindings[1].buffer = m_foliageInstanceLiveCountBuffer;
     storageBindings[1].cycle = false;
 
-    SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, nullptr, 0, storageBindings, 2);
+    SDL_GPUComputePass *computePass = SDL_BeginGPUComputePass(commandBuffer, nullptr, 0, storageBindings, 2);
     if (computePass == nullptr)
     {
         throwSdlError("Failed to begin foliage instance-generation compute pass.");
     }
 
     SDL_BindGPUComputePipeline(computePass, m_foliageInstanceComputePipeline);
-    SDL_GPUBuffer* readonlyStorageBuffers[]{
+    SDL_GPUBuffer *readonlyStorageBuffers[]{
         m_foliageInstanceGenerationBuffer,
         m_heightmapBuffer,
     };
@@ -1325,11 +1260,9 @@ void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(
     }
 
     const std::uint32_t groupCountX =
-        (FoliageConfig::kCandidateGridResolution + kFoliageInstanceComputeThreadCountX - 1u) /
-        kFoliageInstanceComputeThreadCountX;
+        (FoliageConfig::kCandidateGridResolution + kFoliageInstanceComputeThreadCountX - 1u) / kFoliageInstanceComputeThreadCountX;
     const std::uint32_t groupCountY =
-        (FoliageConfig::kCandidateGridResolution + kFoliageInstanceComputeThreadCountY - 1u) /
-        kFoliageInstanceComputeThreadCountY;
+        (FoliageConfig::kCandidateGridResolution + kFoliageInstanceComputeThreadCountY - 1u) / kFoliageInstanceComputeThreadCountY;
     SDL_DispatchGPUCompute(computePass, groupCountX, groupCountY, m_pendingFoliageInstanceGenerationCount);
     SDL_EndGPUComputePass(computePass);
 
@@ -1337,7 +1270,7 @@ void QuadtreeMeshRenderer::dispatchFoliageInstanceGenerations(
     m_pendingFoliageInstanceGenerationCount = 0;
 }
 
-void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass* copyPass)
+void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPass *copyPass)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::QueueFoliageInstanceLiveCountDownloads");
 
@@ -1349,9 +1282,8 @@ void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPas
 
     for (std::size_t offset = 0; offset < m_pendingFoliageLiveCountReadbacks.size(); ++offset)
     {
-        const std::size_t slotIndex =
-            (m_nextFoliageLiveCountReadbackSlot + offset) % m_pendingFoliageLiveCountReadbacks.size();
-        PendingFoliageLiveCountReadback& readback = m_pendingFoliageLiveCountReadbacks[slotIndex];
+        const std::size_t slotIndex = (m_nextFoliageLiveCountReadbackSlot + offset) % m_pendingFoliageLiveCountReadbacks.size();
+        PendingFoliageLiveCountReadback &readback = m_pendingFoliageLiveCountReadbacks[slotIndex];
         if (readback.fence != nullptr)
         {
             continue;
@@ -1376,8 +1308,7 @@ void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPas
         }
 
         m_pendingFoliageLiveCountFenceReadbackSlot = static_cast<std::uint16_t>(slotIndex);
-        m_nextFoliageLiveCountReadbackSlot =
-            static_cast<std::uint16_t>((slotIndex + 1u) % m_pendingFoliageLiveCountReadbacks.size());
+        m_nextFoliageLiveCountReadbackSlot = static_cast<std::uint16_t>((slotIndex + 1u) % m_pendingFoliageLiveCountReadbacks.size());
         break;
     }
 
@@ -1387,15 +1318,19 @@ void QuadtreeMeshRenderer::queueFoliageInstanceLiveCountDownloads(SDL_GPUCopyPas
     }
 }
 
-void QuadtreeMeshRenderer::attachSubmittedFence(
-    const std::shared_ptr<SubmittedGpuFence>& fence,
-    WorldGridQuadtreeHeightmapManager& heightmapManager,
-    WorldGridFoliageManager& foliageManager)
+void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence> &fence,
+                                                WorldGridQuadtreeHeightmapManager &heightmapManager,
+                                                WorldGridFoliageManager &foliageManager)
 {
+    if (m_submittedSourceUploadCount > 0)
+    {
+        heightmapManager.markSourceUploadsSubmitted(
+            std::span<const std::uint16_t>(m_submittedSourceUploadSlots.data(), m_submittedSourceUploadCount), fence);
+        m_submittedSourceUploadCount = 0;
+    }
     if (m_pendingFenceReadbackSlot == UINT16_MAX)
     {
-        if (m_pendingFoliageLiveCountFenceReadbackSlot == UINT16_MAX &&
-            m_pendingHeightmapSliceFenceSlotCount == 0)
+        if (m_pendingFoliageLiveCountFenceReadbackSlot == UINT16_MAX && m_pendingHeightmapSliceFenceSlotCount == 0)
         {
             return;
         }
@@ -1403,7 +1338,7 @@ void QuadtreeMeshRenderer::attachSubmittedFence(
 
     if (m_pendingFenceReadbackSlot != UINT16_MAX)
     {
-        PendingExtentsReadback& readback = m_pendingExtentsReadbacks[m_pendingFenceReadbackSlot];
+        PendingExtentsReadback &readback = m_pendingExtentsReadbacks[m_pendingFenceReadbackSlot];
         readback.fence = fence;
         for (std::uint16_t index = 0; index < readback.count; ++index)
             heightmapManager.markSubmitted(readback.jobs[index], fence);
@@ -1412,16 +1347,14 @@ void QuadtreeMeshRenderer::attachSubmittedFence(
 
     for (std::uint16_t pendingIndex = 0; pendingIndex < m_pendingHeightmapSliceFenceSlotCount; ++pendingIndex)
     {
-        PendingHeightmapSliceReadback& readback =
-            m_pendingHeightmapSliceReadbacks[m_pendingHeightmapSliceFenceSlots[pendingIndex]];
+        PendingHeightmapSliceReadback &readback = m_pendingHeightmapSliceReadbacks[m_pendingHeightmapSliceFenceSlots[pendingIndex]];
         readback.fence = fence;
     }
     m_pendingHeightmapSliceFenceSlotCount = 0;
 
     if (m_pendingFoliageLiveCountFenceReadbackSlot != UINT16_MAX)
     {
-        PendingFoliageLiveCountReadback& readback =
-            m_pendingFoliageLiveCountReadbacks[m_pendingFoliageLiveCountFenceReadbackSlot];
+        PendingFoliageLiveCountReadback &readback = m_pendingFoliageLiveCountReadbacks[m_pendingFoliageLiveCountFenceReadbackSlot];
         readback.fence = fence;
         for (std::uint16_t index = 0; index < readback.count; ++index)
             foliageManager.markSubmitted(readback.jobs[index], fence);
@@ -1429,30 +1362,31 @@ void QuadtreeMeshRenderer::attachSubmittedFence(
     }
 }
 
-void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents>& completedExtents)
+void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents> &completedExtents)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::CollectCompletedHeightmapExtents");
 
-    for (PendingExtentsReadback& readback : m_pendingExtentsReadbacks)
+    for (PendingExtentsReadback &readback : m_pendingExtentsReadbacks)
     {
         if (!readback.fence || !readback.fence->isSignaled())
         {
             continue;
         }
 
-        const GpuHeightmapExtents* mappedExtents = static_cast<const GpuHeightmapExtents*>(
-            SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
+        const GpuHeightmapExtents *mappedExtents =
+            static_cast<const GpuHeightmapExtents *>(SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
         for (std::uint16_t index = 0; index < readback.count; ++index)
         {
             const std::uint16_t sliceIndex = readback.sliceIndices[index];
-            const GpuHeightmapExtents& gpuExtents = mappedExtents[sliceIndex];
+            const GpuHeightmapExtents &gpuExtents = mappedExtents[sliceIndex];
             completedExtents.push_back({
                 .leafId = readback.leafIds[index],
                 .sliceIndex = sliceIndex,
-                .extents = {
-                    .minHeight = static_cast<float>(gpuExtents.minHeightCentimeters) * 0.01f,
-                    .maxHeight = static_cast<float>(gpuExtents.maxHeightCentimeters) * 0.01f,
-                },
+                .extents =
+                    {
+                        .minHeight = static_cast<float>(gpuExtents.minHeightCentimeters) * 0.01f,
+                        .maxHeight = static_cast<float>(gpuExtents.maxHeightCentimeters) * 0.01f,
+                    },
                 .job = readback.jobs[index],
             });
         }
@@ -1462,12 +1396,11 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<Generate
     }
 }
 
-void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(
-    std::vector<CompletedHeightmapSliceReadback>& completedReadbacks)
+void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(std::vector<CompletedHeightmapSliceReadback> &completedReadbacks)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::CollectCompletedHeightmapSliceReadbacks");
 
-    for (PendingHeightmapSliceReadback& readback : m_pendingHeightmapSliceReadbacks)
+    for (PendingHeightmapSliceReadback &readback : m_pendingHeightmapSliceReadbacks)
     {
         if (!readback.fence || !readback.fence->isSignaled())
         {
@@ -1478,8 +1411,7 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(
         completed.leafId = readback.leafId;
         completed.sliceIndex = readback.sliceIndex;
 
-        const float* mappedSamples = static_cast<const float*>(
-            SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
+        const float *mappedSamples = static_cast<const float *>(SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
         std::memcpy(completed.samples.data(), mappedSamples, sizeof(float) * completed.samples.size());
         SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
 
@@ -1493,27 +1425,24 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(
     }
 }
 
-void QuadtreeMeshRenderer::collectCompletedFoliagePageLiveCounts(
-    std::vector<GeneratedFoliagePageLiveCount>& completedLiveCounts)
+void QuadtreeMeshRenderer::collectCompletedFoliagePageLiveCounts(std::vector<GeneratedFoliagePageLiveCount> &completedLiveCounts)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::CollectCompletedFoliagePageLiveCounts");
 
-    for (PendingFoliageLiveCountReadback& readback : m_pendingFoliageLiveCountReadbacks)
+    for (PendingFoliageLiveCountReadback &readback : m_pendingFoliageLiveCountReadbacks)
     {
         if (!readback.fence || !readback.fence->isSignaled())
         {
             continue;
         }
 
-        const std::uint32_t* mappedCounts = static_cast<const std::uint32_t*>(
-            SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
+        const std::uint32_t *mappedCounts =
+            static_cast<const std::uint32_t *>(SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
         for (std::uint16_t index = 0; index < readback.count; ++index)
         {
             completedLiveCounts.push_back({
                 .leafId = readback.leafIds[index],
-                .liveCount = static_cast<std::uint16_t>(std::min<std::uint32_t>(
-                    mappedCounts[index],
-                    FoliageConfig::kCandidateSlotCount)),
+                .liveCount = static_cast<std::uint16_t>(std::min<std::uint32_t>(mappedCounts[index], FoliageConfig::kCandidateSlotCount)),
                 .pageIndex = readback.pageIndices[index],
                 .job = readback.jobs[index],
             });
@@ -1525,13 +1454,9 @@ void QuadtreeMeshRenderer::collectCompletedFoliagePageLiveCounts(
     }
 }
 
-void QuadtreeMeshRenderer::render(
-    SDL_GPURenderPass* renderPass,
-    SDL_GPUCommandBuffer* commandBuffer,
-    const glm::mat4& viewProjection,
-    const LightingSystem& lightingSystem,
-    const QuadtreeWaterMeshRenderer& waterRenderer,
-    float timeSeconds) const
+void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection,
+                                  const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer,
+                                  float timeSeconds) const
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::Render");
 
@@ -1546,44 +1471,25 @@ void QuadtreeMeshRenderer::render(
     const glm::dvec3 cameraWorld = m_activeCameraPosition.worldPosition();
     uniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     uniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
-    uniforms.terrainHeightParams = glm::vec4(m_terrainBaseHeight, m_terrainHeightAmplitude, 0.0f, 0.0f);
-    uniforms.cameraWorldAndTime = glm::vec4(
-        static_cast<float>(cameraWorld.x),
-        static_cast<float>(cameraWorld.y),
-        static_cast<float>(cameraWorld.z),
-        timeSeconds);
+    uniforms.cameraWorldAndTime =
+        glm::vec4(static_cast<float>(cameraWorld.x), static_cast<float>(cameraWorld.y), static_cast<float>(cameraWorld.z), timeSeconds);
     const bool causticsEnabled = m_waterSettings.enabled && m_waterSettings.drawTerrainCaustics;
-    uniforms.waterCausticsParams = glm::vec4(
-        m_waterSettings.waterLevel,
-        causticsEnabled ? 1.0f : 0.0f,
-        static_cast<float>(m_waterSettings.cascadeCount),
-        std::max(m_waterSettings.causticsIntensity, 0.0f));
+    uniforms.waterCausticsParams =
+        glm::vec4(m_waterSettings.waterLevel, causticsEnabled ? 1.0f : 0.0f, static_cast<float>(m_waterSettings.cascadeCount),
+                  std::max(m_waterSettings.causticsIntensity, 0.0f));
     uniforms.waterCausticsPatternParams = glm::vec4(
-        std::max(m_waterSettings.causticsPatternScaleA, 0.0001f),
-        std::max(m_waterSettings.causticsPatternScaleB, 0.0001f),
-        std::max(m_waterSettings.causticsDisplacementWarpStrength, 0.0f),
-        std::max(m_waterSettings.causticsSlopeWarpStrength, 0.0f));
-    uniforms.waterCausticsRidgeParamsA = glm::vec4(
-        m_waterSettings.causticsRidgeMinA,
-        m_waterSettings.causticsRidgeMaxA,
-        m_waterSettings.causticsFocusMin,
-        m_waterSettings.causticsFocusMax);
-    uniforms.waterCausticsRidgeParamsB = glm::vec4(
-        m_waterSettings.causticsRidgeMinB,
-        m_waterSettings.causticsRidgeMaxB,
-        std::clamp(m_waterSettings.causticsMinSurfaceUp, 0.0f, 1.0f),
-        0.0f);
-    uniforms.waterCausticsDecodeParams = glm::vec4(
-        m_causticsDecodeScaleA,
-        m_causticsDecodeScaleA,
-        0.0f,
-        0.0f);
-    uniforms.waterCausticsRotationParams = glm::vec4(
-        std::cos(m_waterSettings.causticsRotationA),
-        std::sin(m_waterSettings.causticsRotationA),
-        std::cos(m_waterSettings.causticsRotationB),
-        std::sin(m_waterSettings.causticsRotationB));
-    for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(m_waterSettings.cascadeCount, AppConfig::Water::kMaxCascadeCount); ++cascadeIndex)
+        std::max(m_waterSettings.causticsPatternScaleA, 0.0001f), std::max(m_waterSettings.causticsPatternScaleB, 0.0001f),
+        std::max(m_waterSettings.causticsDisplacementWarpStrength, 0.0f), std::max(m_waterSettings.causticsSlopeWarpStrength, 0.0f));
+    uniforms.waterCausticsRidgeParamsA = glm::vec4(m_waterSettings.causticsRidgeMinA, m_waterSettings.causticsRidgeMaxA,
+                                                   m_waterSettings.causticsFocusMin, m_waterSettings.causticsFocusMax);
+    uniforms.waterCausticsRidgeParamsB = glm::vec4(m_waterSettings.causticsRidgeMinB, m_waterSettings.causticsRidgeMaxB,
+                                                   std::clamp(m_waterSettings.causticsMinSurfaceUp, 0.0f, 1.0f), 0.0f);
+    uniforms.waterCausticsDecodeParams = glm::vec4(m_causticsDecodeScaleA, m_causticsDecodeScaleA, 0.0f, 0.0f);
+    uniforms.waterCausticsRotationParams =
+        glm::vec4(std::cos(m_waterSettings.causticsRotationA), std::sin(m_waterSettings.causticsRotationA),
+                  std::cos(m_waterSettings.causticsRotationB), std::sin(m_waterSettings.causticsRotationB));
+    for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(m_waterSettings.cascadeCount, AppConfig::Water::kMaxCascadeCount);
+         ++cascadeIndex)
     {
         const float worldSize = std::max(m_waterSettings.cascades[cascadeIndex].worldSizeMeters, 1.0f);
         if (cascadeIndex < 4u)
@@ -1602,22 +1508,22 @@ void QuadtreeMeshRenderer::render(
     {
         SDL_BindGPUGraphicsPipeline(renderPass, m_mainPipeline);
 
-        const SDL_GPUBufferBinding vertexBinding{ m_mainMesh.vertexBuffer, 0 };
+        const SDL_GPUBufferBinding vertexBinding{m_mainMesh.vertexBuffer, 0};
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
 
-        const SDL_GPUBufferBinding indexBinding{ m_mainMesh.indexBuffer, 0 };
+        const SDL_GPUBufferBinding indexBinding{m_mainMesh.indexBuffer, 0};
         SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_instanceBuffer };
+        SDL_GPUBuffer *storageBuffers[2]{m_heightmapBuffer, m_instanceBuffer};
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
         const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
-            { waterRenderer.displacementTexture(), waterRenderer.waterSampler() },
-            { waterRenderer.slopeTexture(), waterRenderer.waterSampler() },
-            { m_causticsTextureA, m_causticsSampler },
-            { m_pbrAlbedoTextureArray, m_pbrSampler },
-            { m_pbrNormalTextureArray, m_pbrSampler },
-            { m_pbrRoughnessTextureArray, m_pbrSampler },
-            { m_pbrAoTextureArray, m_pbrSampler },
+            {waterRenderer.displacementTexture(), waterRenderer.waterSampler()},
+            {waterRenderer.slopeTexture(), waterRenderer.waterSampler()},
+            {m_causticsTextureA, m_causticsSampler},
+            {m_pbrAlbedoTextureArray, m_pbrSampler},
+            {m_pbrNormalTextureArray, m_pbrSampler},
+            {m_pbrRoughnessTextureArray, m_pbrSampler},
+            {m_pbrAoTextureArray, m_pbrSampler},
         };
         SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
@@ -1627,29 +1533,29 @@ void QuadtreeMeshRenderer::render(
     {
         SDL_BindGPUGraphicsPipeline(renderPass, m_bridgePipeline);
 
-        const SDL_GPUBufferBinding vertexBinding{ m_bridgeMesh.vertexBuffer, 0 };
+        const SDL_GPUBufferBinding vertexBinding{m_bridgeMesh.vertexBuffer, 0};
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
 
-        const SDL_GPUBufferBinding indexBinding{ m_bridgeMesh.indexBuffer, 0 };
+        const SDL_GPUBufferBinding indexBinding{m_bridgeMesh.indexBuffer, 0};
         SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        SDL_GPUBuffer* storageBuffers[2]{ m_heightmapBuffer, m_bridgeInstanceBuffer };
+        SDL_GPUBuffer *storageBuffers[2]{m_heightmapBuffer, m_bridgeInstanceBuffer};
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
         const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
-            { waterRenderer.displacementTexture(), waterRenderer.waterSampler() },
-            { waterRenderer.slopeTexture(), waterRenderer.waterSampler() },
-            { m_causticsTextureA, m_causticsSampler },
-            { m_pbrAlbedoTextureArray, m_pbrSampler },
-            { m_pbrNormalTextureArray, m_pbrSampler },
-            { m_pbrRoughnessTextureArray, m_pbrSampler },
-            { m_pbrAoTextureArray, m_pbrSampler },
+            {waterRenderer.displacementTexture(), waterRenderer.waterSampler()},
+            {waterRenderer.slopeTexture(), waterRenderer.waterSampler()},
+            {m_causticsTextureA, m_causticsSampler},
+            {m_pbrAlbedoTextureArray, m_pbrSampler},
+            {m_pbrNormalTextureArray, m_pbrSampler},
+            {m_pbrRoughnessTextureArray, m_pbrSampler},
+            {m_pbrAoTextureArray, m_pbrSampler},
         };
         SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, m_bridgeIndirectCommandCount);
     }
 }
 
-void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path& shaderDirectory)
+void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path &shaderDirectory)
 {
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -1699,23 +1605,13 @@ void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path& shaderDi
     pipelineInfo.vertex_input_state.num_vertex_attributes = 2;
     pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
-    auto createGraphicsPipeline = [this, &pipelineInfo, &shaderDirectory](const char* vertexShaderName)
-    {
-        SDL_GPUShader* vertexShader = createShader(
-            shaderDirectory / vertexShaderName,
-            SDL_GPU_SHADERSTAGE_VERTEX,
-            1,
-            2);
-        SDL_GPUShader* fragmentShader = createShader(
-            shaderDirectory / "quadtree_mesh.frag.spv",
-            SDL_GPU_SHADERSTAGE_FRAGMENT,
-            1,
-            0,
-            7);
+    auto createGraphicsPipeline = [this, &pipelineInfo, &shaderDirectory](const char *vertexShaderName) {
+        SDL_GPUShader *vertexShader = createShader(shaderDirectory / vertexShaderName, SDL_GPU_SHADERSTAGE_VERTEX, 1, 2);
+        SDL_GPUShader *fragmentShader = createShader(shaderDirectory / "quadtree_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 7);
 
         pipelineInfo.vertex_shader = vertexShader;
         pipelineInfo.fragment_shader = fragmentShader;
-        SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
+        SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
         SDL_ReleaseGPUShader(m_device, fragmentShader);
         SDL_ReleaseGPUShader(m_device, vertexShader);
         return pipeline;
@@ -1734,7 +1630,7 @@ void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path& shaderDi
     }
 }
 
-void QuadtreeMeshRenderer::createHeightmapComputePipeline(const std::filesystem::path& shaderDirectory)
+void QuadtreeMeshRenderer::createHeightmapComputePipeline(const std::filesystem::path &shaderDirectory)
 {
     const std::vector<std::uint8_t> bytes = readShaderCode(shaderDirectory / "heightmap_generate.comp.spv");
 
@@ -1743,7 +1639,7 @@ void QuadtreeMeshRenderer::createHeightmapComputePipeline(const std::filesystem:
     pipelineInfo.code = bytes.data();
     pipelineInfo.entrypoint = "main";
     pipelineInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
-    pipelineInfo.num_readonly_storage_buffers = 1;
+    pipelineInfo.num_readonly_storage_buffers = 3;
     pipelineInfo.num_readwrite_storage_buffers = 2;
     pipelineInfo.num_uniform_buffers = 0;
     pipelineInfo.threadcount_x = kHeightmapComputeThreadCountX;
@@ -1757,7 +1653,7 @@ void QuadtreeMeshRenderer::createHeightmapComputePipeline(const std::filesystem:
     }
 }
 
-void QuadtreeMeshRenderer::createFoliageInstanceComputePipeline(const std::filesystem::path& shaderDirectory)
+void QuadtreeMeshRenderer::createFoliageInstanceComputePipeline(const std::filesystem::path &shaderDirectory)
 {
     const std::vector<std::uint8_t> bytes = readShaderCode(shaderDirectory / "foliage_generate.comp.spv");
 
@@ -1794,8 +1690,8 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
             const float sampleX = static_cast<float>(x) + kRenderedSampleCoordOffset;
             const float sampleZ = static_cast<float>(z) + kRenderedSampleCoordOffset;
             vertices.push_back({
-                { localX, localZ },
-                { sampleX, sampleZ },
+                {localX, localZ},
+                {sampleX, sampleZ},
             });
         }
     }
@@ -1832,8 +1728,8 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     {
         outerVertexIndices[z] = static_cast<std::uint32_t>(bridgeVertices.size());
         bridgeVertices.push_back({
-            { 0.0f, static_cast<float>(z) },
-            { static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo), static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z) },
+            {0.0f, static_cast<float>(z)},
+            {static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo), static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z)},
         });
     }
 
@@ -1841,8 +1737,8 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     {
         innerVertexIndices[z - 1] = static_cast<std::uint32_t>(bridgeVertices.size());
         bridgeVertices.push_back({
-            { kRenderedLocalCoordOffset, static_cast<float>(z) },
-            { kRenderedSampleCoordOffset, static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z) },
+            {kRenderedLocalCoordOffset, static_cast<float>(z)},
+            {kRenderedSampleCoordOffset, static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z)},
         });
     }
 
@@ -1882,8 +1778,9 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
         const float localZ = static_cast<float>(z * 2u);
         coarseOuterVertexIndices[z] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
         coarseBridgeVertices.push_back({
-            { 0.0f, localZ },
-            { static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo), static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo) + localZ },
+            {0.0f, localZ},
+            {static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo),
+             static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo) + localZ},
         });
     }
 
@@ -1939,28 +1836,20 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     m_bridgeMeshRange.indexCount = static_cast<std::uint32_t>(combinedBridgeIndices.size());
 
     const std::uint32_t coarseVertexBase = static_cast<std::uint32_t>(combinedBridgeVertices.size());
-    combinedBridgeVertices.insert(
-        combinedBridgeVertices.end(),
-        coarseBridgeVertices.begin(),
-        coarseBridgeVertices.end());
+    combinedBridgeVertices.insert(combinedBridgeVertices.end(), coarseBridgeVertices.begin(), coarseBridgeVertices.end());
     m_coarseBridgeMeshRange.firstIndex = static_cast<std::uint32_t>(combinedBridgeIndices.size());
     m_coarseBridgeMeshRange.indexCount = static_cast<std::uint32_t>(coarseBridgeIndices.size());
-    for (std::uint32_t& index : coarseBridgeIndices)
+    for (std::uint32_t &index : coarseBridgeIndices)
     {
         index += coarseVertexBase;
     }
-    combinedBridgeIndices.insert(
-        combinedBridgeIndices.end(),
-        coarseBridgeIndices.begin(),
-        coarseBridgeIndices.end());
+    combinedBridgeIndices.insert(combinedBridgeIndices.end(), coarseBridgeIndices.begin(), coarseBridgeIndices.end());
 
     createMeshResources(combinedBridgeVertices, combinedBridgeIndices, m_bridgeMesh);
 }
 
-void QuadtreeMeshRenderer::createMeshResources(
-    const std::vector<Vertex>& vertices,
-    const std::vector<std::uint32_t>& indices,
-    MeshResources& meshResources)
+void QuadtreeMeshRenderer::createMeshResources(const std::vector<Vertex> &vertices, const std::vector<std::uint32_t> &indices,
+                                               MeshResources &meshResources)
 {
     SDL_GPUBufferCreateInfo vertexInfo{};
     vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
@@ -1980,7 +1869,7 @@ void QuadtreeMeshRenderer::createMeshResources(
         throwSdlError("Failed to create quadtree mesh vertex transfer buffer.");
     }
 
-    void* mappedVertices = SDL_MapGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer, false);
+    void *mappedVertices = SDL_MapGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer, false);
     std::memcpy(mappedVertices, vertices.data(), sizeof(Vertex) * vertices.size());
     SDL_UnmapGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer);
 
@@ -2002,12 +1891,12 @@ void QuadtreeMeshRenderer::createMeshResources(
         throwSdlError("Failed to create quadtree mesh index transfer buffer.");
     }
 
-    void* mappedIndices = SDL_MapGPUTransferBuffer(m_device, meshResources.indexTransferBuffer, false);
+    void *mappedIndices = SDL_MapGPUTransferBuffer(m_device, meshResources.indexTransferBuffer, false);
     std::memcpy(mappedIndices, indices.data(), sizeof(std::uint32_t) * indices.size());
     SDL_UnmapGPUTransferBuffer(m_device, meshResources.indexTransferBuffer);
 
-    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
 
     SDL_GPUTransferBufferLocation vertexSource{};
     vertexSource.transfer_buffer = meshResources.vertexTransferBuffer;
@@ -2032,13 +1921,9 @@ void QuadtreeMeshRenderer::createMeshResources(
     meshResources.indexCount = static_cast<std::uint32_t>(indices.size());
 }
 
-SDL_GPUIndexedIndirectDrawCommand QuadtreeMeshRenderer::makeDrawCommand(
-    std::uint32_t indexCount,
-    std::uint32_t instanceCount,
-    std::uint32_t firstIndex,
-    std::int32_t vertexOffset,
-    std::uint32_t firstInstance
-)
+SDL_GPUIndexedIndirectDrawCommand QuadtreeMeshRenderer::makeDrawCommand(std::uint32_t indexCount, std::uint32_t instanceCount,
+                                                                        std::uint32_t firstIndex, std::int32_t vertexOffset,
+                                                                        std::uint32_t firstInstance)
 {
     SDL_GPUIndexedIndirectDrawCommand command{};
     command.num_indices = indexCount;
@@ -2049,18 +1934,14 @@ SDL_GPUIndexedIndirectDrawCommand QuadtreeMeshRenderer::makeDrawCommand(
     return command;
 }
 
-float QuadtreeMeshRenderer::instanceDistanceSquared(const InstanceData& instance)
+float QuadtreeMeshRenderer::instanceDistanceSquared(const InstanceData &instance)
 {
     const std::uint8_t scalePow = static_cast<std::uint8_t>((instance.packedMetadata >> 16U) & 0xFFU);
-    const float leafSize = static_cast<float>(
-        AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(1ULL << scalePow));
+    const float leafSize = static_cast<float>(AppConfig::Quadtree::kMinimumQuadSize * static_cast<double>(1ULL << scalePow));
     const float centerX = instance.position[0] + (leafSize * 0.5f);
     const float centerY = instance.position[1];
     const float centerZ = instance.position[2] + (leafSize * 0.5f);
-    return
-        (centerX * centerX) +
-        (centerY * centerY) +
-        (centerZ * centerZ);
+    return (centerX * centerX) + (centerY * centerY) + (centerZ * centerZ);
 }
 
 void QuadtreeMeshRenderer::createCausticsTextures()
@@ -2090,7 +1971,7 @@ void QuadtreeMeshRenderer::createCausticsTextures()
     SDL_GPUTransferBufferCreateInfo transferInfo{};
     transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     transferInfo.size = static_cast<Uint32>(image.pixels.size());
-    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+    SDL_GPUTransferBuffer *transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
     if (transferBuffer == nullptr)
     {
         SDL_ReleaseGPUTexture(m_device, m_causticsTextureA);
@@ -2098,12 +1979,12 @@ void QuadtreeMeshRenderer::createCausticsTextures()
         throwSdlError("Failed to create terrain caustics upload transfer buffer.");
     }
 
-    void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
+    void *mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
     std::memcpy(mapped, image.pixels.data(), image.pixels.size());
     SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
 
-    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
 
     SDL_GPUTextureTransferInfo source{};
     source.transfer_buffer = transferBuffer;
@@ -2215,7 +2096,7 @@ void QuadtreeMeshRenderer::loadPbrTextures()
         textureIndexByName.emplace(texBin.stringAt(texBin.textures[textureIndex].nameOffset), textureIndex);
     }
 
-    auto requireTexture = [&](const std::string& textureName) -> std::uint32_t {
+    auto requireTexture = [&](const std::string &textureName) -> std::uint32_t {
         const auto found = textureIndexByName.find(textureName);
         if (found == textureIndexByName.end())
         {
@@ -2225,52 +2106,38 @@ void QuadtreeMeshRenderer::loadPbrTextures()
     };
 
     const std::array<std::uint32_t, kTerrainMaterialLayerCount> albedoIndices{
-        requireTexture("mud_albedo"),
-        requireTexture("wavy-sand_albedo"),
-        requireTexture("pineneedles_albedo"),
-        requireTexture("jagged-rocky-ground_albedo"),
+        requireTexture("mud_albedo"),         requireTexture("wavy-sand_albedo"),
+        requireTexture("pineneedles_albedo"), requireTexture("jagged-rocky-ground_albedo"),
         requireTexture("snowdrift1_albedo"),
     };
     const std::array<std::uint32_t, kTerrainMaterialLayerCount> normalIndices{
-        requireTexture("mud_normal"),
-        requireTexture("wavy-sand_normal"),
-        requireTexture("pineneedles_normal"),
-        requireTexture("jagged-rocky-ground_normal"),
+        requireTexture("mud_normal"),           requireTexture("wavy-sand_normal"),
+        requireTexture("pineneedles_normal"),   requireTexture("jagged-rocky-ground_normal"),
         requireTexture("snowdrift1_normal-dx"),
     };
     const std::array<std::uint32_t, kTerrainMaterialLayerCount> roughnessIndices{
-        requireTexture("mud_roughness"),
-        requireTexture("wavy-sand_roughness"),
-        requireTexture("pineneedles_roughness"),
-        requireTexture("jagged-rocky-ground_roughness"),
+        requireTexture("mud_roughness"),         requireTexture("wavy-sand_roughness"),
+        requireTexture("pineneedles_roughness"), requireTexture("jagged-rocky-ground_roughness"),
         requireTexture("snowdrift1_roughness"),
     };
     const std::array<std::uint32_t, kTerrainMaterialLayerCount> aoIndices{
-        requireTexture("mud_ao"),
-        requireTexture("wavy-sand_ao"),
-        requireTexture("pineneedles_ao"),
-        requireTexture("jagged-rocky-ground_ao"),
+        requireTexture("mud_ao"),         requireTexture("wavy-sand_ao"),
+        requireTexture("pineneedles_ao"), requireTexture("jagged-rocky-ground_ao"),
         requireTexture("snowdrift1_ao"),
     };
 
-    const auto createArray = [&](std::span<const std::uint32_t> textureIndices,
-                                 RuntimeAssets::TextureFormat expectedFormat,
-                                 const char* label) -> SDL_GPUTexture* {
-        const RuntimeAssets::TextureRecord& reference = texBin.textures[textureIndices.front()];
+    const auto createArray = [&](std::span<const std::uint32_t> textureIndices, RuntimeAssets::TextureFormat expectedFormat,
+                                 const char *label) -> SDL_GPUTexture * {
+        const RuntimeAssets::TextureRecord &reference = texBin.textures[textureIndices.front()];
         if (reference.format != static_cast<std::uint32_t>(expectedFormat) ||
-            reference.dimension != static_cast<std::uint32_t>(RuntimeAssets::TextureDimension::Texture2D) ||
-            reference.layerCount != 1u)
+            reference.dimension != static_cast<std::uint32_t>(RuntimeAssets::TextureDimension::Texture2D) || reference.layerCount != 1u)
         {
             throw std::runtime_error(std::string("Terrain PBR ") + label + " texture metadata is not the expected format.");
         }
 
         const RuntimeAssets::TextureFormat runtimeFormat = static_cast<RuntimeAssets::TextureFormat>(reference.format);
         const SDL_GPUTextureFormat gpuFormat = textureFormatFromRuntimeFormat(runtimeFormat);
-        if (!SDL_GPUTextureSupportsFormat(
-                m_device,
-                gpuFormat,
-                SDL_GPU_TEXTURETYPE_2D_ARRAY,
-                SDL_GPU_TEXTUREUSAGE_SAMPLER))
+        if (!SDL_GPUTextureSupportsFormat(m_device, gpuFormat, SDL_GPU_TEXTURETYPE_2D_ARRAY, SDL_GPU_TEXTUREUSAGE_SAMPLER))
         {
             throw std::runtime_error(std::string("SDL GPU device does not support terrain PBR ") + label + " texture format.");
         }
@@ -2278,13 +2145,9 @@ void QuadtreeMeshRenderer::loadPbrTextures()
         std::uint64_t totalTransferBytes = 0u;
         for (const std::uint32_t textureIndex : textureIndices)
         {
-            const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndex];
-            if (record.width != reference.width ||
-                record.height != reference.height ||
-                record.layerCount != reference.layerCount ||
-                record.mipCount != reference.mipCount ||
-                record.format != reference.format ||
-                record.dimension != reference.dimension)
+            const RuntimeAssets::TextureRecord &record = texBin.textures[textureIndex];
+            if (record.width != reference.width || record.height != reference.height || record.layerCount != reference.layerCount ||
+                record.mipCount != reference.mipCount || record.format != reference.format || record.dimension != reference.dimension)
             {
                 throw std::runtime_error(std::string("Terrain PBR ") + label + " textures do not share a consistent array layout.");
             }
@@ -2300,7 +2163,7 @@ void QuadtreeMeshRenderer::loadPbrTextures()
         textureInfo.layer_count_or_depth = static_cast<Uint32>(textureIndices.size());
         textureInfo.num_levels = reference.mipCount;
         textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
-        SDL_GPUTexture* texture = SDL_CreateGPUTexture(m_device, &textureInfo);
+        SDL_GPUTexture *texture = SDL_CreateGPUTexture(m_device, &textureInfo);
         if (texture == nullptr)
         {
             throwSdlError(("Failed to create terrain PBR " + std::string(label) + " texture array.").c_str());
@@ -2309,27 +2172,27 @@ void QuadtreeMeshRenderer::loadPbrTextures()
         SDL_GPUTransferBufferCreateInfo transferInfo{};
         transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
         transferInfo.size = static_cast<Uint32>(totalTransferBytes);
-        SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
+        SDL_GPUTransferBuffer *transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
         if (transferBuffer == nullptr)
         {
             SDL_ReleaseGPUTexture(m_device, texture);
             throwSdlError(("Failed to create terrain PBR " + std::string(label) + " transfer buffer.").c_str());
         }
 
-        std::byte* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(m_device, transferBuffer, false));
+        std::byte *mapped = static_cast<std::byte *>(SDL_MapGPUTransferBuffer(m_device, transferBuffer, false));
         std::uint64_t transferOffset = 0u;
         std::array<std::uint64_t, kTerrainMaterialLayerCount> textureOffsets{};
         for (std::size_t layerIndex = 0; layerIndex < textureIndices.size(); ++layerIndex)
         {
-            const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndices[layerIndex]];
+            const RuntimeAssets::TextureRecord &record = texBin.textures[textureIndices[layerIndex]];
             textureOffsets[layerIndex] = transferOffset;
-            const std::byte* sourceBytes = texBin.pixelData.data() + record.dataOffset;
+            const std::byte *sourceBytes = texBin.pixelData.data() + record.dataOffset;
             std::memcpy(mapped + transferOffset, sourceBytes, static_cast<std::size_t>(record.dataUncompressedSize));
             transferOffset += record.dataUncompressedSize;
         }
         SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
 
-        SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
+        SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
         if (commandBuffer == nullptr)
         {
             SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
@@ -2337,7 +2200,7 @@ void QuadtreeMeshRenderer::loadPbrTextures()
             throwSdlError(("Failed to acquire command buffer for terrain PBR " + std::string(label) + " upload.").c_str());
         }
 
-        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+        SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
         if (copyPass == nullptr)
         {
             SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
@@ -2347,7 +2210,7 @@ void QuadtreeMeshRenderer::loadPbrTextures()
 
         for (std::size_t layerIndex = 0; layerIndex < textureIndices.size(); ++layerIndex)
         {
-            const RuntimeAssets::TextureRecord& record = texBin.textures[textureIndices[layerIndex]];
+            const RuntimeAssets::TextureRecord &record = texBin.textures[textureIndices[layerIndex]];
             std::uint64_t sourceOffset = textureOffsets[layerIndex];
             for (std::uint32_t mipIndex = 0; mipIndex < record.mipCount; ++mipIndex)
             {
@@ -2415,29 +2278,20 @@ void QuadtreeMeshRenderer::destroyPbrTextures()
     }
 }
 
-void QuadtreeMeshRenderer::sortInstances(InstanceData* instances, std::uint16_t instanceCount)
+void QuadtreeMeshRenderer::sortInstances(InstanceData *instances, std::uint16_t instanceCount)
 {
     if (instanceCount <= 1)
     {
         return;
     }
 
-    std::sort(
-        instances,
-        instances + instanceCount,
-        [](const InstanceData& left, const InstanceData& right)
-        {
-            return instanceDistanceSquared(left) < instanceDistanceSquared(right);
-        });
+    std::sort(instances, instances + instanceCount, [](const InstanceData &left, const InstanceData &right) {
+        return instanceDistanceSquared(left) < instanceDistanceSquared(right);
+    });
 }
 
-std::uint32_t QuadtreeMeshRenderer::packMetadata(
-    std::uint16_t sliceIndex,
-    std::uint8_t scalePow,
-    std::uint8_t edgeIndex)
+std::uint32_t QuadtreeMeshRenderer::packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow, std::uint8_t edgeIndex)
 {
-    return
-        static_cast<std::uint32_t>(sliceIndex) |
-        (static_cast<std::uint32_t>(scalePow) << 16U) |
-        (static_cast<std::uint32_t>(edgeIndex & 0x3U) << 24U);
+    return static_cast<std::uint32_t>(sliceIndex) | (static_cast<std::uint32_t>(scalePow) << 16U) |
+           (static_cast<std::uint32_t>(edgeIndex & 0x3U) << 24U);
 }

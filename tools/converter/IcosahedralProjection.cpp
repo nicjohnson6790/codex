@@ -21,6 +21,16 @@ Vertex3 normalize(const Vertex3 v)
     return {v.x / length, v.y / length, v.z / length};
 }
 
+Vertex3 cross(const Vertex3 a, const Vertex3 b)
+{
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+double dot(const Vertex3 a, const Vertex3 b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
 Vertex3 inverseAiroceanRotation(double longitude, double latitude)
 {
     const double cosPhi = std::cos(latitude);
@@ -207,6 +217,43 @@ IcosahedralProjection::IcosahedralProjection()
             m_bounds.maxX = std::max(m_bounds.maxX, p.x);
             m_bounds.maxY = std::max(m_bounds.maxY, p.y);
         }
+}
+
+bool IcosahedralProjection::forward(double longitudeDegrees, double latitudeDegrees, double* xMeters, double* yMeters) const
+{
+    if (xMeters == nullptr || yMeters == nullptr || !std::isfinite(longitudeDegrees) || !std::isfinite(latitudeDegrees) ||
+        latitudeDegrees < -90.0 || latitudeDegrees > 90.0)
+        return false;
+
+    const double longitude = longitudeDegrees * kDegreesToRadians;
+    const double latitude = latitudeDegrees * kDegreesToRadians;
+    const double cosLatitude = std::cos(latitude);
+    const Vertex3 point{std::cos(longitude) * cosLatitude, std::sin(longitude) * cosLatitude, std::sin(latitude)};
+    constexpr double epsilon = 1e-10;
+    for (const Face &face : m_faces)
+    {
+        const Vertex3 a{face.sphere[0].x, face.sphere[0].y, face.sphere[0].z};
+        const Vertex3 b{face.sphere[1].x, face.sphere[1].y, face.sphere[1].z};
+        const Vertex3 c{face.sphere[2].x, face.sphere[2].y, face.sphere[2].z};
+        const double determinant = dot(a, cross(b, c));
+        if (std::abs(determinant) <= epsilon)
+            continue;
+        const double q0 = dot(point, cross(b, c)) / determinant;
+        const double q1 = dot(a, cross(point, c)) / determinant;
+        const double q2 = dot(a, cross(b, point)) / determinant;
+        if (q0 < -epsilon || q1 < -epsilon || q2 < -epsilon)
+            continue;
+        const double sum = q0 + q1 + q2;
+        if (std::abs(sum) <= epsilon)
+            continue;
+        const double w0 = q0 / sum;
+        const double w1 = q1 / sum;
+        const double w2 = q2 / sum;
+        *xMeters = w0 * face.atlas[0].x + w1 * face.atlas[1].x + w2 * face.atlas[2].x;
+        *yMeters = w0 * face.atlas[0].y + w1 * face.atlas[1].y + w2 * face.atlas[2].y;
+        return true;
+    }
+    return false;
 }
 
 bool IcosahedralProjection::inverse(double xMeters, double yMeters, double* longitudeDegrees, double* latitudeDegrees) const

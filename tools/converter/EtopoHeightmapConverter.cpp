@@ -325,6 +325,21 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
     }
     if (validProjectionTests < 100)
     { if (error) *error = "icosahedral projection coverage self-test failed"; return false; }
+    double japanX = 0.0, japanY = 0.0, japanLongitude = 0.0, japanLatitude = 0.0;
+    if (!projection.forward(139.6917, 35.6895, &japanX, &japanY) ||
+        !projection.inverse(japanX, japanY, &japanLongitude, &japanLatitude) ||
+        std::abs(japanLongitude - 139.6917) > 1e-6 || std::abs(japanLatitude - 35.6895) > 1e-6)
+    { if (error) *error = "icosahedral projection Japan round-trip self-test failed"; return false; }
+    if (config.verbose)
+    {
+        double northX = 0.0, northY = 0.0, eastX = 0.0, eastY = 0.0;
+        if (!projection.forward(139.6917, 36.6895, &northX, &northY) ||
+            !projection.forward(140.6917, 35.6895, &eastX, &eastY))
+        { if (error) *error = "icosahedral projection local-basis check failed"; return false; }
+        std::cout << "Tokyo projection: " << japanX << ", " << japanY << " m; local north vector: "
+                  << northX - japanX << ", " << northY - japanY << " m/degree; local east vector: " << eastX - japanX << ", "
+                  << eastY - japanY << " m/degree\n";
+    }
     if (config.selfTestOnly)
     {
         std::cout << "ETOPO self-tests passed: exhaustive filter round-trip and projection origin/bounds\n";
