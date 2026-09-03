@@ -31,4 +31,5 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 - The rendering architecture document now also covers the offline asset boundary and multiplayer render-emission boundary.
 - Shared asset-cache/generation-queue infrastructure and migrations are implemented locally; focused coverage is in `tests/AssetResidencyTests.cpp` and built by default as `asset_residency_tests`.
 - Runtime heightmaps now compose cached 256x256 ETOPO source tiles through contribution descriptors; repeated placements share source residency and remain additive.
+- Terrain materials, water FFT sampling, foam detail, and terrain caustics use CPU-computed periodic phases from `Position` via `src/PeriodicWorldPhase.hpp`; keep repeating shader coordinates render-origin-relative rather than reconstructing absolute X/Z floats.
 - Add concrete unfinished work here only when it must survive into another session; include the relevant file or subsystem and the next useful action.

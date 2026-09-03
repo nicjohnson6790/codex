@@ -1,4 +1,5 @@
 #include "QuadtreeMeshRenderer.hpp"
+#include "PeriodicWorldPhase.hpp"
 
 #include "AppConfig.hpp"
 #include "PerformanceCapture.hpp"
@@ -1468,11 +1469,10 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
     TerrainUniforms uniforms{};
     uniforms.viewProjection = viewProjection;
     const glm::vec3 sunDirection = lightingSystem.sunDirection();
-    const glm::dvec3 cameraWorld = m_activeCameraPosition.worldPosition();
     uniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     uniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
     uniforms.cameraWorldAndTime =
-        glm::vec4(static_cast<float>(cameraWorld.x), static_cast<float>(cameraWorld.y), static_cast<float>(cameraWorld.z), timeSeconds);
+        glm::vec4(0.0f, static_cast<float>(m_activeCameraPosition.localPosition().y), 0.0f, timeSeconds);
     const bool causticsEnabled = m_waterSettings.enabled && m_waterSettings.drawTerrainCaustics;
     uniforms.waterCausticsParams =
         glm::vec4(m_waterSettings.waterLevel, causticsEnabled ? 1.0f : 0.0f, static_cast<float>(m_waterSettings.cascadeCount),
@@ -1488,6 +1488,33 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
     uniforms.waterCausticsRotationParams =
         glm::vec4(std::cos(m_waterSettings.causticsRotationA), std::sin(m_waterSettings.causticsRotationA),
                   std::cos(m_waterSettings.causticsRotationB), std::sin(m_waterSettings.causticsRotationB));
+    const auto storePhase = [](glm::vec4& packed, std::uint32_t index, const glm::dvec2& phase) {
+        (&packed.x)[index * 2u] = static_cast<float>(phase.x);
+        (&packed.x)[index * 2u + 1u] = static_cast<float>(phase.y);
+    };
+    constexpr std::array<float, 4> terrainPeriods{14.0f, 8.0f, 18.0f, 20.0f};
+    for (std::uint32_t index = 0; index < terrainPeriods.size(); ++index)
+    {
+        storePhase(index < 2u ? uniforms.terrainOriginPhasesA : uniforms.terrainOriginPhasesB,
+                   index % 2u, WorldPhase::periodicWorldPhase(
+                       m_activeCameraPosition, static_cast<double>(1.0f / terrainPeriods[index])));
+    }
+    const float scaleA = uniforms.waterCausticsPatternParams.x;
+    const float scaleB = uniforms.waterCausticsPatternParams.y;
+    const glm::dmat2 transformA(
+        static_cast<double>(uniforms.waterCausticsRotationParams.x * scaleA),
+        static_cast<double>(-uniforms.waterCausticsRotationParams.y * scaleA),
+        static_cast<double>(uniforms.waterCausticsRotationParams.y * scaleA),
+        static_cast<double>(uniforms.waterCausticsRotationParams.x * scaleA));
+    const glm::dmat2 transformB(
+        static_cast<double>(uniforms.waterCausticsRotationParams.z * scaleB),
+        static_cast<double>(-uniforms.waterCausticsRotationParams.w * scaleB),
+        static_cast<double>(uniforms.waterCausticsRotationParams.w * scaleB),
+        static_cast<double>(uniforms.waterCausticsRotationParams.z * scaleB));
+    storePhase(uniforms.waterCausticsOriginPhases, 0u,
+               WorldPhase::periodicWorldPhase(m_activeCameraPosition, transformA));
+    storePhase(uniforms.waterCausticsOriginPhases, 1u,
+               WorldPhase::periodicWorldPhase(m_activeCameraPosition, transformB));
     for (std::uint32_t cascadeIndex = 0; cascadeIndex < std::min(m_waterSettings.cascadeCount, AppConfig::Water::kMaxCascadeCount);
          ++cascadeIndex)
     {
@@ -1500,6 +1527,9 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
         {
             (&uniforms.waterCascadeWorldSizesB.x)[cascadeIndex - 4u] = worldSize;
         }
+        storePhase(cascadeIndex < 2u ? uniforms.waterCascadeOriginPhasesA : uniforms.waterCascadeOriginPhasesB,
+                   cascadeIndex % 2u, WorldPhase::periodicWorldPhase(
+                       m_activeCameraPosition, static_cast<double>(1.0f / worldSize)));
     }
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));

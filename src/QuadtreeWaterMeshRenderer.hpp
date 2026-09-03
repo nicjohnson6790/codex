@@ -58,6 +58,10 @@ public:
         glm::vec4 midWaterColor{ 0.0f };
         glm::vec4 deepWaterColor{ 0.0f };
         glm::vec4 waterDepthColorParams{ 0.0f };
+        glm::vec4 cascadeOriginPhasesA{ 0.0f };
+        glm::vec4 cascadeOriginPhasesB{ 0.0f };
+        glm::vec4 foamOriginPhasesA{ 0.0f };
+        glm::vec4 foamOriginPhasesB{ 0.0f };
     };
 
     QuadtreeWaterMeshRenderer() = default;

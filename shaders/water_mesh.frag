@@ -38,6 +38,10 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 midWaterColor;
     vec4 deepWaterColor;
     vec4 waterDepthColorParams;
+    vec4 cascadeOriginPhasesA;
+    vec4 cascadeOriginPhasesB;
+    vec4 foamOriginPhasesA;
+    vec4 foamOriginPhasesB;
 } water;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
@@ -69,6 +73,14 @@ float cascadeWorldSize(uint cascadeIndex)
     }
 
     return water.cascadeWorldSizesB[cascadeIndex - 4u];
+}
+
+vec2 cascadeOriginPhase(uint cascadeIndex)
+{
+    if (cascadeIndex == 0u) return water.cascadeOriginPhasesA.xy;
+    if (cascadeIndex == 1u) return water.cascadeOriginPhasesA.zw;
+    if (cascadeIndex == 2u) return water.cascadeOriginPhasesB.xy;
+    return water.cascadeOriginPhasesB.zw;
 }
 
 float saturate(float value)
@@ -210,7 +222,7 @@ float phaseSchlick(float viewLightDot, float anisotropy)
 
 void main()
 {
-    vec2 worldXZ = water.cameraAndTime.xy + fragWorldPosition.xz;
+    vec2 localXZ = fragWorldPosition.xz;
     uint cascadeCount = uint(max(water.waterParams.w, 0.0));
     float metersPerPixelAtView = metersPerPixel(fragViewDistance);
     vec2 slope = vec2(0.0);
@@ -250,7 +262,7 @@ void main()
             continue;
         }
 
-        vec2 uv = fract(worldXZ / worldSize);
+        vec2 uv = cascadeOriginPhase(cascadeIndex) + localXZ / worldSize;
         vec4 slopeSample = texture(slopeTexture, vec3(uv, float(cascadeIndex)));
         slope += slopeSample.xy * detailWeight;
         if (evaluateFoam)
@@ -280,11 +292,12 @@ void main()
             }
             if (!historyOffsetReady)
             {
-                historyNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
+                historyNoiseSample = texture(foamDetailNoiseTexture,
+                    water.foamOriginPhasesA.xy + localXZ * water.foamDetailShape.z);
                 historyOffsetWorld = (historyNoiseSample.rg - vec2(0.5)) * water.foamDetailShape.w;
                 historyOffsetReady = true;
             }
-            vec2 historyUv = (worldXZ + historyOffsetWorld) / worldSize;
+            vec2 historyUv = cascadeOriginPhase(cascadeIndex) + (localXZ + historyOffsetWorld) / worldSize;
             float cascadeFoam = saturate(texture(foamTexture, vec3(historyUv, float(cascadeIndex))).r);
             foamCoverage = max(
                 foamCoverage,
@@ -301,8 +314,9 @@ void main()
     {
         vec4 worldNoiseSample = historyOffsetReady
             ? historyNoiseSample
-            : texture(foamDetailNoiseTexture, worldXZ * water.foamDetailShape.z);
-        vec4 breakupNoiseSample = texture(foamDetailNoiseTexture, worldXZ * water.foamDetailBreakup.y);
+            : texture(foamDetailNoiseTexture, water.foamOriginPhasesA.xy + localXZ * water.foamDetailShape.z);
+        vec4 breakupNoiseSample = texture(foamDetailNoiseTexture,
+            water.foamOriginPhasesA.zw + localXZ * water.foamDetailBreakup.y);
         vec2 detailOffsetWorld = (worldNoiseSample.ba - vec2(0.5)) * water.foamDetailBreakup.x;
         float historySignal = foamCoverage;
         float decaySignal = 1.0 - historySignal;
@@ -317,7 +331,8 @@ void main()
         vec2 evolvedRidgeRange = vec2(
             mix(water.foamDetailRidges.x, water.foamDetailRidges.z, evolutionT),
             mix(water.foamDetailRidges.y, water.foamDetailRidges.w, evolutionT));
-        vec2 detailBaseUv = (worldXZ + detailOffsetWorld) / max(water.foamDetailShape.x, 0.0001);
+        vec2 detailBaseUv = water.foamOriginPhasesB.xy +
+            (localXZ + detailOffsetWorld) / max(water.foamDetailShape.x, 0.0001);
         vec2 detailUv =
             detailBaseUv +
             (slope * 0.022);

@@ -65,6 +65,11 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         glm::vec4 waterCausticsRidgeParamsB{0.0f};
         glm::vec4 waterCausticsDecodeParams{0.0f};
         glm::vec4 waterCausticsRotationParams{0.0f};
+        glm::vec4 terrainOriginPhasesA{0.0f};
+        glm::vec4 terrainOriginPhasesB{0.0f};
+        glm::vec4 waterCascadeOriginPhasesA{0.0f};
+        glm::vec4 waterCascadeOriginPhasesB{0.0f};
+        glm::vec4 waterCausticsOriginPhases{0.0f};
     };
 
     QuadtreeMeshRenderer() = default;

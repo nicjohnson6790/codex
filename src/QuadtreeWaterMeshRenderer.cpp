@@ -1,4 +1,5 @@
 #include "QuadtreeWaterMeshRenderer.hpp"
+#include "PeriodicWorldPhase.hpp"
 
 #include "AppConfig.hpp"
 #include "PerformanceCapture.hpp"
@@ -1527,11 +1528,10 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     WaterUniforms uniforms{};
     uniforms.viewProjection = viewProjection;
 
-    const glm::dvec3 cameraWorld = m_activeCameraPosition.worldPosition();
     uniforms.cameraAndTime = glm::vec4(
-        static_cast<float>(cameraWorld.x),
-        static_cast<float>(cameraWorld.z),
-        static_cast<float>(cameraWorld.y),
+        0.0f,
+        0.0f,
+        static_cast<float>(m_activeCameraPosition.localPosition().y),
         timeSeconds);
     uniforms.waterParams = glm::vec4(
         m_settings.waterLevel,
@@ -1611,6 +1611,17 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
         std::max(m_settings.foamDetailBreakupScale, 0.0001f),
         std::max(m_settings.foamDetailBreakupStrength, 0.0f),
         0.0f);
+    const auto storePhase = [](glm::vec4& packed, std::uint32_t index, const glm::dvec2& phase) {
+        (&packed.x)[index * 2u] = static_cast<float>(phase.x);
+        (&packed.x)[index * 2u + 1u] = static_cast<float>(phase.y);
+    };
+    storePhase(uniforms.foamOriginPhasesA, 0u,
+               WorldPhase::periodicWorldPhase(m_activeCameraPosition, static_cast<double>(uniforms.foamDetailShape.z)));
+    storePhase(uniforms.foamOriginPhasesA, 1u,
+               WorldPhase::periodicWorldPhase(m_activeCameraPosition, static_cast<double>(uniforms.foamDetailBreakup.y)));
+    storePhase(uniforms.foamOriginPhasesB, 0u,
+               WorldPhase::periodicWorldPhase(
+                   m_activeCameraPosition, static_cast<double>(1.0f / uniforms.foamDetailShape.x)));
     uniforms.foamEvolutionParams = glm::vec4(
         foamEvolutionStart,
         std::max(foamEvolutionEnd, foamEvolutionStart + 1.0e-4f),
@@ -1668,6 +1679,9 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
             (&uniforms.cascadeShallowDampingB.x)[cascadeIndex - 4u] = shallowDamping;
             (&uniforms.cascadeShallowDepthB.x)[cascadeIndex - 4u] = shallowDepthMeters;
         }
+        storePhase(cascadeIndex < 2u ? uniforms.cascadeOriginPhasesA : uniforms.cascadeOriginPhasesB,
+                   cascadeIndex % 2u, WorldPhase::periodicWorldPhase(
+                       m_activeCameraPosition, static_cast<double>(1.0f / worldSize)));
     }
 
     return uniforms;

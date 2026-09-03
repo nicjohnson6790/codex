@@ -15,6 +15,11 @@ layout(set=1, binding=0) uniform TerrainUniforms
     vec4 waterCausticsRidgeParamsB;
     vec4 waterCausticsDecodeParams;
     vec4 waterCausticsRotationParams;
+    vec4 terrainOriginPhasesA;
+    vec4 terrainOriginPhasesB;
+    vec4 waterCascadeOriginPhasesA;
+    vec4 waterCascadeOriginPhasesB;
+    vec4 waterCausticsOriginPhases;
 } terrain;
 
 layout(set=0, binding=0, std430) readonly buffer HeightmapBuffer

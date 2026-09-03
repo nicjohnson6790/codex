@@ -38,6 +38,10 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 midWaterColor;
     vec4 deepWaterColor;
     vec4 waterDepthColorParams;
+    vec4 cascadeOriginPhasesA;
+    vec4 cascadeOriginPhasesB;
+    vec4 foamOriginPhasesA;
+    vec4 foamOriginPhasesB;
 } water;
 
 layout(set=0, binding=0) uniform sampler2DArray displacementTexture;
@@ -90,6 +94,14 @@ float cascadeShallowDamping(uint cascadeIndex)
     }
 
     return water.cascadeShallowDampingB[cascadeIndex - 4u];
+}
+
+vec2 cascadeOriginPhase(uint cascadeIndex)
+{
+    if (cascadeIndex == 0u) return water.cascadeOriginPhasesA.xy;
+    if (cascadeIndex == 1u) return water.cascadeOriginPhasesA.zw;
+    if (cascadeIndex == 2u) return water.cascadeOriginPhasesB.xy;
+    return water.cascadeOriginPhasesB.zw;
 }
 
 float cascadeShallowDepth(uint cascadeIndex)
@@ -154,7 +166,6 @@ void main()
         instance.position.y + waterLevel,
         instance.position.z + localMeters.y);
     float viewDistance = length(position);
-    vec2 worldXZ = water.cameraAndTime.xy + position.xz;
     float metersPerPixelAtView = metersPerPixel(viewDistance);
 
     float localDepth = water.depthEffectParams.x;
@@ -186,7 +197,7 @@ void main()
             continue;
         }
 
-        vec2 uv = fract(worldXZ / worldSize);
+        vec2 uv = cascadeOriginPhase(cascadeIndex) + position.xz / worldSize;
         float dampingStrength = max(cascadeShallowDamping(cascadeIndex), 0.0);
         float shallowFade = hasTerrainSlice ? cascadeShallowFade(cascadeIndex, localDepth) : 1.0;
         float cascadeFade = mix(1.0, shallowFade, clamp(dampingStrength, 0.0, 8.0));

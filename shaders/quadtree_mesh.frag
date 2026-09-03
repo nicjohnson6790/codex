@@ -15,6 +15,11 @@ layout(set=3, binding=0) uniform TerrainUniforms
     vec4 waterCausticsRidgeParamsB;
     vec4 waterCausticsDecodeParams;
     vec4 waterCausticsRotationParams;
+    vec4 terrainOriginPhasesA;
+    vec4 terrainOriginPhasesB;
+    vec4 waterCascadeOriginPhasesA;
+    vec4 waterCascadeOriginPhasesB;
+    vec4 waterCausticsOriginPhases;
 } terrain;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
@@ -71,22 +76,30 @@ float geometrySmith(float nDotV, float nDotL, float roughness)
     return geometrySchlickGgx(nDotV, roughness) * geometrySchlickGgx(nDotL, roughness);
 }
 
-vec2 terrainUv(vec2 worldXZ, float layer)
+vec2 terrainOriginPhase(float layer)
 {
-    float texelWorldSize = 14.0;
     if (layer == kPineLayer)
     {
-        texelWorldSize = 8.0;
+        return terrain.terrainOriginPhasesA.zw;
     }
     else if (layer == kRockLayer)
     {
-        texelWorldSize = 18.0;
+        return terrain.terrainOriginPhasesB.xy;
     }
     else if (layer == kSnowLayer)
     {
-        texelWorldSize = 20.0;
+        return terrain.terrainOriginPhasesB.zw;
     }
-    return worldXZ / texelWorldSize;
+    return terrain.terrainOriginPhasesA.xy;
+}
+
+vec2 terrainUv(vec2 localXZ, float layer)
+{
+    float texelWorldSize = 14.0;
+    if (layer == kPineLayer) texelWorldSize = 8.0;
+    else if (layer == kRockLayer) texelWorldSize = 18.0;
+    else if (layer == kSnowLayer) texelWorldSize = 20.0;
+    return terrainOriginPhase(layer) + localXZ / texelWorldSize;
 }
 
 vec4 terrainLayerWeights(float height, vec3 normal, out float snowWeightOut)
@@ -199,6 +212,14 @@ float cascadeWorldSize(uint cascadeIndex)
     return terrain.waterCascadeWorldSizesB[cascadeIndex - 4u];
 }
 
+vec2 cascadeOriginPhase(uint cascadeIndex)
+{
+    if (cascadeIndex == 0u) return terrain.waterCascadeOriginPhasesA.xy;
+    if (cascadeIndex == 1u) return terrain.waterCascadeOriginPhasesA.zw;
+    if (cascadeIndex == 2u) return terrain.waterCascadeOriginPhasesB.xy;
+    return terrain.waterCascadeOriginPhasesB.zw;
+}
+
 void sampleWaterDrivenCausticsState(
     vec2 worldXZ,
     out vec2 displacementWarp,
@@ -214,7 +235,7 @@ void sampleWaterDrivenCausticsState(
     for (uint cascadeIndex = 0u; cascadeIndex < cascadeCount; ++cascadeIndex)
     {
         float worldSize = max(cascadeWorldSize(cascadeIndex), 1.0);
-        vec2 uv = fract(worldXZ / worldSize);
+        vec2 uv = cascadeOriginPhase(cascadeIndex) + worldXZ / worldSize;
         vec3 displacement = texture(displacementTexture, vec3(uv, float(cascadeIndex))).xyz;
         vec2 slope = texture(slopeTexture, vec3(uv, float(cascadeIndex))).xy;
         float detailWeight = 1.0 - smoothstep(500.0, 8000.0, worldSize);
@@ -233,7 +254,7 @@ void sampleWaterDrivenCausticsState(
     }
 }
 
-float causticsPattern(vec2 uv, vec2 waterWarp, float focusSignal)
+float causticsPattern(vec2 localXZ, vec2 waterWarp, float focusSignal)
 {
     mat2 rotateA = mat2(
         terrain.waterCausticsRotationParams.x,
@@ -245,8 +266,10 @@ float causticsPattern(vec2 uv, vec2 waterWarp, float focusSignal)
         -terrain.waterCausticsRotationParams.w,
         terrain.waterCausticsRotationParams.w,
         terrain.waterCausticsRotationParams.z);
-    vec2 uvA = (rotateA * (uv + (waterWarp * 0.85))) * terrain.waterCausticsPatternParams.x;
-    vec2 uvB = (rotateB * (uv - (waterWarp * 1.05))) * terrain.waterCausticsPatternParams.y;
+    vec2 uvA = terrain.waterCausticsOriginPhases.xy +
+        (rotateA * (localXZ + (waterWarp * 0.85))) * terrain.waterCausticsPatternParams.x;
+    vec2 uvB = terrain.waterCausticsOriginPhases.zw +
+        (rotateB * (localXZ - (waterWarp * 1.05))) * terrain.waterCausticsPatternParams.y;
 
     float sdfA = (texture(causticsTextureA, uvA).r - 0.5) * terrain.waterCausticsDecodeParams.x;
     float sdfB = (texture(causticsTextureA, uvB).r - 0.5) * terrain.waterCausticsDecodeParams.y;
@@ -260,13 +283,13 @@ float causticsPattern(vec2 uv, vec2 waterWarp, float focusSignal)
 
 void main()
 {
-    vec3 worldPosition = terrain.cameraWorldAndTime.xyz + fragLocalPosition;
+    float worldHeight = terrain.cameraWorldAndTime.y + fragLocalPosition.y;
     vec3 geometricNormal = normalize(fragWorldNormal);
     vec3 albedo = vec3(0.0);
     vec3 normal = geometricNormal;
     float roughness = 0.8;
     float ao = 1.0;
-    sampleTerrainMaterial(worldPosition.xz, worldPosition.y, geometricNormal, albedo, normal, roughness, ao);
+    sampleTerrainMaterial(fragLocalPosition.xz, worldHeight, geometricNormal, albedo, normal, roughness, ao);
 
     vec3 sunDirection = normalize(terrain.sunDirectionIntensity.xyz);
     vec3 viewDirection = normalize(-fragLocalPosition);
@@ -291,22 +314,22 @@ void main()
 
     if (terrain.waterCausticsParams.y > 0.5 &&
         fragAllowCaustics != 0u &&
-        worldPosition.y < terrain.waterCausticsParams.x &&
+        worldHeight < terrain.waterCausticsParams.x &&
         abs(geometricNormal.y) > terrain.waterCausticsRidgeParamsB.z)
     {
-        float waterDepth = terrain.waterCausticsParams.x - worldPosition.y;
-        float shoreFade = smoothstep(0.8, 3.0, waterDepth);
+        float waterDepth = terrain.waterCausticsParams.x - worldHeight;
+        float shoreFade = smoothstep(0.2, 1.25, waterDepth);
         float depthFade = 1.0 - smoothstep(5.0, 16.0, waterDepth);
         float sunFade = smoothstep(0.08, 0.55, sunDirection.y);
         float slopeFade = mix(0.55, 1.0, abs(geometricNormal.y));
         vec2 displacementWarp = vec2(0.0);
         vec2 slopeWarp = vec2(0.0);
         float focusSignal = 0.0;
-        sampleWaterDrivenCausticsState(worldPosition.xz, displacementWarp, slopeWarp, focusSignal);
+        sampleWaterDrivenCausticsState(fragLocalPosition.xz, displacementWarp, slopeWarp, focusSignal);
         vec2 waterWarp =
             (displacementWarp * terrain.waterCausticsPatternParams.z) +
             (slopeWarp * terrain.waterCausticsPatternParams.w);
-        float caustics = causticsPattern(worldPosition.xz, waterWarp, focusSignal);
+        float caustics = causticsPattern(fragLocalPosition.xz, waterWarp, focusSignal);
         float causticsStrength = caustics * shoreFade * depthFade * sunFade * slopeFade * terrain.waterCausticsParams.w;
         litColor += terrain.sunColorAmbient.rgb * terrain.sunDirectionIntensity.w * causticsStrength;
     }

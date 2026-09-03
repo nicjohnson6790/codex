@@ -393,6 +393,11 @@ if (CODEX_BUILD_TESTS)
     target_include_directories(heightmap_dataset_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
     target_link_libraries(heightmap_dataset_tests PRIVATE lz4_local SDL3::Headers)
     add_test(NAME heightmap_dataset_tests COMMAND $<TARGET_FILE:heightmap_dataset_tests>)
+
+    add_executable(periodic_world_phase_tests tests/PeriodicWorldPhaseTests.cpp)
+    set_target_properties(periodic_world_phase_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
+    target_include_directories(periodic_world_phase_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
+    add_test(NAME periodic_world_phase_tests COMMAND $<TARGET_FILE:periodic_world_phase_tests>)
 endif()
 
 if (TERRAIN_SANDBOX_ENABLE_STEAM)
