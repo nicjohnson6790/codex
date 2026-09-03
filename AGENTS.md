@@ -22,6 +22,7 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 - The ETOPO converter is an explicit offline operation, not part of the normal asset build. Its format is version 2 and its fixed Airocean projection is version 3.
 - ETOPO is the initial runtime terrain source. `WorldGridQuadtreeHeightmapManager` owns tiled source residency, affine source placements, retained final-to-source references, and composed-final scheduling; `QuadtreeMeshRenderer` retains all GPU resource ownership. User-created heightmap layers remain future work.
 - Terrain heightmaps, canonical foliage, canopy, and nearby decoded foliage use the shared `FixedAssetCache` / `GenerationQueue` residency protocol in `src/AssetResidency.hpp`; preserve transactional queue-before-cache admission, ready-only request results, manager-owned shared fences, and handle-based stale-result retirement. Nearby residency is owned by `WorldGridNearbyFoliageManager`, not its renderer.
+- `FixedAssetCache` lookup storage is `bucketCount * entriesPerBucket`, with a cache-capacity overflow list consulted only for buckets marked overflowed. Do not replace this with bounded linear probing plus unconditional full-cache fallback scans.
 - Preserve unrelated working-tree changes and use `apply_patch` for source/text edits.
 
 ## Session handoff notes

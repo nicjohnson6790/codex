@@ -72,7 +72,7 @@ int main()
     cache.markReady(0);
     cache.assign(1, 20);
     cache.markReady(1);
-    assert(cache.find(20) == 1); // Full-cache fallback after the forced collision.
+    assert(cache.find(20) == 1); // Bucket overflow fallback after the forced collision.
     assert(cache.hashTableSize() == 1 && cache.lookupDepth() == 1);
     assert(cache.hashOccupiedCount() == 1 && cache.hashCollisionCount() == 1);
     assert(cache.validatesHint(0, 10));
@@ -85,6 +85,18 @@ int main()
     cache.markNotReady(0);
     assert(!cache.isReady(0));
     cache.markReady(0);
+
+    FixedAssetCache<int, std::uint16_t, ConstantHash> overflowCache(3, 1, 1);
+    overflowCache.assign(0, 10);
+    overflowCache.assign(1, 20);
+    overflowCache.assign(2, 30);
+    assert(overflowCache.find(10) == 0 && overflowCache.find(20) == 1 && overflowCache.find(30) == 2);
+    assert(overflowCache.hashOccupiedCount() == 1 && overflowCache.hashCollisionCount() == 2);
+    overflowCache.release(0); // Removing a bucket entry promotes one overflow entry.
+    assert(!overflowCache.find(10) && overflowCache.find(20) == 1 && overflowCache.find(30) == 2);
+    assert(overflowCache.hashOccupiedCount() == 1 && overflowCache.hashCollisionCount() == 1);
+    overflowCache.assign(0, 40);
+    assert(overflowCache.find(40) == 0 && overflowCache.hashCollisionCount() == 2);
 
     GenerationQueue<Job, Fence> queue(3);
     auto a = queue.tryPush({10, 0}).value();

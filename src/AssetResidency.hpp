@@ -68,13 +68,15 @@ class FixedAssetCache
   public:
     static constexpr SlotIndex kInvalidSlot = std::numeric_limits<SlotIndex>::max();
 
-    FixedAssetCache(std::size_t capacity, std::size_t hashTableSize, std::size_t lookupDepth, Hash hash = {}, Equal equal = {})
+    FixedAssetCache(std::size_t capacity, std::size_t bucketCount, std::size_t entriesPerBucket, Hash hash = {}, Equal equal = {})
         : m_assetIds(capacity), m_open(capacity), m_ready(capacity), m_ages(capacity, 0), m_activeJobs(capacity),
-          m_hashTable(hashTableSize, kInvalidSlot), m_lookupDepth(lookupDepth), m_hash(std::move(hash)), m_equal(std::move(equal))
+          m_lookupBuckets(checkedBucketStorageSize(bucketCount, entriesPerBucket), kInvalidSlot), m_bucketHasOverflow(bucketCount),
+          m_overflowEntries(capacity),
+          m_bucketCount(bucketCount), m_entriesPerBucket(entriesPerBucket), m_hash(std::move(hash)), m_equal(std::move(equal))
     {
-        if (capacity == 0 || capacity > static_cast<std::size_t>(kInvalidSlot) || hashTableSize == 0 || lookupDepth == 0)
+        if (capacity == 0 || capacity > static_cast<std::size_t>(kInvalidSlot))
             throw std::invalid_argument("FixedAssetCache requires non-zero representable capacity, hash "
-                                        "size, and lookup depth.");
+                                        "bucket count, and bucket entry count.");
     }
 
     [[nodiscard]] std::size_t capacity() const
@@ -83,46 +85,38 @@ class FixedAssetCache
     }
     [[nodiscard]] std::size_t hashTableSize() const
     {
-        return m_hashTable.size();
+        return m_lookupBuckets.size();
     }
     [[nodiscard]] std::size_t lookupDepth() const
     {
-        return m_lookupDepth;
+        return m_entriesPerBucket;
     }
     [[nodiscard]] std::size_t hashOccupiedCount() const
     {
         return static_cast<std::size_t>(
-            std::count_if(m_hashTable.begin(), m_hashTable.end(), [](SlotIndex slot) { return slot != kInvalidSlot; }));
+            std::count_if(m_lookupBuckets.begin(), m_lookupBuckets.end(), [](SlotIndex slot) { return slot != kInvalidSlot; }));
     }
     [[nodiscard]] std::size_t hashCollisionCount() const
     {
-        std::size_t collisions = 0;
-        for (std::size_t index = 0; index < capacity(); ++index)
-        {
-            const SlotIndex slot = static_cast<SlotIndex>(index);
-            if (!isOpen(slot))
-                continue;
-            const std::size_t start = m_hash(m_assetIds[index]) % m_hashTable.size();
-            if (m_hashTable[start] != slot)
-                ++collisions;
-        }
-        return collisions;
+        return m_overflowCount;
     }
 
     [[nodiscard]] std::optional<SlotIndex> find(const AssetId &id) const
     {
-        const std::size_t start = m_hash(id) % m_hashTable.size();
-        for (std::size_t probe = 0; probe < std::min(m_lookupDepth, m_hashTable.size()); ++probe)
+        const std::size_t bucketIndex = m_hash(id) % m_bucketCount;
+        const std::size_t bucketStart = bucketIndex * m_entriesPerBucket;
+        for (std::size_t entryIndex = 0; entryIndex < m_entriesPerBucket; ++entryIndex)
         {
-            const SlotIndex slot = m_hashTable[(start + probe) % m_hashTable.size()];
+            const SlotIndex slot = m_lookupBuckets[bucketStart + entryIndex];
             if (slot != kInvalidSlot && isOpen(slot) && m_equal(m_assetIds[slot], id))
                 return slot;
         }
-        for (std::size_t index = 0; index < capacity(); ++index)
+        if (!m_bucketHasOverflow.test(bucketIndex))
+            return std::nullopt;
+        for (const OverflowEntry &entry : m_overflowEntries)
         {
-            const SlotIndex slot = static_cast<SlotIndex>(index);
-            if (isOpen(slot) && m_equal(m_assetIds[index], id))
-                return slot;
+            if (entry.used && entry.bucketIndex == bucketIndex && m_equal(entry.assetId, id))
+                return entry.slot;
         }
         return std::nullopt;
     }
@@ -237,10 +231,21 @@ class FixedAssetCache
         m_ready.clear();
         std::fill(m_ages.begin(), m_ages.end(), 0);
         std::fill(m_activeJobs.begin(), m_activeJobs.end(), GenerationJobHandle{});
-        std::fill(m_hashTable.begin(), m_hashTable.end(), kInvalidSlot);
+        std::fill(m_lookupBuckets.begin(), m_lookupBuckets.end(), kInvalidSlot);
+        m_bucketHasOverflow.clear();
+        std::fill(m_overflowEntries.begin(), m_overflowEntries.end(), OverflowEntry{});
+        m_overflowCount = 0;
     }
 
   private:
+    [[nodiscard]] static std::size_t checkedBucketStorageSize(std::size_t bucketCount, std::size_t entriesPerBucket)
+    {
+        if (bucketCount == 0 || entriesPerBucket == 0 ||
+            bucketCount > std::numeric_limits<std::size_t>::max() / entriesPerBucket)
+            throw std::invalid_argument("FixedAssetCache bucket storage size is invalid");
+        return bucketCount * entriesPerBucket;
+    }
+
     [[nodiscard]] bool validSlot(SlotIndex slot) const
     {
         return static_cast<std::size_t>(slot) < capacity();
@@ -256,25 +261,80 @@ class FixedAssetCache
             throw std::out_of_range("open cache slot");
     }
 
+    struct OverflowEntry
+    {
+        AssetId assetId{};
+        SlotIndex slot = kInvalidSlot;
+        std::size_t bucketIndex = 0;
+        bool used = false;
+    };
+
     void insertLookup(SlotIndex slot)
     {
-        const std::size_t start = m_hash(m_assetIds[slot]) % m_hashTable.size();
-        for (std::size_t probe = 0; probe < std::min(m_lookupDepth, m_hashTable.size()); ++probe)
+        const std::size_t bucketIndex = m_hash(m_assetIds[slot]) % m_bucketCount;
+        const std::size_t bucketStart = bucketIndex * m_entriesPerBucket;
+        for (std::size_t entryIndex = 0; entryIndex < m_entriesPerBucket; ++entryIndex)
         {
-            SlotIndex &candidate = m_hashTable[(start + probe) % m_hashTable.size()];
+            SlotIndex &candidate = m_lookupBuckets[bucketStart + entryIndex];
             if (candidate == kInvalidSlot)
             {
                 candidate = slot;
                 return;
             }
         }
+        for (OverflowEntry &entry : m_overflowEntries)
+        {
+            if (entry.used)
+                continue;
+            entry = {.assetId = m_assetIds[slot], .slot = slot, .bucketIndex = bucketIndex, .used = true};
+            m_bucketHasOverflow.set(bucketIndex);
+            ++m_overflowCount;
+            return;
+        }
+        throw std::logic_error("FixedAssetCache lookup overflow exhausted");
     }
 
     void removeLookup(SlotIndex slot)
     {
-        for (SlotIndex &candidate : m_hashTable)
-            if (candidate == slot)
-                candidate = kInvalidSlot;
+        const std::size_t bucketIndex = m_hash(m_assetIds[slot]) % m_bucketCount;
+        const std::size_t bucketStart = bucketIndex * m_entriesPerBucket;
+        for (std::size_t entryIndex = 0; entryIndex < m_entriesPerBucket; ++entryIndex)
+        {
+            SlotIndex &candidate = m_lookupBuckets[bucketStart + entryIndex];
+            if (candidate != slot)
+                continue;
+            candidate = kInvalidSlot;
+            for (OverflowEntry &entry : m_overflowEntries)
+            {
+                if (!entry.used || entry.bucketIndex != bucketIndex)
+                    continue;
+                candidate = entry.slot;
+                entry = {};
+                --m_overflowCount;
+                refreshBucketOverflowFlag(bucketIndex);
+                return;
+            }
+            refreshBucketOverflowFlag(bucketIndex);
+            return;
+        }
+        for (OverflowEntry &entry : m_overflowEntries)
+        {
+            if (!entry.used || entry.bucketIndex != bucketIndex || entry.slot != slot)
+                continue;
+            entry = {};
+            --m_overflowCount;
+            refreshBucketOverflowFlag(bucketIndex);
+            return;
+        }
+    }
+
+    void refreshBucketOverflowFlag(std::size_t bucketIndex)
+    {
+        const bool hasOverflow = std::any_of(m_overflowEntries.begin(), m_overflowEntries.end(),
+                                             [bucketIndex](const OverflowEntry &entry) {
+                                                 return entry.used && entry.bucketIndex == bucketIndex;
+                                             });
+        m_bucketHasOverflow.set(bucketIndex, hasOverflow);
     }
 
     std::vector<AssetId> m_assetIds;
@@ -282,8 +342,12 @@ class FixedAssetCache
     AssetResidencyDetail::BitArray m_ready;
     std::vector<std::uint8_t> m_ages;
     std::vector<GenerationJobHandle> m_activeJobs;
-    std::vector<SlotIndex> m_hashTable;
-    std::size_t m_lookupDepth;
+    std::vector<SlotIndex> m_lookupBuckets;
+    AssetResidencyDetail::BitArray m_bucketHasOverflow;
+    std::vector<OverflowEntry> m_overflowEntries;
+    std::size_t m_bucketCount;
+    std::size_t m_entriesPerBucket;
+    std::size_t m_overflowCount = 0;
     Hash m_hash;
     Equal m_equal;
 };
