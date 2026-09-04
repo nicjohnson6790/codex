@@ -10,7 +10,7 @@
 | Renderer pipelines | Terrain, water, three foliage paths, sky/atmosphere, world text, debug triangles/lines. |
 | Caches | Ownership, capacity, residency policy, generation budget, invalidation, and stale-result protection. |
 | Asset lifetimes | Application-lifetime GPU assets, viewport resources, resident cache contents, temporal state, and per-frame data. |
-| Offline asset boundary | Converter-only source import, stable runtime packs, build staging, and the offline ETOPO base-heightmap foundation. |
+| Offline asset boundary | Converter-only source import, stable runtime packs, build staging, the ETOPO base heightmap, and optional Japan DEM10 delta mosaics. |
 | Multiplayer render boundary | Session/transport ownership, remote-entity presentation state, and emission through existing debug/text render queues. |
 
 Prepared from static source inspection; this is an implementation document, not a proposed redesign.
@@ -112,15 +112,15 @@ Generation writes, readback copies, render passes, and UI are recorded in a dete
 
 QuadtreeMeshRenderer is both the terrain draw renderer and an important GPU-generation hub. It owns the persistent terrain heightmap pool, terrain graphics pipelines, generation compute pipelines, static terrain/bridge meshes, PBR material arrays, and the per-frame instance/indirect data used to draw the current LOD.
 
-- CPU manager resolves each visible leaf to a final heightmap slice. First allocation computes and retains a block of source-heightmap tile contributions. Requests drive shared source-tile residency and queue final composition only after every current source revision is ready.
+- CPU manager resolves each visible leaf to a final heightmap slice. First allocation computes and retains a block of source-heightmap tile contributions. Requests drive shared source-tile residency and queue final composition only after every current source revision is ready. Contribution discovery is limited to source tiles whose footprints overlap the final grid (plus the existing sampling halo); it does not load unrelated neighboring sources.
 
 - Generation scheduling reuses a free slice or the oldest evictable resident slice, then queues a GPU generation descriptor. Slice reuse invalidates cached extents and optional CPU height data immediately.
 
-- During the GPU compute stage, batches of up to 16 final heightmaps are composed into the persistent slice pool. Each Z dispatch layer follows one final descriptor into a permanent contribution-descriptor buffer and samples renderer-owned 256x256 source-tile slices.
+- During the GPU compute stage, batches of up to 16 final heightmaps are composed into the persistent slice pool. Each Z dispatch layer follows one final descriptor into a permanent contribution-descriptor buffer and samples renderer-owned 256x256 source-tile slices. Sampling coordinates are transformed into contribution-local grid coordinates before float conversion and bilinear interpolation. A sample belongs to one source tile rather than blending duplicate contributions across a tile edge; the offline packs duplicate valid shared-border samples exactly.
 
 - A later copy stage queues extents and requested heightmap-slice readbacks. Those are consumed only after the submission fence completes.
 
-- Terrain draws reference resident slice indices and render main patches plus bridge/coarse-bridge geometry for LOD seams.
+- Terrain draws reference resident slice indices and render main patches plus bridge/coarse-bridge geometry for LOD seams. Each bridge instance identifies the fine inner slice, the resident coarse outer slice and half mapping, and independently resolved slices/sample coordinates for both outer corners. The bridge vertex shader therefore samples the heightmap that owns each edge or corner instead of extending one leaf's samples across a neighboring heightmap boundary; normals use the same selected slice and pitch.
 
 ### 4.2 Persistent assets
 
@@ -279,7 +279,7 @@ TriangleRenderer and LineRenderer are immediate/debug-oriented paths. App rebuil
 
 Terrain heightmaps, canonical foliage pages, canopy cells, and nearby decoded pages now share the `FixedAssetCache` and `GenerationQueue` protocol. Each owner composes independently configured cache and queue instances while retaining only content-specific metadata. The shared protocol keeps fixed-capacity GPU storage reusable without confusing storage identity with world identity.
 
-`FixedAssetCache` owns bit-packed open/ready state, saturating `uint8_t` eviction age, configurable hash lookup with a full-cache fallback, and the active generation-job handle for every slot. Requests return a usable slot or unavailable; queued assets remain unavailable, and queue admission occurs before any cache reassignment. A supplied slot hint is validated against the semantic asset ID before use.
+`FixedAssetCache` owns bit-packed open/ready state, saturating `uint8_t` eviction age, bucketed hash lookup, and the active generation-job handle for every slot. Lookup storage contains `bucketCount * entriesPerBucket` entries. Only buckets marked overflowed consult the separate cache-capacity overflow list; ordinary misses never fall back to scanning the full cache. Requests return a usable slot or unavailable; queued assets remain unavailable, and queue admission occurs before any cache reassignment. A supplied slot hint is validated against the semantic asset ID before use.
 
 `GenerationQueue` is a hard-capacity front/count ring. Entries independently track submitted, discarded, and completed state plus a shared submission fence. Completion can be processed out of fence order, but physical storage is reclaimed only by advancing the front across completed entries. Discard immediately severs cache ownership; submitted discarded work retains its fence until signaling and never runs cache completion logic.
 
@@ -342,15 +342,17 @@ This sequence is the most useful single mental model for the current renderer: t
 
 ## 15. Offline asset pipeline and global heightmap foundation
 
-Runtime rendering is intentionally separated from authored-source import. The standalone converter owns expensive or format-specific processing and emits compact binary packs that the application can validate and upload without linking source-format libraries into the runtime. Generated packs live under assets/runtime and the main CMake build stages them into build/&lt;Config&gt;/assets/runtime.
+Runtime rendering is intentionally separated from authored-source import. The standalone converter owns expensive or format-specific processing and emits compact binary packs that the application can validate and upload without linking source-format libraries into the runtime. Generated packs live under `assets/runtime` and the main CMake build stages them into `build/<Config>/app/assets/runtime`.
 
-- The converter builds in its own build/Assets tree. Assimp, SDL_image, FreeType, DirectXTex, libtiff, and converter-side image/shader work remain outside the main executable.
+- The converter builds in its own `build/Assets/<Config>/converter` tree. Assimp, SDL_image, FreeType, DirectXTex, libtiff/ZSTD, and converter-side image/shader work remain outside the main executable. Building the converter does not perform conversion; each pack is generated by an explicit converter invocation.
 
 - Small assetbin manifests describe independently compressed payloads held in meshbin, texbin, or heightbin files. Runtime readers validate headers, offsets, counts, formats, and compression metadata before consumers create GPU resources.
 
 - Mesh, material, texture, font, skybox, and foliage-imposter artifacts are application-lifetime inputs after upload. Their authored files are not consulted during rendering.
 
-- The ETOPO 2022 path generates a versioned Airocean one-island atlas as independently filtered and LZ4-compressed 256x256 tiles. It is currently an offline foundation only: no runtime base-height sampler, terrain composition layer, or atlas placement transform consumes it yet.
+- The ETOPO 2022 path generates a versioned Airocean one-island atlas as independently filtered and LZ4-compressed 256x256 tiles. Runtime final heightmaps always compose this base source. The heightmap manager registers each available Japan DEM10 mosaic under a distinct dataset identity with its fixed affine placement and adds its ETOPO-relative deltas only at final sample pitches of 32 m or finer, before source references are allocated.
+
+- Japan DEM10 conversion samples bilinear footprints across adjacent GeoTIFF files so source-file boundaries do not become zero-valued seams. At coastal NoData boundaries it emits a 2 km linear correction collar that cancels positive ETOPO land while retaining ETOPO bathymetry; only the maximum positive X/Y edge of each complete mosaic is forced to zero for ownership. Four rotated sparse mosaics cover Japan, and their atlas Y placement is converted to the runtime convention where atlas Y maps to negative world Z.
 
 > **Code:** tools/converter; RuntimeAssetReader.cpp; RuntimeAssetFormat.hpp; RuntimeHeightmapFormat.hpp; root CMakeLists.txt asset staging
 

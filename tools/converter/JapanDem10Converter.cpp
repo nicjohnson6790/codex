@@ -31,6 +31,7 @@ namespace
 {
 constexpr int kMinTile = -128, kMaxTile = 127;
 constexpr double kSpacing = 10.0;
+constexpr double kOceanCollarMeters = 2000.0;
 constexpr double kTileSize = RuntimeAssets::kHeightmapTileStride * kSpacing;
 constexpr double kMosaicSize = 256.0 * kTileSize;
 // The grid is rotated 7.5 degrees clockwise about the former four-cell
@@ -225,20 +226,28 @@ struct Raster
         return true;
     }
 
-    bool sample(double lon, double lat, double* out, std::string* error) const
+    bool gridCoordinates(double lon, double lat, double* x, double* y) const
     {
-        if (lon < minLon || lon > maxLon || lat < minLat || lat > maxLat || !load(error)) return false;
         const double shift = pixelIsPoint ? 0.0 : 0.5;
-        const double fx = (lon - minLon) / pixelX - shift;
-        const double fy = (maxLat - lat) / pixelY - shift;
-        const auto x0 = static_cast<std::int64_t>(std::floor(fx)), y0 = static_cast<std::int64_t>(std::floor(fy));
-        if (x0 < 0 || y0 < 0 || x0 + 1 >= width || y0 + 1 >= height) return false;
-        const double tx = fx - x0, ty = fy - y0;
-        std::array<double, 4> v{{values[y0 * width + x0], values[y0 * width + x0 + 1],
-                                 values[(y0 + 1) * width + x0], values[(y0 + 1) * width + x0 + 1]}};
-        for (double n : v) if (!std::isfinite(n) || (noData && n == *noData)) return false;
-        *out = (v[0] * (1.0 - tx) + v[1] * tx) * (1.0 - ty) + (v[2] * (1.0 - tx) + v[3] * tx) * ty;
+        *x = (lon - minLon) / pixelX - shift;
+        *y = (maxLat - lat) / pixelY - shift;
         return true;
+    }
+
+    bool samplePixel(std::int64_t x, std::int64_t y, double* out) const
+    {
+        if (x < 0 || y < 0 || x >= width || y >= height || values.empty()) return false;
+        const double value = values[static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)];
+        if (!std::isfinite(value) || (noData && value == *noData)) return false;
+        *out = value;
+        return true;
+    }
+
+    std::array<double, 2> pixelCenter(std::int64_t x, std::int64_t y) const
+    {
+        const double shift = pixelIsPoint ? 0.0 : 0.5;
+        return {minLon + (static_cast<double>(x) + shift) * pixelX,
+                maxLat - (static_cast<double>(y) + shift) * pixelY};
     }
 };
 
@@ -276,6 +285,44 @@ public:
         }
         return true;
     }
+    bool ensureResident(std::size_t index, std::string* error) const
+    {
+        if (!rasters[index].values.empty()) return true;
+        if (residentRasters.size() == kResidentRasterLimit)
+        {
+            rasters[residentRasters.front()].values.clear();
+            residentRasters.pop_front();
+        }
+        if (!rasters[index].load(error)) return false;
+        residentRasters.push_back(index);
+        return true;
+    }
+
+    bool sampleGridPoint(double lon, double lat, double expectedPixelX, double expectedPixelY,
+                         double* value, std::string* error) const
+    {
+        const int bx = static_cast<int>(std::floor(lon * 10)), by = static_cast<int>(std::floor(lat * 10));
+        const auto found = bins.find(binKey(bx, by));
+        if (found == bins.end()) return false;
+        for (const std::size_t i : found->second)
+        {
+            const Raster& r = rasters[i];
+            if (std::abs(r.pixelX - expectedPixelX) > expectedPixelX * 1e-6 ||
+                std::abs(r.pixelY - expectedPixelY) > expectedPixelY * 1e-6)
+                continue;
+            double fx = 0.0, fy = 0.0;
+            r.gridCoordinates(lon, lat, &fx, &fy);
+            const auto ix = static_cast<std::int64_t>(std::llround(fx));
+            const auto iy = static_cast<std::int64_t>(std::llround(fy));
+            if (std::abs(fx - ix) > 1e-5 || std::abs(fy - iy) > 1e-5 ||
+                ix < 0 || iy < 0 || ix >= r.width || iy >= r.height)
+                continue;
+            if (!ensureResident(i, error)) return false;
+            if (r.samplePixel(ix, iy, value)) return true;
+        }
+        return false;
+    }
+
     bool sample(double lon, double lat, double* value, std::string* error) const
     {
         const int bx = static_cast<int>(std::floor(lon * 10)), by = static_cast<int>(std::floor(lat * 10));
@@ -284,19 +331,52 @@ public:
         for (const std::size_t i : found->second)
             if (const Raster& r = rasters[i]; lon >= r.minLon && lon <= r.maxLon && lat >= r.minLat && lat <= r.maxLat)
             {
-                if (r.values.empty())
-                {
-                    if (residentRasters.size() == kResidentRasterLimit)
+                double fx = 0.0, fy = 0.0;
+                r.gridCoordinates(lon, lat, &fx, &fy);
+                const auto x0 = static_cast<std::int64_t>(std::floor(fx));
+                const auto y0 = static_cast<std::int64_t>(std::floor(fy));
+                const double tx = fx - x0, ty = fy - y0;
+                std::array<double, 4> samples{};
+                bool complete = true;
+                for (int dy = 0; dy < 2; ++dy)
+                    for (int dx = 0; dx < 2; ++dx)
                     {
-                        rasters[residentRasters.front()].values.clear();
-                        residentRasters.pop_front();
+                        const auto point = r.pixelCenter(x0 + dx, y0 + dy);
+                        complete &= sampleGridPoint(point[0], point[1], r.pixelX, r.pixelY,
+                                                    &samples[static_cast<std::size_t>(dy * 2 + dx)], error);
                     }
-                    if (!r.load(error)) return false;
-                    residentRasters.push_back(i);
-                }
-                if (r.sample(lon, lat, value, error)) return true;
+                if (!complete) continue;
+                *value = (samples[0] * (1.0 - tx) + samples[1] * tx) * (1.0 - ty) +
+                         (samples[2] * (1.0 - tx) + samples[3] * tx) * ty;
+                return true;
             }
         return false;
+    }
+
+    double coverageWeight(double lon, double lat, double collarMeters) const
+    {
+        constexpr double latitudeMetersPerDegree = 110540.0;
+        const double longitudeMetersPerDegree = 111320.0 * std::max(std::cos(lat * 3.14159265358979323846 / 180.0), 0.01);
+        const int bx = static_cast<int>(std::floor(lon * 10));
+        const int by = static_cast<int>(std::floor(lat * 10));
+        double nearestSquared = std::numeric_limits<double>::max();
+        std::set<std::size_t> candidates;
+        for (int y = by - 1; y <= by + 1; ++y)
+            for (int x = bx - 1; x <= bx + 1; ++x)
+                if (const auto found = bins.find(binKey(x, y)); found != bins.end())
+                    candidates.insert(found->second.begin(), found->second.end());
+        for (const std::size_t i : candidates)
+        {
+            const Raster& r = rasters[i];
+            const double dxDegrees = lon < r.minLon ? r.minLon - lon : lon > r.maxLon ? lon - r.maxLon : 0.0;
+            const double dyDegrees = lat < r.minLat ? r.minLat - lat : lat > r.maxLat ? lat - r.maxLat : 0.0;
+            const double dx = dxDegrees * longitudeMetersPerDegree;
+            const double dy = dyDegrees * latitudeMetersPerDegree;
+            nearestSquared = std::min(nearestSquared, dx * dx + dy * dy);
+        }
+        if (nearestSquared == 0.0) return 1.0;
+        const double distance = std::sqrt(nearestSquared);
+        return distance >= collarMeters ? 0.0 : 1.0 - distance / collarMeters;
     }
     bool validateFirstDecode(std::string* error) const { return !rasters.empty() && rasters.front().load(error); }
     mutable std::vector<Raster> rasters;
@@ -374,7 +454,7 @@ bool WriteMetadata(const std::filesystem::path& path, const std::filesystem::pat
         << "  \"basis\": {\"x\": [" << kXAxisX << ", " << kXAxisY << "], \"y\": [" << kYAxisX << ", " << kYAxisY << "], \"rotationDegrees\": 20.5},\n"
         << "  \"mosaicSizeMeters\": " << kMosaicSize << ",\n  \"positiveEdgesZeroed\": true,\n  \"mosaics\": [\n";
     for (std::size_t i = 0; i < kIds.size(); ++i) { const auto o = MosaicOrigin(i); out << "    {\"id\": \"" << kIds[i] << "\", \"offset\": [" << kOffsets[i][0] << ", " << kOffsets[i][1] << "], \"originAiroceanMeters\": [" << o[0] << ", " << o[1] << "]}" << (i + 1 == kIds.size() ? "\n" : ",\n"); }
-    out << "  ],\n  \"delta\": \"DEM10 bilinear elevation minus bilinear existing Codex ETOPO v2 tile elevation, rounded to signed integer meters\"\n}\n";
+    out << "  ],\n  \"delta\": \"DEM10 bilinear elevation minus bilinear existing Codex ETOPO v2 tile elevation, with a 2000 m fading positive-ETOPO ocean collar, rounded to signed integer meters\"\n}\n";
     return static_cast<bool>(out);
 }
 
@@ -400,6 +480,35 @@ bool WritePreview(const std::filesystem::path& path, const RasterCatalog& source
 bool SelfTest(std::string* error)
 {
     if (!HeightmapTileFilter::RunSelfTests(error)) return false;
+    {
+        RasterCatalog catalog;
+        Raster west{}, east{};
+        west.width = east.width = 2; west.height = east.height = 2;
+        west.minLon = 0.0; west.maxLon = 2.0; east.minLon = 2.0; east.maxLon = 4.0;
+        west.minLat = east.minLat = 0.0; west.maxLat = east.maxLat = 2.0;
+        west.pixelX = west.pixelY = east.pixelX = east.pixelY = 1.0;
+        west.values = {0.0, 10.0, 0.0, 10.0};
+        east.values = {20.0, 30.0, 20.0, 30.0};
+        catalog.rasters = {std::move(west), std::move(east)};
+        for (std::size_t i = 0; i < catalog.rasters.size(); ++i)
+            for (int y = 0; y <= 20; ++y)
+                for (int x = static_cast<int>(catalog.rasters[i].minLon * 10.0);
+                     x <= static_cast<int>(catalog.rasters[i].maxLon * 10.0); ++x)
+                    catalog.bins[RasterCatalog::binKey(x, y)].push_back(i);
+        double seamSample = 0.0;
+        if (!catalog.sample(2.0, 1.0, &seamSample, error) || std::abs(seamSample - 15.0) > 1e-12)
+        {
+            *error = "cross-raster bilinear sampling self-test failed";
+            return false;
+        }
+        if (catalog.coverageWeight(2.0, 1.0, kOceanCollarMeters) != 1.0 ||
+            catalog.coverageWeight(4.01, 1.0, kOceanCollarMeters) <= 0.0 ||
+            catalog.coverageWeight(4.1, 1.0, kOceanCollarMeters) != 0.0)
+        {
+            *error = "DEM10 ocean-collar coverage self-test failed";
+            return false;
+        }
+    }
     if (std::abs(std::hypot(kXAxisX,kXAxisY)-1.0)>1e-12 || std::abs(kXAxisX*kYAxisX+kXAxisY*kYAxisY)>1e-12) { *error="Japan basis is not orthonormal"; return false; }
     Tile t; t.fill(7); for (std::size_t i=0;i<256;++i) { t[255*256+i]=0; t[i*256+255]=0; }
     for (std::size_t i=0;i<256;++i) if (t[255*256+i]!=0 || t[i*256+255]!=0) { *error="positive-edge convention self-test failed"; return false; }
@@ -475,8 +584,30 @@ bool JapanDem10Converter::run(const JapanDem10ConversionConfig& config, JapanDem
                     const double lx=(static_cast<double>(tx-kMinTile)*255+x)*kSpacing, ly=(static_cast<double>(ty-kMinTile)*255+y)*kSpacing;
                     const double px=origin[0]+lx*kXAxisX+ly*kYAxisX, py=origin[1]+lx*kXAxisY+ly*kYAxisY;
                     double lon,lat,dem,base;
-                    if(projection.inverse(px,py,&lon,&lat)&&source.sample(lon,lat,&dem,error)&&etopo.sample(px,py,&base,error))
-                    { value=static_cast<std::int16_t>(std::clamp<long>(std::lround(dem-base),INT16_MIN+1L,INT16_MAX)); ++valid; ++summary->validSamples; lo=std::min(lo,value); hi=std::max(hi,value); }
+                    if (projection.inverse(px,py,&lon,&lat) && etopo.sample(px,py,&base,error))
+                    {
+                        bool contributes = false;
+                        double delta = 0.0;
+                        if (source.sample(lon,lat,&dem,error))
+                        {
+                            delta = dem - base;
+                            contributes = true;
+                        }
+                        else
+                        {
+                            const double collarWeight = source.coverageWeight(lon, lat, kOceanCollarMeters);
+                            if (collarWeight > 0.0 && base > 0.0)
+                            {
+                                delta = -base * collarWeight;
+                                contributes = true;
+                            }
+                        }
+                        if (contributes)
+                        {
+                            value=static_cast<std::int16_t>(std::clamp<long>(std::lround(delta),INT16_MIN+1L,INT16_MAX));
+                            ++valid; ++summary->validSamples; lo=std::min(lo,value); hi=std::max(hi,value);
+                        }
+                    }
                 }
                 tile[static_cast<std::size_t>(y)*256+x]=value;
             }

@@ -97,8 +97,14 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     // Queues one quadtree leaf instance for drawing, using the given heightmap
     // slice.
     void addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
-    void addBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
-    void addCoarseBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex);
+    struct BridgeHeightmaps
+    {
+        std::uint16_t inner = 0, outer = 0, firstCorner = 0, secondCorner = 0;
+        std::uint32_t firstCornerSample = 0, secondCornerSample = 0;
+        std::uint8_t coarseHalf = 0;
+    };
+    void addBridge(const WorldGridQuadtreeLeafId &leafId, const BridgeHeightmaps &heightmaps, std::uint8_t edgeIndex);
+    void addCoarseBridge(const WorldGridQuadtreeLeafId &leafId, const BridgeHeightmaps &heightmaps, std::uint8_t edgeIndex);
 
     // Uploads staged instance and indirect draw data into GPU buffers.
     void upload(SDL_GPUCopyPass *copyPass);
@@ -142,6 +148,15 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     {
         float position[3]{};
         std::uint32_t packedMetadata = 0;
+    };
+
+    struct alignas(16) BridgeInstanceData
+    {
+        float position[3]{};
+        std::uint32_t packedMetadata = 0;
+        std::uint32_t heightmapIndices[4]{};
+        std::uint32_t cornerSampleCoords[2]{};
+        std::uint32_t reserved[2]{};
     };
 
     struct MeshResources
@@ -210,6 +225,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     static_assert(sizeof(InstanceData) == 16, "Terrain instance data must stay 16 bytes.");
     static_assert(offsetof(InstanceData, position) == 0, "Terrain instance position must start at offset 0.");
     static_assert(offsetof(InstanceData, packedMetadata) == 12, "Terrain packed metadata must stay at offset 12.");
+    static_assert(sizeof(BridgeInstanceData) == 48, "Terrain bridge instance data must stay 48 bytes.");
     static_assert(sizeof(HeightmapGenerationDescriptor) == 16);
     static_assert(sizeof(HeightmapSourceGpuDescriptor) == 64);
 
@@ -233,6 +249,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     void createMeshResources(const std::vector<Vertex> &vertices, const std::vector<std::uint32_t> &indices, MeshResources &meshResources);
     [[nodiscard]] static float instanceDistanceSquared(const InstanceData &instance);
     static void sortInstances(InstanceData *instances, std::uint16_t instanceCount);
+    static void sortBridgeInstances(BridgeInstanceData *instances, std::uint16_t instanceCount);
 
     // Convenience helper for filling SDL's indexed-indirect draw struct.
     [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(std::uint32_t indexCount, std::uint32_t instanceCount,
@@ -287,8 +304,8 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     SDL_GPUTransferBuffer *m_foliageInstanceLiveCountInitTransferBuffer = nullptr;
 
     std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
-    std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_bridgeInstanceData{};
-    std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_coarseBridgeInstanceData{};
+    std::array<BridgeInstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_bridgeInstanceData{};
+    std::array<BridgeInstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_coarseBridgeInstanceData{};
     std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
     std::array<HeightmapGenerationDescriptor, WorldGridQuadtreeHeightmapManager::kMaxFinalHeightmapsPerDispatch>
         m_pendingHeightmapGenerations{};

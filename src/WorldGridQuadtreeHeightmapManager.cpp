@@ -15,6 +15,19 @@
 
 namespace
 {
+constexpr double kJapanDem10TileSizeMeters = 2550.0;
+constexpr double kJapanDem10MaxContributionPitchMeters = 32.0;
+constexpr double kJapanDem10OriginX = 11709172.9257765;
+constexpr double kJapanDem10OriginZ = -903715.758822597;
+constexpr double kJapanDem10XAxisX = 0.936672189248398;
+constexpr double kJapanDem10XAxisZ = 0.350207381259467;
+constexpr double kJapanDem10ZAxisX = -0.350207381259467;
+constexpr double kJapanDem10ZAxisZ = 0.936672189248398;
+constexpr double kJapanDem10MosaicSizeMeters = 256.0 * kJapanDem10TileSizeMeters;
+constexpr std::array<std::array<int, 2>, 4> kJapanDem10MosaicOffsets{{{{0, 0}}, {{1, 0}}, {{1, 1}}, {{1, 2}}}};
+constexpr std::array<const char *, 4> kJapanDem10MosaicIds{{"sw", "se", "ce", "ne"}};
+constexpr HeightmapDatasetId kJapanDem10DatasetIdBase = 0x4a5044454d313000ULL;
+
 std::uint64_t mix64(std::uint64_t x)
 {
     x ^= x >> 30U;
@@ -58,6 +71,34 @@ WorldGridQuadtreeHeightmapManager::WorldGridQuadtreeHeightmapManager()
     }
     else
         throw std::runtime_error("Failed to open ETOPO runtime heightmap dataset: " + error);
+
+    // Converter coordinates are Airocean atlas (X,Y). Runtime terrain uses
+    // world (X,Z), with atlas Y mapped to -Z, matching the ETOPO placement.
+    const glm::dvec2 xTileAxis{kJapanDem10TileSizeMeters * kJapanDem10XAxisX,
+                               -kJapanDem10TileSizeMeters * kJapanDem10XAxisZ};
+    const glm::dvec2 zTileAxis{kJapanDem10TileSizeMeters * kJapanDem10ZAxisX,
+                               -kJapanDem10TileSizeMeters * kJapanDem10ZAxisZ};
+    for (std::size_t mosaic = 0; mosaic < kJapanDem10MosaicIds.size(); ++mosaic)
+    {
+        const auto offset = kJapanDem10MosaicOffsets[mosaic];
+        const double mosaicOriginX = kJapanDem10OriginX + offset[0] * kJapanDem10MosaicSizeMeters * kJapanDem10XAxisX +
+                                     offset[1] * kJapanDem10MosaicSizeMeters * kJapanDem10ZAxisX;
+        const double mosaicOriginZ = -(kJapanDem10OriginZ + offset[0] * kJapanDem10MosaicSizeMeters * kJapanDem10XAxisZ +
+                                       offset[1] * kJapanDem10MosaicSizeMeters * kJapanDem10ZAxisZ);
+        const auto indexPath = assetDirectory / (std::string("japan_dem10_delta_") + kJapanDem10MosaicIds[mosaic] + ".assetbin");
+        if (!std::filesystem::exists(indexPath))
+            continue;
+        error.clear();
+        const HeightmapDatasetId datasetId = kJapanDem10DatasetIdBase + mosaic;
+        const auto dataset = EtopoHeightmapDataset::open(indexPath, error, datasetId);
+        if (!dataset)
+            throw std::runtime_error("Failed to open Japan DEM10 runtime heightmap dataset: " + error);
+        addDataset(dataset);
+        const glm::dvec2 tileZero = glm::dvec2{mosaicOriginX, mosaicOriginZ} + 128.0 * (xTileAxis + zTileAxis);
+        addSourceHeightmap({static_cast<SourceHeightmapId>(2 + mosaic), datasetId,
+                            Position(0, 0, {tileZero.x, 0.0, tileZero.y}), xTileAxis, 1.0, zTileAxis,
+                            kJapanDem10MaxContributionPitchMeters});
+    }
     clearCache();
 }
 
@@ -123,6 +164,9 @@ void WorldGridQuadtreeHeightmapManager::allocateReferences(std::uint16_t slot, c
     meta.referenceCount = 0;
     for (const auto &source : m_sources)
     {
+        const double finalPitch = worldGridQuadtreeLeafSize(leaf) / AppConfig::Terrain::kHeightmapLeafIntervalCount;
+        if (finalPitch > source.maxContributionPitch)
+            continue;
         const auto *dataset = findDataset(source.datasetId);
         if (!dataset)
             continue;

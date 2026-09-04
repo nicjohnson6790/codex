@@ -62,6 +62,16 @@ int main()
     placement.zTileAxis = {-256.0, 0.0};
     if (collectOverlappingSourceTiles(placement, grid, minimumLeaf()).size() != 9)
         return 11;
+    auto coarseLeaf = minimumLeaf();
+    coarseLeaf.subdivisionPath >>= 18u;
+    placement.maxContributionPitch = 32.0;
+    if (!collectOverlappingSourceTiles(placement, grid, coarseLeaf).empty())
+        return 14;
+    auto cutoffLeaf = minimumLeaf();
+    cutoffLeaf.subdivisionPath >>= 15u;
+    if (collectOverlappingSourceTiles(placement, grid, cutoffLeaf).empty())
+        return 15;
+    placement.maxContributionPitch = std::numeric_limits<double>::infinity();
     auto farLeaf = minimumLeaf();
     farLeaf.gridX = std::numeric_limits<std::int64_t>::max();
     farLeaf.gridY = std::numeric_limits<std::int64_t>::min();
@@ -125,6 +135,7 @@ int main()
         if (!std::isfinite(sample) || sample != 123.0f)
             return 24;
     }
+
     std::filesystem::remove_all(fixtureDirectory);
     return 0;
 }

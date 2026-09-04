@@ -11,7 +11,7 @@ The converter is separate on purpose:
 
 ## Supported Packs
 
-The converter currently builds three asset groups:
+The converter currently builds six asset groups:
 
 - `pinetreepack`
   - source root: `assets/source/pinetreepack`
@@ -28,6 +28,15 @@ The converter currently builds three asset groups:
   - outputs: `roboto.texbin`, `roboto.assetbin`
   - the MSDF atlas is stored as uncompressed `RGBA8_UNORM` texels inside `texbin`; the texel payload is still LZ4-compressed like the other runtime textures
   - font atlas and glyph layout records are stored in `assetbin`
+- `etopo2022`
+  - source: `assets/source/etopo2022/ETOPO_2022_v1_60s_N90W180_surface.tif`
+  - outputs: `etopo2022.assetbin`, `etopo2022.heightbin`, and diagnostic previews
+  - provides the required global base heightmap
+- `japan-dem10`
+  - source root: `assets/source/japan-dem10`
+  - requires the generated ETOPO pack to compute additive deltas
+  - outputs four `japan_dem10_delta_<id>.assetbin`/`.heightbin` pairs, provenance metadata, and diagnostic previews
+  - is optional at runtime and contributes only at terrain pitches of 32 m or finer
 
 All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/app/assets/runtime` by the main build. Converter executables are isolated under `build/Assets/<Config>/converter`.
 
@@ -68,6 +77,12 @@ The converter expects six cubemap face images there:
 
 These are intended to be the base nighttime cubemap that the runtime atmosphere shader runs on top of, not a fully baked final sky with atmospheric scattering already solved into it. All six faces should share the same dimensions because the runtime uploads them into one cubemap texture.
 
+### PBR terrain pack
+
+Terrain material textures are read from `assets/source/pbr/tex`. The converter
+normalizes them to `1024x1024`, builds complete mip chains, and writes BC3 sRGB
+albedo, BC5 normal, and BC3 UNORM data for the remaining material channels.
+
 ### Roboto font pack
 
 The repo includes the Roboto variable TTF and its license under:
@@ -87,8 +102,8 @@ tools\build.cmd Assets Debug
 ```
 
 The configuration argument is optional and defaults to Release. These commands
-build the standalone converter into `build\Assets\Release` and
-`build\Assets\Debug`, respectively. They do not generate any asset packs;
+build the standalone converter into `build\Assets\Release\converter` and
+`build\Assets\Debug\converter`, respectively. They do not generate any asset packs;
 conversions are explicit offline operations.
 
 All converters report progress unconditionally. File-based packs print each
@@ -104,13 +119,19 @@ Manual runs after that:
 .\build\Assets\Release\converter\converter.exe pinetreepack
 .\build\Assets\Release\converter\converter.exe pbr
 .\build\Assets\Release\converter\converter.exe roboto
+.\build\Assets\Release\converter\converter.exe etopo2022
+.\build\Assets\Release\converter\converter.exe japan-dem10
 ```
 
 Or with explicit paths:
 
 ```powershell
-.\build\Assets\Release\converter\converter.exe --source assets/source/pinetreepack --out assets/runtime --name pinetreepack
+.\build\Assets\Release\converter\converter.exe --name pinetreepack --source assets/source/pinetreepack --out assets/runtime
 ```
+
+For the four art/font modes, place `--name` before path overrides because
+selecting a named pack applies that pack's defaults. The two heightmap modes use
+their mode name first and accept the mode-specific options shown below.
 
 Default roots:
 
@@ -127,6 +148,11 @@ Default roots:
 - `roboto`
   - source root: `assets/source/font`
   - font file: `assets/source/font/Roboto-VariableFont_wdth,wght.ttf`
+- `etopo2022`
+  - source TIFF: `assets/source/etopo2022/ETOPO_2022_v1_60s_N90W180_surface.tif`
+- `japan-dem10`
+  - source root: `assets/source/japan-dem10`
+  - ETOPO index: `assets/runtime/etopo2022.assetbin`
 - output root: `assets/runtime`
 
 ## ETOPO 2022 global base-height atlas
@@ -176,12 +202,12 @@ Index records are sorted deterministically by `tileY`, then `tileX`.
 
 Generation validates source dimensions/georeferencing/sample type, exhaustively self-tests the reversible residual transform, round-trips every filtered/compressed tile, compares every emitted shared edge, validates index ranges and uniqueness, then closes and reopens both output files and decodes all blobs. Runtime sampling, affine world placement, and final terrain composition are implemented by the runtime; user-created heightmap layers remain outside this converter stage.
 
-## Conversion Pipeline
-
 ## Japan DEM10 ETOPO-relative delta mosaics
 
 Japan's GSI DEM10 conversion is an explicit offline operation. It is not run by
-the normal asset build and does not register the generated data with the game.
+the normal asset build. When present in `assets/runtime`, the game registers the
+four generated mosaics as additive ETOPO-relative sources for final heightmaps
+whose sample pitch is at most 32 m.
 The downloader always refreshes Source Cooperative's current-file manifest and
 verifies every cached GeoTIFF using both the declared byte size and MD5:
 
@@ -193,7 +219,8 @@ tools\build.cmd Assets
 
 Use `--source`, `--etopo`, and `--out` to override the DEM10 directory, existing
 Codex ETOPO index, and destination. `--self-test` runs dependency-independent
-filter, placement, basis, and positive-edge ownership checks. Normal conversions
+filter, placement, basis, cross-raster bilinear sampling, 2 km ocean-collar,
+and positive-edge ownership checks. Normal conversions
 report source-indexing progress and print an update after every candidate tile,
 including completion percentage, valid-sample and stored-tile counts, elapsed
 time, and ETA. It also writes `japan_dem10_delta_coverage.svg` with a taller,
@@ -204,13 +231,19 @@ are dark neutral.
 
 The converter's libtiff build includes ZSTD support, as required by the Source
 Cooperative DEM10 GeoTIFFs. The command reads EPSG:6668 and NoData metadata from every GeoTIFF, bilinearly
-samples DEM10 on a fixed rotated 10 m grid, and subtracts a bilinear sample
+samples DEM10 on a fixed rotated 10 m grid, resolving bilinear footprints across
+neighboring GeoTIFF files rather than treating file boundaries as missing data, and subtracts a bilinear sample
 decoded from the existing `etopo2022.assetbin`/`heightbin`. It emits four sparse
 `japan_dem10_delta_<id>.assetbin`/`.heightbin` packs, placement/provenance JSON,
 and an SVG coverage/footprint preview. Every mosaic uses signed tile coordinates
 `-128..127`; its `tileX=127/sampleX=255` and `tileY=127/sampleY=255` edges are
 always zero. The transform is deliberately fixed in source and repeated in the
 metadata so future runtime integration cannot silently choose a different fit.
+
+Where DEM10 becomes NoData at the coast, the converter emits a 2 km correction
+collar that cancels positive ETOPO elevation while retaining existing ETOPO
+bathymetry. The correction fades to zero across the collar and is limited to
+the vicinity of the source GeoTIFF coverage.
 
 Conversion keeps decoded ETOPO tiles resident for reuse and maintains a bounded
 eight-raster DEM10 working set. This prevents repeated TIFF/ZSTD and ETOPO/LZ4
@@ -229,6 +262,8 @@ Suggested quality validation after a full conversion is to inspect Mt. Fuji and
 representative locations by reconstructing `ETOPO + delta`, confirm the result
 matches DEM10 to integer-meter encoding tolerance, and inspect
 `japan_dem10_delta_coverage.svg` for footprint coverage.
+
+## Conversion Pipeline
 
 The converter follows a simple two-stage flow:
 
@@ -255,6 +290,11 @@ For the pine tree pack, that flow now includes an additional imposter-generation
 - [TextureImport.cpp](TextureImport.cpp): TGA and PNG decoding, texture normalization, resize rules, color-space inference, and deduplication
 - [PineImposterGenerator.cpp](PineImposterGenerator.cpp): offscreen pine imposter capture, supersampled downfiltering, alpha-coverage-preserving mip generation, and BC compression setup
 - [FontMsdfConverter.cpp](FontMsdfConverter.cpp): FreeType-based Roboto outline loading, MSDF atlas generation, and glyph metric record generation
+- [EtopoHeightmapConverter.cpp](EtopoHeightmapConverter.cpp): global ETOPO projection, tiling, filtering, previews, and pack validation
+- [JapanDem10Converter.cpp](JapanDem10Converter.cpp): DEM10 catalog sampling, ETOPO-relative delta generation, coastline collar, mosaics, metadata, and previews
+- [EtopoGeoTiffReader.cpp](EtopoGeoTiffReader.cpp): GeoTIFF metadata and raster access shared by heightmap conversion
+- [IcosahedralProjection.cpp](IcosahedralProjection.cpp): fixed Airocean-layout projection used by converter and runtime
+- [HeightmapTileFilter.cpp](HeightmapTileFilter.cpp): reversible height-sample filter used before LZ4 compression
 
 ### Runtime format writers
 
@@ -314,6 +354,8 @@ The generated bins are loaded directly by the main app:
 - `SkyboxRenderer` loads `skybox.texbin` and `skybox.assetbin`
 - `QuadtreeMeshRenderer` loads `pbr.texbin` and `pbr.assetbin` for terrain material layers
 - `WorldTextRenderer` loads `roboto.texbin` and `roboto.assetbin` for the MSDF atlas and glyph layout
+- `WorldGridQuadtreeHeightmapManager` loads `etopo2022.assetbin`/`.heightbin` as the global base source and optionally registers all four Japan DEM10 delta packs with their fixed affine placements and 32 m pitch gate
+- composed final heightmaps retain source references while resident; `QuadtreeMeshRenderer` owns the GPU source cache and final-heightmap resources
 
 That makes converter correctness immediately visible in the runtime for mesh layout, material wiring, texture assignment, normal mapping, alpha-mask handling, and skybox cubemap assembly.
 
@@ -326,5 +368,9 @@ The converter fetches and uses:
 - Assimp
 - DirectXTex
 - FreeType
+- libtiff, with ZSTD and DEFLATE support for source GeoTIFFs
+- LZ4 for independently compressed runtime blobs
 
-These are converter-only dependencies. The main runtime app only consumes the generated binary packs and the shared runtime reader.
+These are fetched by the converter build. Assimp, DirectXTex, FreeType, libtiff,
+and ZSTD are converter-only; the main runtime consumes the generated binary
+packs through the shared reader and uses LZ4 to decode their individual blobs.

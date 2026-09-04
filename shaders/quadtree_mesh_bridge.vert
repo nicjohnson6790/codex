@@ -26,6 +26,9 @@ struct TerrainInstance
 {
     vec3 position;
     uint packedMetadata;
+    uvec4 heightmapIndices;
+    uvec2 cornerSampleCoords;
+    uvec2 reserved;
 };
 
 layout(set=0, binding=1, std430) readonly buffer InstanceBuffer
@@ -116,12 +119,30 @@ void rotateBridgeCoords(uint edgeIndex, out vec2 localCoord, out ivec2 sampleCoo
         float(kHeightmapMaxCoord) - baseSampleCoord.x);
 }
 
+ivec2 unpackSampleCoord(uint packedCoord)
+{
+    return ivec2(int(packedCoord & 0xFFFFu), int(packedCoord >> 16u));
+}
+
+ivec2 coarseOuterSampleCoord(uint edgeIndex, uint coarseHalf, vec2 localCoord)
+{
+    int along = int(round((edgeIndex == 0u || edgeIndex == 2u ? localCoord.y : localCoord.x) * 0.5));
+    along += int(coarseHalf) * 128;
+    if (edgeIndex == 0u)
+        return ivec2(int(kHeightmapMaxCoord) - 1, 1 + along);
+    if (edgeIndex == 1u)
+        return ivec2(1 + along, int(kHeightmapMaxCoord) - 1);
+    if (edgeIndex == 2u)
+        return ivec2(1, 1 + along);
+    return ivec2(1 + along, 1);
+}
+
 void main()
 {
     TerrainInstance instance = instanceBuffer.instanceData[gl_InstanceIndex];
-    uint sliceIndex = instance.packedMetadata & 0xFFFFu;
     uint scalePow = (instance.packedMetadata >> 16u) & 0xFFu;
     uint edgeIndex = (instance.packedMetadata >> 24u) & 0x3u;
+    uint coarseHalf = (instance.packedMetadata >> 26u) & 0x1u;
     float leafSize = kMinimumQuadSize * exp2(float(scalePow));
     float sampleSpacing = leafSize / kHeightmapLeafIntervalCount;
 
@@ -129,6 +150,28 @@ void main()
     ivec2 sampleCoord = ivec2(0);
     rotateBridgeCoords(edgeIndex, localCoord, sampleCoord);
 
+    bool outerVertex = inLocalCoord.x == 0.0;
+    bool firstCorner = outerVertex && inLocalCoord.y == 0.0;
+    bool secondCorner = outerVertex && inLocalCoord.y == kHeightmapLeafIntervalCount;
+    uint sliceIndex = outerVertex ? instance.heightmapIndices.y : instance.heightmapIndices.x;
+    float heightSampleSpacing = sampleSpacing;
+    if (outerVertex && instance.heightmapIndices.y != instance.heightmapIndices.x)
+    {
+        sampleCoord = coarseOuterSampleCoord(edgeIndex, coarseHalf, localCoord);
+        heightSampleSpacing *= 2.0;
+    }
+    if (firstCorner)
+    {
+        sliceIndex = instance.heightmapIndices.z;
+        sampleCoord = unpackSampleCoord(instance.cornerSampleCoords.x);
+        heightSampleSpacing = sliceIndex == instance.heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
+    }
+    else if (secondCorner)
+    {
+        sliceIndex = instance.heightmapIndices.w;
+        sampleCoord = unpackSampleCoord(instance.cornerSampleCoords.y);
+        heightSampleSpacing = sliceIndex == instance.heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
+    }
     float height = sampleHeight(sliceIndex, sampleCoord);
     vec2 localOffset = localCoord * sampleSpacing;
 
@@ -140,6 +183,6 @@ void main()
 
     gl_Position = terrain.viewProjection * vec4(worldPosition, 1.0);
     fragLocalPosition = worldPosition;
-    fragWorldNormal = computeNormal(sliceIndex, sampleCoord, sampleSpacing);
+    fragWorldNormal = computeNormal(sliceIndex, sampleCoord, heightSampleSpacing);
     fragAllowCaustics = scalePow == 0u ? 1u : 0u;
 }

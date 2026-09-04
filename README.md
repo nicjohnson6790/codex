@@ -1,6 +1,6 @@
 # SDL3 GPU Terrain Sandbox
 
-![rendered screenshot](images/Screenshot%202026-05-16%20175430.png)
+![NW of Teshima looking WSW](images/Screenshot%202026-09-04%20181340.png)
 
 Codex is an experimental large-world terrain sandbox and editor built in C++20 with SDL3 GPU and Dear ImGui. It combines streamed quadtree terrain, procedural foliage, FFT water, atmospheric rendering, world-space text, and optional Steam multiplayer in a dockable desktop UI.
 
@@ -71,9 +71,15 @@ tools\build.cmd Assets
 .\build\Assets\Release\converter\converter.exe pinetreepack
 .\build\Assets\Release\converter\converter.exe pbr
 .\build\Assets\Release\converter\converter.exe roboto
+# Generate the global ETOPO base heightmap after installing its source data
+.\build\Assets\Release\converter\converter.exe etopo2022
+# Optionally generate the higher-resolution Japan DEM10 delta heightmaps
+.\build\Assets\Release\converter\converter.exe japan-dem10
 ```
 
-The pine source pack is externally licensed and is not part of the repository. Details about expected source directories, individual converter modes, and the optional ETOPO global-heightmap build are in the [asset converter guide](tools/converter/README.md). The runtime terrain system consumes the generated ETOPO tile pack through its source-heightmap cache.
+The terrain requires the generated ETOPO pack as its global base heightmap. The optional Japan DEM10 conversion produces four additive, ETOPO-relative delta packs; the runtime streams them over Japan only at terrain pitches of 32 m or finer. Their coastline correction collars suppress positive coarse ETOPO terrain for 2 km beyond valid DEM10 coverage so land does not reappear immediately offshore.
+
+The ETOPO, Japan DEM10, and pine source data are supplied separately and are not part of the repository. Details about their expected source directories and every converter mode are in the [asset converter guide](tools/converter/README.md). Generated heightmap packs remain under the ignored `assets/runtime` tree and are staged into the application by the next normal build.
 
 ## Optional Steamworks support
 

@@ -697,15 +697,64 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
 
     m_heightmapManager.requestLeaf(node.nodeId, *renderEngines.quadtreeMeshRenderer);
 
+    std::array<std::optional<CoarseTerrainNeighbor>, 4> coarseNeighbors{};
+    for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
+        coarseNeighbors[edgeIndex] = drawableCoarserNeighbor(nodeIndex, edgeIndex);
+
+    struct CornerOwner
+    {
+        WorldGridQuadtreeLeafId leafId{};
+        std::uint16_t sliceIndex = 0;
+        bool coarse = false;
+    };
+    std::array<CornerOwner, 4> corners{}; // southwest, southeast, northeast, northwest
+    for (auto &corner : corners)
+        corner = {node.nodeId, sliceIndex, false};
+    constexpr std::array<std::array<std::uint8_t, 2>, 4> edgeCorners{{{{0, 3}}, {{1, 0}}, {{2, 1}}, {{3, 2}}}};
+    for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
+        if (coarseNeighbors[edgeIndex])
+            for (const std::uint8_t cornerIndex : edgeCorners[edgeIndex])
+                if (!corners[cornerIndex].coarse)
+                    corners[cornerIndex] = {m_nodes[coarseNeighbors[edgeIndex]->nodeIndex].nodeId,
+                                            coarseNeighbors[edgeIndex]->sliceIndex, true};
+
+    const auto [nodeMin, nodeMax] = worldGridQuadtreeLeafBounds(node.nodeId);
+    const std::array<Position, 4> cornerPositions{{nodeMin,
+                                                   Position(nodeMax.gridX(), nodeMin.gridY(),
+                                                            {nodeMax.localPosition().x, 0.0, nodeMin.localPosition().z}),
+                                                   nodeMax,
+                                                   Position(nodeMin.gridX(), nodeMax.gridY(),
+                                                            {nodeMin.localPosition().x, 0.0, nodeMax.localPosition().z})}};
+    const auto packCornerSample = [&](std::uint8_t cornerIndex) {
+        const auto [ownerMin, ownerMax] = worldGridQuadtreeLeafBounds(corners[cornerIndex].leafId);
+        (void)ownerMax;
+        const glm::dvec3 offset = cornerPositions[cornerIndex].localCoordinatesInCellOf(ownerMin);
+        const double pitch = worldGridQuadtreeLeafSize(corners[cornerIndex].leafId) /
+                             AppConfig::Terrain::kHeightmapLeafIntervalCount;
+        const std::uint32_t x = static_cast<std::uint32_t>(std::llround(offset.x / pitch)) + AppConfig::Terrain::kHeightmapLeafHalo;
+        const std::uint32_t z = static_cast<std::uint32_t>(std::llround(offset.z / pitch)) + AppConfig::Terrain::kHeightmapLeafHalo;
+        return x | (z << 16u);
+    };
+
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
     {
-        if (edgeHasDrawableCoarserNeighbor(nodeIndex, edgeIndex))
+        const auto cornerIds = edgeCorners[edgeIndex];
+        QuadtreeMeshRenderer::BridgeHeightmaps heightmaps{
+            sliceIndex,
+            coarseNeighbors[edgeIndex] ? coarseNeighbors[edgeIndex]->sliceIndex : sliceIndex,
+            corners[cornerIds[0]].sliceIndex,
+            corners[cornerIds[1]].sliceIndex,
+            packCornerSample(cornerIds[0]),
+            packCornerSample(cornerIds[1]),
+            coarseNeighbors[edgeIndex] ? coarseNeighbors[edgeIndex]->half : 0u,
+        };
+        if (coarseNeighbors[edgeIndex])
         {
-            renderEngines.quadtreeMeshRenderer->addCoarseBridge(node.nodeId, sliceIndex, edgeIndex);
+            renderEngines.quadtreeMeshRenderer->addCoarseBridge(node.nodeId, heightmaps, edgeIndex);
         }
         else
         {
-            renderEngines.quadtreeMeshRenderer->addBridge(node.nodeId, sliceIndex, edgeIndex);
+            renderEngines.quadtreeMeshRenderer->addBridge(node.nodeId, heightmaps, edgeIndex);
         }
     }
 }
@@ -1483,12 +1532,13 @@ bool WorldGridQuadtree::edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex,
     return subtreeEdgeCoveredByTerrain(neighborRootIndex, oppositeEdge(edgeIndex));
 }
 
-bool WorldGridQuadtree::edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
+std::optional<WorldGridQuadtree::CoarseTerrainNeighbor> WorldGridQuadtree::drawableCoarserNeighbor(
+    std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
 {
     const std::uint16_t neighborRootIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
     if (neighborRootIndex == QuadtreeNode::NullNodeIndex)
     {
-        return false;
+        return std::nullopt;
     }
 
     const QuadtreeNode& node = m_nodes[nodeIndex];
@@ -1496,9 +1546,17 @@ bool WorldGridQuadtree::edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, 
     const double nodeSize = worldGridQuadtreeLeafSize(node.nodeId);
     const double neighborSize = worldGridQuadtreeLeafSize(neighborRoot.nodeId);
     std::uint16_t sliceIndex = 0;
-    return
-        std::abs(neighborSize - (nodeSize * 2.0)) <= kEdgeCoverageEpsilon &&
-        m_heightmapManager.getResidentSliceIndex(neighborRoot.nodeId, sliceIndex);
+    if (std::abs(neighborSize - (nodeSize * 2.0)) > kEdgeCoverageEpsilon ||
+        !m_heightmapManager.getResidentSliceIndex(neighborRoot.nodeId, sliceIndex))
+        return std::nullopt;
+    const auto [nodeMin, nodeMax] = worldGridQuadtreeLeafBounds(node.nodeId);
+    const auto [neighborMin, neighborMax] = worldGridQuadtreeLeafBounds(neighborRoot.nodeId);
+    (void)nodeMax;
+    (void)neighborMax;
+    const glm::dvec3 offset = nodeMin.localCoordinatesInCellOf(neighborMin);
+    const double parallelOffset = edgeIndex == kEdgeWest || edgeIndex == kEdgeEast ? offset.z : offset.x;
+    return CoarseTerrainNeighbor{neighborRootIndex, sliceIndex,
+                                 static_cast<std::uint8_t>(parallelOffset >= neighborSize * 0.5 ? 1u : 0u)};
 }
 
 bool WorldGridQuadtree::edgeHasWaterNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const

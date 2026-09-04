@@ -324,7 +324,7 @@ void QuadtreeMeshRenderer::initialize(SDL_GPUDevice *device, SDL_GPUTextureForma
 
     SDL_GPUBufferCreateInfo bridgeInstanceInfo{};
     bridgeInstanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-    bridgeInstanceInfo.size = static_cast<Uint32>(sizeof(InstanceData) * (m_bridgeInstanceData.size() + m_coarseBridgeInstanceData.size()));
+    bridgeInstanceInfo.size = static_cast<Uint32>(sizeof(BridgeInstanceData) * (m_bridgeInstanceData.size() + m_coarseBridgeInstanceData.size()));
     m_bridgeInstanceBuffer = SDL_CreateGPUBuffer(m_device, &bridgeInstanceInfo);
     if (m_bridgeInstanceBuffer == nullptr)
     {
@@ -798,7 +798,7 @@ void QuadtreeMeshRenderer::addLeaf(const WorldGridQuadtreeLeafId &leafId, std::u
     };
 }
 
-void QuadtreeMeshRenderer::addBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex)
+void QuadtreeMeshRenderer::addBridge(const WorldGridQuadtreeLeafId &leafId, const BridgeHeightmaps &heightmaps, std::uint8_t edgeIndex)
 {
     if (m_bridgeInstanceCount >= m_bridgeInstanceData.size())
     {
@@ -815,11 +815,15 @@ void QuadtreeMeshRenderer::addBridge(const WorldGridQuadtreeLeafId &leafId, std:
             localMinCorner.y,
             localMinCorner.z,
         },
-        .packedMetadata = packMetadata(sliceIndex, worldGridQuadtreeLeafScalePow(leafId), edgeIndex),
+        .packedMetadata = packMetadata(heightmaps.inner, worldGridQuadtreeLeafScalePow(leafId), edgeIndex) |
+                          (static_cast<std::uint32_t>(heightmaps.coarseHalf & 1u) << 26u),
+        .heightmapIndices{heightmaps.inner, heightmaps.outer, heightmaps.firstCorner, heightmaps.secondCorner},
+        .cornerSampleCoords{heightmaps.firstCornerSample, heightmaps.secondCornerSample},
     };
 }
 
-void QuadtreeMeshRenderer::addCoarseBridge(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, std::uint8_t edgeIndex)
+void QuadtreeMeshRenderer::addCoarseBridge(const WorldGridQuadtreeLeafId &leafId, const BridgeHeightmaps &heightmaps,
+                                           std::uint8_t edgeIndex)
 {
     if (m_coarseBridgeInstanceCount >= m_coarseBridgeInstanceData.size())
     {
@@ -836,7 +840,10 @@ void QuadtreeMeshRenderer::addCoarseBridge(const WorldGridQuadtreeLeafId &leafId
             localMinCorner.y,
             localMinCorner.z,
         },
-        .packedMetadata = packMetadata(sliceIndex, worldGridQuadtreeLeafScalePow(leafId), edgeIndex),
+        .packedMetadata = packMetadata(heightmaps.inner, worldGridQuadtreeLeafScalePow(leafId), edgeIndex) |
+                          (static_cast<std::uint32_t>(heightmaps.coarseHalf & 1u) << 26u),
+        .heightmapIndices{heightmaps.inner, heightmaps.outer, heightmaps.firstCorner, heightmaps.secondCorner},
+        .cornerSampleCoords{heightmaps.firstCornerSample, heightmaps.secondCornerSample},
     };
 }
 
@@ -943,12 +950,12 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
 
     if (m_bridgeInstanceCount > 0)
     {
-        sortInstances(m_bridgeInstanceData.data(), m_bridgeInstanceCount);
+        sortBridgeInstances(m_bridgeInstanceData.data(), m_bridgeInstanceCount);
     }
 
     if (m_coarseBridgeInstanceCount > 0)
     {
-        sortInstances(m_coarseBridgeInstanceData.data(), m_coarseBridgeInstanceCount);
+        sortBridgeInstances(m_coarseBridgeInstanceData.data(), m_coarseBridgeInstanceCount);
     }
 
     if (m_bridgeInstanceCount > 0 || m_coarseBridgeInstanceCount > 0)
@@ -958,7 +965,7 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
         std::size_t bridgeBytes = 0;
         if (m_bridgeInstanceCount > 0)
         {
-            bridgeBytes = sizeof(InstanceData) * m_bridgeInstanceCount;
+            bridgeBytes = sizeof(BridgeInstanceData) * m_bridgeInstanceCount;
             std::memcpy(mappedBridgeBytes, m_bridgeInstanceData.data(), bridgeBytes);
         }
 
@@ -966,7 +973,7 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
         {
             const std::size_t coarseBridgeOffset = bridgeBytes;
             std::memcpy(mappedBridgeBytes + coarseBridgeOffset, m_coarseBridgeInstanceData.data(),
-                        sizeof(InstanceData) * m_coarseBridgeInstanceCount);
+                        sizeof(BridgeInstanceData) * m_coarseBridgeInstanceCount);
         }
         SDL_UnmapGPUTransferBuffer(m_device, m_bridgeInstanceTransferBuffer);
 
@@ -974,7 +981,7 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
         bridgeInstanceSource.transfer_buffer = m_bridgeInstanceTransferBuffer;
         SDL_GPUBufferRegion bridgeInstanceDestination{};
         bridgeInstanceDestination.buffer = m_bridgeInstanceBuffer;
-        bridgeInstanceDestination.size = static_cast<Uint32>(sizeof(InstanceData) * (m_bridgeInstanceCount + m_coarseBridgeInstanceCount));
+        bridgeInstanceDestination.size = static_cast<Uint32>(sizeof(BridgeInstanceData) * (m_bridgeInstanceCount + m_coarseBridgeInstanceCount));
         SDL_UploadToGPUBuffer(copyPass, &bridgeInstanceSource, &bridgeInstanceDestination, true);
 
         m_bridgeIndirectCommandCount = 0;
@@ -2317,6 +2324,19 @@ void QuadtreeMeshRenderer::sortInstances(InstanceData *instances, std::uint16_t 
 
     std::sort(instances, instances + instanceCount, [](const InstanceData &left, const InstanceData &right) {
         return instanceDistanceSquared(left) < instanceDistanceSquared(right);
+    });
+}
+
+void QuadtreeMeshRenderer::sortBridgeInstances(BridgeInstanceData *instances, std::uint16_t instanceCount)
+{
+    if (instanceCount <= 1)
+        return;
+    std::sort(instances, instances + instanceCount, [](const BridgeInstanceData &left, const BridgeInstanceData &right) {
+        const auto distanceSquared = [](const BridgeInstanceData &instance) {
+            return instance.position[0] * instance.position[0] + instance.position[1] * instance.position[1] +
+                   instance.position[2] * instance.position[2];
+        };
+        return distanceSquared(left) < distanceSquared(right);
     });
 }
 

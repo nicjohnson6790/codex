@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -24,6 +25,7 @@ struct SourceHeightmap
     glm::dvec2 xTileAxis{static_cast<double>(Position::kCellSize), 0.0};
     double yScale = 1.0;
     glm::dvec2 zTileAxis{0.0, static_cast<double>(Position::kCellSize)};
+    double maxContributionPitch = std::numeric_limits<double>::infinity();
 };
 
 struct SourceTileId
@@ -58,7 +60,8 @@ class HeightmapDataset
 class EtopoHeightmapDataset final : public HeightmapDataset
 {
   public:
-    static std::shared_ptr<EtopoHeightmapDataset> open(const std::filesystem::path &indexPath, std::string &error);
+    static std::shared_ptr<EtopoHeightmapDataset> open(const std::filesystem::path &indexPath, std::string &error,
+                                                       HeightmapDatasetId datasetId = 0x45544f504f323032ULL);
 
     [[nodiscard]] HeightmapDatasetId datasetId() const override
     {

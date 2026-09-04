@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 class RenderEngines;
 class FoliageCanopyRenderer;
@@ -93,6 +94,12 @@ public:
     TreeData treeData{};
 
 private:
+    struct CoarseTerrainNeighbor
+    {
+        std::uint16_t nodeIndex = QuadtreeNode::NullNodeIndex;
+        std::uint16_t sliceIndex = 0;
+        std::uint8_t half = 0;
+    };
     static constexpr std::uint32_t kQuadrantCount = 4;
 
     enum class LodDecision
@@ -160,7 +167,8 @@ private:
     void emitTerrainDrawForNode(std::uint16_t nodeIndex, const QuadtreeNode& node, RenderEngines& renderEngines);
     void emitWaterDrawForNode(std::uint16_t nodeIndex, const QuadtreeNode& node, WorldGridQuadtreeWaterManager& waterManager) const;
     [[nodiscard]] bool edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
-    [[nodiscard]] bool edgeHasDrawableCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
+    [[nodiscard]] std::optional<CoarseTerrainNeighbor> drawableCoarserNeighbor(std::uint16_t nodeIndex,
+                                                                                std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasWaterNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasWaterCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] std::uint16_t findBaseNode(std::int64_t gridX, std::int64_t gridY) const;

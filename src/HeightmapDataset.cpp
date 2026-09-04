@@ -46,6 +46,8 @@ std::vector<SourceTileCoordinate> collectOverlappingSourceTiles(const SourceHeig
     double minX, minZ, size;
     worldGridQuadtreeLeafExtents(finalHeightmap, minX, minZ, size);
     const double pitch = size / AppConfig::Terrain::kHeightmapLeafIntervalCount;
+    if (pitch > source.maxContributionPitch)
+        return {};
     minX -= pitch * AppConfig::Terrain::kHeightmapLeafHalo;
     minZ -= pitch * AppConfig::Terrain::kHeightmapLeafHalo;
     const double maxX = minX + pitch * (AppConfig::Terrain::kHeightmapResolution - 1);
@@ -95,10 +97,12 @@ constexpr std::size_t rasterIndex(std::size_t traversalIndex)
 }
 } // namespace
 
-std::shared_ptr<EtopoHeightmapDataset> EtopoHeightmapDataset::open(const std::filesystem::path &indexPath, std::string &error)
+std::shared_ptr<EtopoHeightmapDataset> EtopoHeightmapDataset::open(const std::filesystem::path &indexPath, std::string &error,
+                                                                  HeightmapDatasetId datasetId)
 {
     std::ifstream input(indexPath, std::ios::binary);
     auto result = std::shared_ptr<EtopoHeightmapDataset>(new EtopoHeightmapDataset());
+    result->m_datasetId = datasetId;
     if (!input.read(reinterpret_cast<char *>(&result->m_header), sizeof(result->m_header)))
     {
         error = "could not read ETOPO heightmap header: " + indexPath.string();
