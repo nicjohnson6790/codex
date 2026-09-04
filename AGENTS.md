@@ -8,9 +8,10 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 
 - Codex is a Windows C++20 terrain sandbox using SDL3 GPU, Dear ImGui, CMake, Ninja, and GLSL compiled to SPIR-V.
 - The root [README.md](README.md) is intentionally an onboarding document. Detailed rendering design belongs in [docs/codex_rendering_architecture.md](docs/codex_rendering_architecture.md).
-- Canonical builds are `tools\build.cmd Debug`, `tools\build.cmd Release`, and `tools\build.cmd Assets`.
-- Canonical build directories are `build/Debug`, `build/Release`, and `build/Assets`. Avoid creating alternate build-directory names for routine validation.
-- Keep target runtime outputs isolated: the app and its staged resources belong in `build/<Config>/app`, tests in `build/<Config>/tests`, and the asset converter in `build/Assets/converter`. Do not stage target outputs directly into a canonical build root.
+- Canonical builds are `tools\build.cmd Debug`, `tools\build.cmd Release`, and `tools\build.cmd Assets [Debug|Release]`; the Assets configuration defaults to Release.
+- `tools\build.cmd Assets [Debug|Release]` builds the converter only. Every asset-pack conversion is an explicit `build\Assets\<Config>\converter\converter.exe <pack>` operation.
+- Canonical build directories are `build/Debug`, `build/Release`, `build/Assets/Debug`, and `build/Assets/Release`. Avoid creating alternate build-directory names for routine validation.
+- Keep target runtime outputs isolated: the app and its staged resources belong in `build/<Config>/app`, tests in `build/<Config>/tests`, and the asset converter in `build/Assets/<Config>/converter`. Do not stage target outputs directly into a canonical build root.
 - Generate local runtime metadata such as `steam_appid.txt` directly in `build/<Config>/app`; do not create an intermediate copy in the canonical build root.
 - The build/configure scripts detect CMake caches that reference a removed MSVC compiler and automatically reconfigure with `cmake --fresh`.
 
@@ -32,4 +33,6 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 - Shared asset-cache/generation-queue infrastructure and migrations are implemented locally; focused coverage is in `tests/AssetResidencyTests.cpp` and built by default as `asset_residency_tests`.
 - Runtime heightmaps now compose cached 256x256 ETOPO source tiles through contribution descriptors; repeated placements share source residency and remain additive.
 - Terrain materials, water FFT sampling, foam detail, and terrain caustics use CPU-computed periodic phases from `Position` via `src/PeriodicWorldPhase.hpp`; keep repeating shader coordinates render-origin-relative rather than reconstructing absolute X/Z floats.
+- The offline `japan-dem10` converter path creates four fixed rotated 10 m ETOPO-relative delta mosaics from Source Cooperative's manifest-backed EPSG:6668 DEM10 files. It is asset-generation-only; do not register those packs with the runtime without a separate change.
+- Japan DEM10 conversion retains decoded ETOPO tiles and uses a bounded eight-raster DEM10 working set; preserve these caches to avoid severe boundary-thrashing regressions.
 - Add concrete unfinished work here only when it must survive into another session; include the relevant file or subsystem and the next useful action.

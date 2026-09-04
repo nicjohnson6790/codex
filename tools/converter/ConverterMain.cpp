@@ -1,5 +1,6 @@
 #include "PineTreePackConverter.hpp"
 #include "EtopoHeightmapConverter.hpp"
+#include "JapanDem10Converter.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -63,7 +64,28 @@ void PrintUsage()
         << "  converter.exe pbr\n"
         << "  converter.exe roboto\n"
         << "  converter.exe etopo2022 [--source <tif>] [--out <directory>] [--verbose|--self-test]\n"
+        << "  converter.exe japan-dem10 [--source <directory>] [--etopo <assetbin>] [--out <directory>] [--verbose|--self-test]\n"
         << "  converter.exe --source <path> --out <path> --name <pack>\n";
+}
+
+bool RunJapanDem10(int argc, char** argv, std::string* error)
+{
+    JapanDem10ConversionConfig config{repoRoot() / "assets" / "source" / "japan-dem10",
+        repoRoot() / "assets" / "runtime" / "etopo2022.assetbin", repoRoot() / "assets" / "runtime", false, false};
+    for (int index = 2; index < argc; ++index)
+    {
+        const std::string_view arg = argv[index];
+        if ((arg == "--source" || arg == "--etopo" || arg == "--out") && index + 1 >= argc)
+        { *error = std::string(arg) + " requires a path"; return false; }
+        if (arg == "--source") config.sourceRoot = argv[++index];
+        else if (arg == "--etopo") config.etopoIndex = argv[++index];
+        else if (arg == "--out") config.outputRoot = argv[++index];
+        else if (arg == "--verbose") config.verbose = true;
+        else if (arg == "--self-test") config.selfTestOnly = true;
+        else { *error = "unknown japan-dem10 argument: " + std::string(arg); return false; }
+    }
+    JapanDem10Converter converter; JapanDem10ConversionSummary summary;
+    return converter.run(config, &summary, error);
 }
 
 bool RunEtopo(int argc, char** argv, std::string* error)
@@ -164,6 +186,13 @@ int main(int argc, char** argv)
         if (!success) std::cerr << "ETOPO conversion failed: " << etopoError << '\n';
         SDL_Quit();
         return success ? 0 : 1;
+    }
+    if (argc >= 2 && std::string_view(argv[1]) == "japan-dem10")
+    {
+        std::string conversionError;
+        const bool success = RunJapanDem10(argc, argv, &conversionError);
+        if (!success) std::cerr << "Japan DEM10 conversion failed: " << conversionError << '\n';
+        SDL_Quit(); return success ? 0 : 1;
     }
 
     ConverterConfig config;

@@ -9,14 +9,17 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <set>
 #include <span>
+#include <sstream>
 #include <vector>
 
 namespace
@@ -30,6 +33,17 @@ struct TileEdges
 {
     std::array<std::int16_t, kResolution> left{}, right{}, bottom{}, top{};
 };
+
+std::string FormatDuration(double seconds)
+{
+    const auto total = static_cast<std::uint64_t>(std::max(0.0, seconds));
+    const auto hours = total / 3600, minutes = total % 3600 / 60, secs = total % 60;
+    std::ostringstream out;
+    if (hours) out << hours << 'h' << std::setfill('0') << std::setw(2) << minutes << 'm';
+    else if (minutes) out << minutes << 'm' << std::setfill('0') << std::setw(2) << secs << 's';
+    else out << secs << 's';
+    return out.str();
+}
 
 template <typename T>
 bool WriteObject(std::ofstream& stream, const T& value)
@@ -330,16 +344,13 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
         !projection.inverse(japanX, japanY, &japanLongitude, &japanLatitude) ||
         std::abs(japanLongitude - 139.6917) > 1e-6 || std::abs(japanLatitude - 35.6895) > 1e-6)
     { if (error) *error = "icosahedral projection Japan round-trip self-test failed"; return false; }
-    if (config.verbose)
-    {
-        double northX = 0.0, northY = 0.0, eastX = 0.0, eastY = 0.0;
-        if (!projection.forward(139.6917, 36.6895, &northX, &northY) ||
-            !projection.forward(140.6917, 35.6895, &eastX, &eastY))
-        { if (error) *error = "icosahedral projection local-basis check failed"; return false; }
-        std::cout << "Tokyo projection: " << japanX << ", " << japanY << " m; local north vector: "
-                  << northX - japanX << ", " << northY - japanY << " m/degree; local east vector: " << eastX - japanX << ", "
-                  << eastY - japanY << " m/degree\n";
-    }
+    double northX = 0.0, northY = 0.0, eastX = 0.0, eastY = 0.0;
+    if (!projection.forward(139.6917, 36.6895, &northX, &northY) ||
+        !projection.forward(140.6917, 35.6895, &eastX, &eastY))
+    { if (error) *error = "icosahedral projection local-basis check failed"; return false; }
+    std::cout << "Tokyo projection: " << japanX << ", " << japanY << " m; local north vector: "
+              << northX - japanX << ", " << northY - japanY << " m/degree; local east vector: " << eastX - japanX << ", "
+              << eastY - japanY << " m/degree\n";
     if (config.selfTestOnly)
     {
         std::cout << "ETOPO self-tests passed: exhaustive filter round-trip and projection origin/bounds\n";
@@ -372,6 +383,17 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
     std::vector<HeightmapTileRecord> records;
     std::map<std::pair<int, int>, TileEdges> edges;
     Tile tile{};
+    std::int32_t completedTiles = 0;
+    const auto conversionStarted = std::chrono::steady_clock::now();
+    auto reportProgress = [&](int tx, int ty, std::uint32_t validCount, std::size_t compressedBytes) {
+        ++completedTiles;
+        const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - conversionStarted).count();
+        const double eta = completedTiles ? elapsed * (summary->candidateTiles - completedTiles) / completedTiles : 0.0;
+        std::cout << "tile " << completedTiles << '/' << summary->candidateTiles << " (" << std::fixed << std::setprecision(1)
+                  << (100.0 * completedTiles / summary->candidateTiles) << "%), (" << tx << ',' << ty << "), " << validCount
+                  << " valid, " << compressedBytes << " bytes, " << summary->storedTiles << " stored, elapsed "
+                  << FormatDuration(elapsed) << ", ETA " << FormatDuration(eta) << '\n';
+    };
     for (int ty = minY; ty <= maxY; ++ty)
     for (int tx = minX; tx <= maxX; ++tx)
     {
@@ -394,7 +416,7 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
             }
             tile[y * kResolution + x] = value;
         }
-        if (validCount == 0) { ++summary->omittedTiles; continue; }
+        if (validCount == 0) { ++summary->omittedTiles; reportProgress(tx, ty, 0, 0); continue; }
         if (validCount != tile.size()) ++summary->partialTiles;
 
         std::vector<std::byte> filtered, compressed, decompressed;
@@ -418,7 +440,7 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
         ++summary->storedTiles;
         summary->rawBytes += tile.size() * sizeof(std::int16_t); summary->filteredBytes += filtered.size(); summary->compressedBytes += compressed.size();
         summary->minHeight = std::min(summary->minHeight, tileMin); summary->maxHeight = std::max(summary->maxHeight, tileMax);
-        if (config.verbose) std::cout << "tile (" << tx << ',' << ty << "): " << validCount << " valid, " << compressed.size() << " bytes\n";
+        reportProgress(tx, ty, validCount, compressed.size());
     }
     data.close();
     if (!ValidateBorders(edges, error)) return false;

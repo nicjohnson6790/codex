@@ -41,7 +41,7 @@ bool EtopoGeoTiffReader::open(const std::filesystem::path& path, std::string* er
 
     double* scale = nullptr;
     double* tiePoints = nullptr;
-    std::uint16_t scaleCount = 0, tieCount = 0;
+    std::uint32_t scaleCount = 0, tieCount = 0;
     constexpr ttag_t modelPixelScaleTag = 33550;
     constexpr ttag_t modelTiepointTag = 33922;
     if (!TIFFGetField(tiff.get(), modelPixelScaleTag, &scaleCount, &scale) || scaleCount < 2 ||

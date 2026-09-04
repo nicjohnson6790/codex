@@ -16,7 +16,14 @@ if errorlevel 1 exit /b %errorlevel%
 exit /b %errorlevel%
 
 :configure_assets
-set "BUILD_DIR=build\Assets"
+set "ASSET_CONFIG=%~2"
+if not defined ASSET_CONFIG set "ASSET_CONFIG=Release"
+if /I not "%ASSET_CONFIG%"=="Debug" if /I not "%ASSET_CONFIG%"=="Release" (
+    echo Asset configuration must be Debug or Release.
+    echo Usage: tools\configure.cmd Assets [Debug^|Release]
+    exit /b 1
+)
+set "BUILD_DIR=build\Assets\%ASSET_CONFIG%"
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 call :ensure_ninja_cache "%BUILD_DIR%"
 if errorlevel 1 exit /b %errorlevel%
@@ -25,7 +32,17 @@ if "%CMAKE_CACHE_STALE%"=="1" set "CMAKE_FRESH_ARG=--fresh"
 call :setup_vs_tools
 if errorlevel 1 exit /b %errorlevel%
 
-"C:\Program Files\CMake\bin\cmake.exe" %CMAKE_FRESH_ARG% -S tools/converter -B "%BUILD_DIR%" -G Ninja -DCONVERTER_ENABLE_DIRECTXTEX=ON
+set "FETCH_SOURCE_ARGS="
+if exist "build\Assets\_deps\sdl3-src\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_SDL3=%CD%/build/Assets/_deps/sdl3-src"
+if exist "build\Assets\_deps\sdl3_image-src\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_SDL3_IMAGE=%CD%/build/Assets/_deps/sdl3_image-src"
+if exist "build\Assets\_deps\assimp-src\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_ASSIMP=%CD%/build/Assets/_deps/assimp-src"
+if exist "build\Assets\_deps\lz4-src\build\cmake\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_LZ4=%CD%/build/Assets/_deps/lz4-src"
+if exist "build\Assets\_deps\freetype-src\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_FREETYPE=%CD%/build/Assets/_deps/freetype-src"
+if exist "build\Assets\_deps\tiff-src\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_TIFF=%CD%/build/Assets/_deps/tiff-src"
+if exist "build\Assets\_deps\zstd-src\build\cmake\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_ZSTD=%CD%/build/Assets/_deps/zstd-src"
+if exist "build\Assets\_deps\directxtex-src\CMakeLists.txt" set "FETCH_SOURCE_ARGS=%FETCH_SOURCE_ARGS% -DFETCHCONTENT_SOURCE_DIR_DIRECTXTEX=%CD%/build/Assets/_deps/directxtex-src"
+
+"C:\Program Files\CMake\bin\cmake.exe" %CMAKE_FRESH_ARG% -S tools/converter -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=%ASSET_CONFIG% -DCONVERTER_ENABLE_DIRECTXTEX=ON %FETCH_SOURCE_ARGS%
 exit /b %errorlevel%
 
 :setup_vs_tools

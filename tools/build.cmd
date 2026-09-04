@@ -18,27 +18,31 @@ if errorlevel 1 exit /b %errorlevel%
 exit /b %errorlevel%
 
 :build_assets
-set "BUILD_DIR=build\Assets"
+set "ASSET_CONFIG=%~2"
+if not defined ASSET_CONFIG set "ASSET_CONFIG=Release"
+if /I not "%ASSET_CONFIG%"=="Debug" if /I not "%ASSET_CONFIG%"=="Release" (
+    echo Asset configuration must be Debug or Release.
+    echo Usage: tools\build.cmd Assets [Debug^|Release]
+    exit /b 1
+)
+set "BUILD_DIR=build\Assets\%ASSET_CONFIG%"
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 call :ensure_ninja_cache "%BUILD_DIR%"
 if errorlevel 1 exit /b %errorlevel%
-if "%CMAKE_CACHE_STALE%"=="1" call "%~dp0configure.cmd" Assets
+if "%CMAKE_CACHE_STALE%"=="1" call "%~dp0configure.cmd" Assets %ASSET_CONFIG%
 if errorlevel 1 exit /b %errorlevel%
-if not exist "%BUILD_DIR%\build.ninja" call "%~dp0configure.cmd" Assets
+if not exist "%BUILD_DIR%\build.ninja" call "%~dp0configure.cmd" Assets %ASSET_CONFIG%
+if errorlevel 1 exit /b %errorlevel%
+findstr /B /C:"CMAKE_BUILD_TYPE:STRING=%ASSET_CONFIG%" "%BUILD_DIR%\CMakeCache.txt" >nul
+if errorlevel 1 (
+    echo Assets build is not configured for %ASSET_CONFIG%. Reconfiguring.
+    call "%~dp0configure.cmd" Assets %ASSET_CONFIG%
+)
 if errorlevel 1 exit /b %errorlevel%
 call :setup_vs_tools
 if errorlevel 1 exit /b %errorlevel%
 
 "C:\Program Files\CMake\bin\cmake.exe" --build "%BUILD_DIR%" --parallel %NUMBER_OF_PROCESSORS%
-if errorlevel 1 exit /b %errorlevel%
-
-"%BUILD_DIR%\converter\converter.exe" skybox
-if errorlevel 1 exit /b %errorlevel%
-"%BUILD_DIR%\converter\converter.exe" pinetreepack
-if errorlevel 1 exit /b %errorlevel%
-"%BUILD_DIR%\converter\converter.exe" pbr
-if errorlevel 1 exit /b %errorlevel%
-"%BUILD_DIR%\converter\converter.exe" roboto
 exit /b %errorlevel%
 
 :setup_vs_tools

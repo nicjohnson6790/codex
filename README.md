@@ -55,17 +55,22 @@ tools\build.cmd Release
 .\build\Release\app\terrain_sandbox.exe
 ```
 
-The canonical build directories are `build/Debug`, `build/Release`, and `build/Assets`. Application runtime files are isolated under `build/<Config>/app`, tests under `build/<Config>/tests`, and the offline converter under `build/Assets/converter`.
+The canonical build directories are `build/Debug`, `build/Release`, and `build/Assets/<Config>`. Application runtime files are isolated under `build/<Config>/app`, tests under `build/<Config>/tests`, and the offline converter under `build/Assets/<Config>/converter`.
 When `STEAMWORKS_APP_ID` is set, CMake generates `steam_appid.txt` directly beside the application executable in `build/<Config>/app`, including configurations where Steamworks support itself is disabled.
 
 ## Runtime assets
 
 The application loads prebuilt runtime packs from `assets/runtime`; the build copies them into `build/<Config>/app/assets/runtime`. The `assets` tree is intentionally ignored by Git, so a clean clone needs the source/runtime asset set supplied separately before the complete scene can run.
 
-To rebuild the standard packs after their source files are present:
+Build the optimized Release converter, then explicitly generate whichever
+standard packs are needed after their source files are present:
 
 ```powershell
 tools\build.cmd Assets
+.\build\Assets\Release\converter\converter.exe skybox
+.\build\Assets\Release\converter\converter.exe pinetreepack
+.\build\Assets\Release\converter\converter.exe pbr
+.\build\Assets\Release\converter\converter.exe roboto
 ```
 
 The pine source pack is externally licensed and is not part of the repository. Details about expected source directories, individual converter modes, and the optional ETOPO global-heightmap build are in the [asset converter guide](tools/converter/README.md). The runtime terrain system consumes the generated ETOPO tile pack through its source-heightmap cache.

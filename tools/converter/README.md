@@ -29,7 +29,7 @@ The converter currently builds three asset groups:
   - the MSDF atlas is stored as uncompressed `RGBA8_UNORM` texels inside `texbin`; the texel payload is still LZ4-compressed like the other runtime textures
   - font atlas and glyph layout records are stored in `assetbin`
 
-All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/app/assets/runtime` by the main build. The converter executable itself is isolated under `build/Assets/converter`.
+All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/app/assets/runtime` by the main build. Converter executables are isolated under `build/Assets/<Config>/converter`.
 
 ## Source Assets
 
@@ -83,23 +83,33 @@ From the repo root:
 
 ```powershell
 tools\build.cmd Assets
+tools\build.cmd Assets Debug
 ```
 
-That command configures the standalone converter into `build\Assets`, builds it, and regenerates the supported packs.
+The configuration argument is optional and defaults to Release. These commands
+build the standalone converter into `build\Assets\Release` and
+`build\Assets\Debug`, respectively. They do not generate any asset packs;
+conversions are explicit offline operations.
+
+All converters report progress unconditionally. File-based packs print each
+source file, generated item, and serialized blob as it is processed. The ETOPO
+and Japan DEM10 converters print an update after every candidate heightmap tile,
+including completed count, percentage, elapsed time, and estimated time
+remaining. Output is flushed immediately so long conversions remain observable.
 
 Manual runs after that:
 
 ```powershell
-.\build\Assets\converter.exe skybox
-.\build\Assets\converter.exe pinetreepack
-.\build\Assets\converter.exe pbr
-.\build\Assets\converter.exe roboto
+.\build\Assets\Release\converter\converter.exe skybox
+.\build\Assets\Release\converter\converter.exe pinetreepack
+.\build\Assets\Release\converter\converter.exe pbr
+.\build\Assets\Release\converter\converter.exe roboto
 ```
 
 Or with explicit paths:
 
 ```powershell
-.\build\Assets\converter.exe --source assets/source/pinetreepack --out assets/runtime --name pinetreepack
+.\build\Assets\Release\converter\converter.exe --source assets/source/pinetreepack --out assets/runtime --name pinetreepack
 ```
 
 Default roots:
@@ -126,27 +136,27 @@ ETOPO generation is deliberately separate from `tools\build.cmd Assets`: the off
 ```powershell
 tools\download_etopo2022.cmd
 tools\build.cmd Assets
-.\build\Assets\converter.exe etopo2022
+.\build\Assets\Release\converter\converter.exe etopo2022
 ```
 
 The download script uses Windows `curl.exe`, retries failures, downloads to a `.part` file, and only replaces the final file after success. Pass `--force` to download it again. The official source is NOAA's [ETOPO 2022 60 arc-second surface elevation GeoTIFF](https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif), stored as `assets/source/etopo2022/ETOPO_2022_v1_60s_N90W180_surface.tif`.
 
-To build only the already-configured converter without regenerating the normal packs:
+To build only the already-configured converter directly:
 
 ```powershell
-cmake --build build\Assets --target converter --parallel
+cmake --build build\Assets\Release --target converter --parallel
 ```
 
 Input/output overrides and tile logging are available:
 
 ```powershell
-.\build\Assets\converter.exe etopo2022 --source D:\data\etopo.tif --out D:\generated --verbose
+.\build\Assets\Release\converter\converter.exe etopo2022 --source D:\data\etopo.tif --out D:\generated --verbose
 ```
 
 The dependency-independent filter/projection checks can be run without the TIFF:
 
 ```powershell
-.\build\Assets\converter.exe etopo2022 --self-test
+.\build\Assets\Release\converter\converter.exe etopo2022 --self-test
 ```
 
 The output is:
@@ -167,6 +177,58 @@ Index records are sorted deterministically by `tileY`, then `tileX`.
 Generation validates source dimensions/georeferencing/sample type, exhaustively self-tests the reversible residual transform, round-trips every filtered/compressed tile, compares every emitted shared edge, validates index ranges and uniqueness, then closes and reopens both output files and decodes all blobs. Runtime sampling, affine world placement, and final terrain composition are implemented by the runtime; user-created heightmap layers remain outside this converter stage.
 
 ## Conversion Pipeline
+
+## Japan DEM10 ETOPO-relative delta mosaics
+
+Japan's GSI DEM10 conversion is an explicit offline operation. It is not run by
+the normal asset build and does not register the generated data with the game.
+The downloader always refreshes Source Cooperative's current-file manifest and
+verifies every cached GeoTIFF using both the declared byte size and MD5:
+
+```powershell
+tools\download_japan_dem10.cmd
+tools\build.cmd Assets
+.\build\Assets\Release\converter\converter.exe japan-dem10
+```
+
+Use `--source`, `--etopo`, and `--out` to override the DEM10 directory, existing
+Codex ETOPO index, and destination. `--self-test` runs dependency-independent
+filter, placement, basis, and positive-edge ownership checks. Normal conversions
+report source-indexing progress and print an update after every candidate tile,
+including completion percentage, valid-sample and stored-tile counts, elapsed
+time, and ETA. It also writes `japan_dem10_delta_coverage.svg` with a taller,
+Mt. Fuji-centered overview and one densely packed 32x32-per-tile preview PNG per
+mosaic (`japan_dem10_delta_<id>_preview.png`), following ETOPO's packed-preview
+layout. Blue areas are below ETOPO, red areas are above it, and near-zero deltas
+are dark neutral.
+
+The converter's libtiff build includes ZSTD support, as required by the Source
+Cooperative DEM10 GeoTIFFs. The command reads EPSG:6668 and NoData metadata from every GeoTIFF, bilinearly
+samples DEM10 on a fixed rotated 10 m grid, and subtracts a bilinear sample
+decoded from the existing `etopo2022.assetbin`/`heightbin`. It emits four sparse
+`japan_dem10_delta_<id>.assetbin`/`.heightbin` packs, placement/provenance JSON,
+and an SVG coverage/footprint preview. Every mosaic uses signed tile coordinates
+`-128..127`; its `tileX=127/sampleX=255` and `tileY=127/sampleY=255` edges are
+always zero. The transform is deliberately fixed in source and repeated in the
+metadata so future runtime integration cannot silently choose a different fit.
+
+Conversion keeps decoded ETOPO tiles resident for reuse and maintains a bounded
+eight-raster DEM10 working set. This prevents repeated TIFF/ZSTD and ETOPO/LZ4
+decode work when output tiles cross source boundaries while keeping nationwide
+source-memory use bounded.
+
+The current four-cell layout is `x / x / xx` in one common basis, rotated 20.5
+degrees with the long axis following southwest-to-northeast Japan. It derives
+from the earlier five-cell layout by rotating 7.5 degrees clockwise about the
+four-cell intersection, shifting 7.5 km west, and dropping `cw`. Generated packs and downloaded GSI
+data remain under the ignored `assets` tree and must not be committed. The GSI
+source carries attribution and reproduction conditions; review them before
+redistributing generated products.
+
+Suggested quality validation after a full conversion is to inspect Mt. Fuji and
+representative locations by reconstructing `ETOPO + delta`, confirm the result
+matches DEM10 to integer-meter encoding tolerance, and inspect
+`japan_dem10_delta_coverage.svg` for footprint coverage.
 
 The converter follows a simple two-stage flow:
 

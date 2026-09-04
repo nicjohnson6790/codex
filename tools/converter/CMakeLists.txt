@@ -52,6 +52,13 @@ FetchContent_Declare(
     URL https://download.osgeo.org/libtiff/tiff-4.7.1.tar.xz
 )
 
+FetchContent_Declare(
+    zstd
+    URL https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.tar.gz
+    SOURCE_SUBDIR build/cmake
+    OVERRIDE_FIND_PACKAGE
+)
+
 if (CONVERTER_ENABLE_DIRECTXTEX)
     FetchContent_Declare(
         DirectXTex
@@ -111,10 +118,22 @@ set(jbig OFF CACHE BOOL "" FORCE)
 set(jpeg OFF CACHE BOOL "" FORCE)
 set(lzma OFF CACHE BOOL "" FORCE)
 set(webp OFF CACHE BOOL "" FORCE)
-set(zstd OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+# libtiff's configure-time try-link cannot consume a FetchContent target that
+# has not been built yet. ZSTD 1.5.7 provides this API; state that explicitly.
+set(ZSTD_HAVE_DECOMPRESS_STREAM ON CACHE BOOL "" FORCE)
+set(zstd ON CACHE BOOL "" FORCE)
 set(zlib ON CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(SDL3 SDL3_image assimp lz4 freetype)
+FetchContent_MakeAvailable(SDL3 SDL3_image assimp lz4 freetype zstd)
+if (TARGET libzstd_static AND NOT TARGET ZSTD::ZSTD)
+    add_library(ZSTD::ZSTD ALIAS libzstd_static)
+endif()
 
 # Assimp's converter-only zlib is already available here. Reuse it so libtiff
 # can decode DEFLATE-compressed GeoTIFFs without adding another runtime or
@@ -205,6 +224,7 @@ target_link_libraries(runtime_asset_reader
 add_executable(converter
     ConverterMain.cpp
     EtopoHeightmapConverter.cpp
+    JapanDem10Converter.cpp
     EtopoGeoTiffReader.cpp
     HeightmapTileFilter.cpp
     IcosahedralProjection.cpp
