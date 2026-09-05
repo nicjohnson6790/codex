@@ -14,6 +14,7 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 - Keep target runtime outputs isolated: the app and its staged resources belong in `build/<Config>/app`, tests in `build/<Config>/tests`, and the asset converter in `build/Assets/<Config>/converter`. Do not stage target outputs directly into a canonical build root.
 - Generate local runtime metadata such as `steam_appid.txt` directly in `build/<Config>/app`; do not create an intermediate copy in the canonical build root.
 - The build/configure scripts detect CMake caches that reference a removed MSVC compiler and automatically reconfigure with `cmake --fresh`.
+- Windows `.cmd`/`.bat` scripts must retain CRLF working-tree line endings (enforced by `.gitattributes`); LF-only scripts can fail with missing batch subroutine labels before compilation.
 
 ## Durable constraints
 
