@@ -71,8 +71,6 @@ bool EtopoGeoTiffReader::open(const std::filesystem::path& path, std::string* er
         if (error) *error = "not enough memory to cache the ETOPO source raster";
         return false;
     }
-    m_sourceMin = INT16_MAX;
-    m_sourceMax = INT16_MIN;
     const auto convertSample = [sampleFormat, bitsPerSample](const std::byte* bytes, std::size_t index, double* value)
     {
         if (sampleFormat == SAMPLEFORMAT_INT && bitsPerSample == 16)
@@ -86,21 +84,13 @@ bool EtopoGeoTiffReader::open(const std::filesystem::path& path, std::string* er
     };
     const auto storeSample = [this, error](std::uint32_t x, std::uint32_t y, double value)
     {
-        if (!std::isfinite(value))
+        if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
         {
-            if (error) *error = "source elevation is non-finite at sample (" + std::to_string(x) + "," + std::to_string(y) + ")";
+            if (error) *error = "source elevation cannot be stored as finite float at sample (" + std::to_string(x) + "," + std::to_string(y) + ")";
             m_samples.clear();
             return false;
         }
-        const long rounded = std::lround(value);
-        if (rounded <= INT16_MIN || rounded > INT16_MAX)
-        {
-            if (error) *error = "source elevation rounds to the reserved sentinel or outside signed 16-bit meters at sample (" +
-                std::to_string(x) + "," + std::to_string(y) + ")";
-            m_samples.clear();
-            return false;
-        }
-        m_samples[static_cast<std::size_t>(y) * m_width + x] = static_cast<std::int16_t>(rounded);
+        m_samples[static_cast<std::size_t>(y) * m_width + x] = static_cast<float>(value);
         return true;
     };
 

@@ -46,7 +46,7 @@ class HeightmapDataset
     enum class SampleEncoding
     {
         Float32Meters,
-        SignedInt16Meters
+        QuantizedInt16ScaleBias
     };
     virtual ~HeightmapDataset() = default;
     [[nodiscard]] virtual HeightmapDatasetId datasetId() const = 0;
@@ -69,7 +69,7 @@ class EtopoHeightmapDataset final : public HeightmapDataset
     }
     [[nodiscard]] SampleEncoding sampleEncoding() const override
     {
-        return SampleEncoding::SignedInt16Meters;
+        return SampleEncoding::QuantizedInt16ScaleBias;
     }
     [[nodiscard]] TileRange tileRange() const override
     {

@@ -21,7 +21,7 @@ struct EtopoConversionSummary
     std::int32_t storedTiles = 0;
     std::int32_t partialTiles = 0;
     std::int32_t minTileX = 0, maxTileX = 0, minTileY = 0, maxTileY = 0;
-    std::int16_t minHeight = 0, maxHeight = 0;
+    float minHeight = 0, maxHeight = 0;
     std::uint64_t rawBytes = 0;
     std::uint64_t filteredBytes = 0;
     std::uint64_t compressedBytes = 0;

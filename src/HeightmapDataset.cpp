@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -111,11 +112,11 @@ std::shared_ptr<EtopoHeightmapDataset> EtopoHeightmapDataset::open(const std::fi
     const auto &h = result->m_header;
     if (h.magic != RuntimeAssets::kHeightmapPackMagic || h.version != RuntimeAssets::kHeightmapFormatVersion ||
         h.tileResolution != RuntimeAssets::kHeightmapTileResolution || h.tileStride != RuntimeAssets::kHeightmapTileStride ||
-        h.sampleType != static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::SignedInt16Meters) ||
+        h.sampleType != static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias) ||
         h.filterType != static_cast<std::uint32_t>(RuntimeAssets::HeightFilterType::SerpentineDeltaZigZagBytePlanes) ||
         h.compressionType != static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4))
     {
-        error = "unsupported ETOPO runtime heightmap format";
+        error = "unsupported runtime heightmap format; regenerate ETOPO, then Japan DEM10 packs";
         return {};
     }
     result->m_records.resize(h.tileCount);
@@ -136,6 +137,11 @@ std::shared_ptr<EtopoHeightmapDataset> EtopoHeightmapDataset::open(const std::fi
         };
         for (const auto &record : result->m_records)
         {
+            if (!std::isfinite(record.sampleScale) || record.sampleScale < 0 || !std::isfinite(record.sampleBias))
+            {
+                error = "invalid heightmap scale/bias";
+                return {};
+            }
             result->m_tileRange.minX = std::min<std::int32_t>(result->m_tileRange.minX, record.tileX);
             result->m_tileRange.minY = std::min<std::int32_t>(result->m_tileRange.minY, record.tileY);
             result->m_tileRange.maxX = std::max<std::int32_t>(result->m_tileRange.maxX, record.tileX);
@@ -198,9 +204,7 @@ bool EtopoHeightmapDataset::loadTile(std::int32_t tileX, std::int32_t tileY, std
     samples.assign(RuntimeAssets::kHeightmapTileSampleCount, 0.0f);
     std::uint16_t previous = static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[0])) |
                              static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[1]) << 8u);
-    samples[rasterIndex(0)] = previous == std::bit_cast<std::uint16_t>(RuntimeAssets::kHeightmapInvalidHeight)
-                                  ? 0.0f
-                                  : static_cast<float>(std::bit_cast<std::int16_t>(previous));
+    samples[rasterIndex(0)] = RuntimeAssets::DecodeHeight(std::bit_cast<std::int16_t>(previous), record->sampleScale, record->sampleBias);
     constexpr std::size_t low = 2;
     constexpr std::size_t high = 2 + RuntimeAssets::kHeightmapTileSampleCount - 1;
     for (std::size_t i = 1; i < RuntimeAssets::kHeightmapTileSampleCount; ++i)
@@ -208,9 +212,7 @@ bool EtopoHeightmapDataset::loadTile(std::int32_t tileX, std::int32_t tileY, std
         const std::uint16_t folded = static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[low + i - 1])) |
                                      static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[high + i - 1]) << 8u);
         previous = static_cast<std::uint16_t>(previous + zigZagDecode(folded));
-        samples[rasterIndex(i)] = previous == std::bit_cast<std::uint16_t>(RuntimeAssets::kHeightmapInvalidHeight)
-                                      ? 0.0f
-                                      : static_cast<float>(std::bit_cast<std::int16_t>(previous));
+        samples[rasterIndex(i)] = RuntimeAssets::DecodeHeight(std::bit_cast<std::int16_t>(previous), record->sampleScale, record->sampleBias);
     }
     return true;
 }

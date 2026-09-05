@@ -192,13 +192,17 @@ The output is:
 - `etopo2022_preview.png`: diagnostic hypsometric projection preview with tile lines (not runtime data).
 - `etopo2022_tiles_preview.png`: dense near-square contact sheet of 32x32 thumbnails decoded from every indexed LZ4 tile blob, in index/blob order. Fully invalid discarded tiles consume no cell; only unused cells at the end of the final row are empty (not runtime data).
 
-Projection version 3 is a fixed Airocean "one-island" icosahedral gnomonic net on the authalic sphere (radius `6,371,007.180918475 m`). Its face tree keeps the north-pole faces connected and routes most cuts through oceans; three faces are subdivided so the cuts pass around Japan and Australia. The globe orientation is `(-83.65929, 25.44458, -87.45184)` degrees and the unfolded net is rotated `-60 degrees` in atlas space. All three orientation components and the atlas rotation are stored explicitly in format-version-2 pack headers, while the precise cut topology is identified by projection version 3. This is an Airocean-layout gnomonic implementation, not Fuller's proprietary per-face transform. The atlas coordinate system is independent of Codex's `Position` grid and does not bake in runtime terrain resolution or world placement.
+Projection version 3 is a fixed Airocean "one-island" icosahedral gnomonic net on the authalic sphere (radius `6,371,007.180918475 m`). Its face tree keeps the north-pole faces connected and routes most cuts through oceans; three faces are subdivided so the cuts pass around Japan and Australia. The globe orientation is `(-83.65929, 25.44458, -87.45184)` degrees and the unfolded net is rotated `-60 degrees` in atlas space. All three orientation components and the atlas rotation are stored explicitly in format-version-3 pack headers, while the precise cut topology is identified by projection version 3. This is an Airocean-layout gnomonic implementation, not Fuller's proprietary per-face transform. The atlas coordinate system is independent of Codex's `Position` grid and does not bake in runtime terrain resolution or world placement.
 
-Tiles have a physical footprint of exactly `524,288 m` and signed `int8` coordinates. Tile `(x,y)` begins at atlas coordinate `(x * 524288, y * 524288)`. Each tile stores `256x256` signed 16-bit integer-meter samples on a global lattice with a stride of 255 intervals, so neighboring tiles duplicate their shared border bit-for-bit. `INT16_MIN` marks samples outside the unfolded projection; only completely invalid tiles are omitted. Ocean and bathymetry remain in the pack.
+Tiles have a physical footprint of exactly `524,288 m` and signed `int8` coordinates. Tile `(x,y)` begins at atlas coordinate `(x * 524288, y * 524288)`. Each tile stores `256x256` signed 16-bit quantized samples with per-tile float scale and bias on a global lattice with a stride of 255 intervals, so neighboring tiles duplicate the floating-point border before independent quantization. Normal codes `-32766..32767` decode as bias + code * scale; `INT16_MIN + 1` decodes to exact zero independently of metadata. `INT16_MIN` marks samples outside the unfolded projection; only completely invalid tiles are omitted. Ocean and bathymetry remain in the pack.
 
-Each tile is filtered independently using serpentine spatial traversal, modulo-16-bit first differences, signed ZigZag folding, and low/high byte planes, then compressed as its own normal LZ4 blob. The small index contains every tile's signed coordinate, blob offset, compressed size, fixed filtered size, valid sample count, and elevation range, so tile lookup never requires scanning `heightbin`.
+Each tile is filtered independently using serpentine spatial traversal, modulo-16-bit first differences, signed ZigZag folding, and low/high byte planes, then compressed as its own normal LZ4 blob. The small index contains every tile's signed coordinate, blob offset, compressed size, fixed filtered size, valid sample count, and float scale/bias in a 32-byte record, so tile lookup never requires scanning `heightbin`.
 
 Index records are sorted deterministically by `tileY`, then `tileX`.
+
+ETOPO caches the source raster as float and preserves floating-point precision through projection and bilinear sampling, quantizing only completed tiles. This intentionally increases offline RAM usage. Format version 3 rejects old packs: regenerate ETOPO first, then all Japan DEM10 packs. Converter diagnostics report quantization steps, maximum/RMS error, decoded ranges, and decoded shared-border mismatch with the participating steps and expected bound.
+
+`build/Release/tests/heightmap_dataset_tests.exe assets/runtime` optionally checks all five generated packs through the production runtime reader, including exact-zero positive edges. The default test invocation uses synthetic fixtures and requires no generated assets.
 
 Generation validates source dimensions/georeferencing/sample type, exhaustively self-tests the reversible residual transform, round-trips every filtered/compressed tile, compares every emitted shared edge, validates index ranges and uniqueness, then closes and reopens both output files and decodes all blobs. Runtime sampling, affine world placement, and final terrain composition are implemented by the runtime; user-created heightmap layers remain outside this converter stage.
 
@@ -260,7 +264,7 @@ redistributing generated products.
 
 Suggested quality validation after a full conversion is to inspect Mt. Fuji and
 representative locations by reconstructing `ETOPO + delta`, confirm the result
-matches DEM10 to integer-meter encoding tolerance, and inspect
+matches DEM10 within the delta tile's quantization error bound, and inspect
 `japan_dem10_delta_coverage.svg` for footprint coverage.
 
 ## Conversion Pipeline

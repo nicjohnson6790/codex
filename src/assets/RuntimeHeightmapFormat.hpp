@@ -9,7 +9,7 @@ namespace RuntimeAssets
 {
 
 constexpr std::uint32_t kHeightmapPackMagic = MakeMagic('H', 'M', 'A', 'P');
-constexpr std::uint32_t kHeightmapFormatVersion = 2;
+constexpr std::uint32_t kHeightmapFormatVersion = 3;
 constexpr std::uint32_t kHeightmapProjectionVersion = 3;
 constexpr std::uint32_t kHeightmapTileResolution = 256;
 constexpr std::uint32_t kHeightmapTileStride = 255;
@@ -17,10 +17,11 @@ constexpr std::uint32_t kHeightmapTileSampleCount = 256u * 256u;
 constexpr std::uint32_t kHeightmapFilteredTileBytes = kHeightmapTileSampleCount * sizeof(std::int16_t);
 constexpr double kHeightmapTilePhysicalSizeMeters = 524288.0;
 constexpr std::int16_t kHeightmapInvalidHeight = INT16_MIN;
+constexpr std::int16_t kHeightmapExactZeroHeight = INT16_MIN + 1;
 
 enum class HeightSampleType : std::uint32_t
 {
-    SignedInt16Meters = 1,
+    QuantizedInt16ScaleBias = 2,
 };
 
 enum class HeightFilterType : std::uint32_t
@@ -64,11 +65,17 @@ struct HeightmapTileRecord
     std::uint32_t compressedSize = 0;
     std::uint32_t uncompressedSize = 0;
     std::uint32_t validSampleCount = 0;
-    std::int16_t validMinHeight = 0;
-    std::int16_t validMaxHeight = 0;
-    std::uint32_t reserved = 0;
+    float sampleScale = 0;
+    float sampleBias = 0;
     std::uint64_t blobOffset = 0;
 };
 static_assert(sizeof(HeightmapTileRecord) == 32);
+
+// Invalid samples retain the runtime's existing zero-contribution behavior.
+inline float DecodeHeight(std::int16_t sample, float scale, float bias)
+{
+    if (sample == kHeightmapInvalidHeight || sample == kHeightmapExactZeroHeight) return 0.0f;
+    return bias + static_cast<float>(sample) * scale;
+}
 
 } // namespace RuntimeAssets

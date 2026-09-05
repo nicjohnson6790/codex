@@ -1,6 +1,7 @@
 #include "JapanDem10Converter.hpp"
 
 #include "HeightmapTileFilter.hpp"
+#include "HeightmapQuantization.hpp"
 #include "IcosahedralProjection.hpp"
 #include "assets/RuntimeAssetCompression.hpp"
 #include "assets/RuntimeHeightmapFormat.hpp"
@@ -101,7 +102,7 @@ std::array<std::uint8_t,3> DeltaColor(double delta)
 bool WritePackedDeltaPreview(const std::filesystem::path& indexPath,const std::filesystem::path& dataPath,const std::filesystem::path& path,std::string* error)
 {
     constexpr std::uint32_t thumb=32, block=8; std::ifstream index(indexPath,std::ios::binary),data(dataPath,std::ios::binary); RuntimeAssets::HeightmapPackHeader header{}; index.read(reinterpret_cast<char*>(&header),sizeof(header));
-    if(!index||!data||header.magic!=RuntimeAssets::kHeightmapPackMagic){*error="failed reopening Japan delta pack for preview";return false;}
+    if(!index||!data||header.magic!=RuntimeAssets::kHeightmapPackMagic||header.version!=RuntimeAssets::kHeightmapFormatVersion||header.sampleType!=static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias)){*error="failed reopening Japan delta pack for preview";return false;}
     const std::uint32_t columns=std::max(1u,static_cast<std::uint32_t>(std::ceil(std::sqrt(static_cast<double>(header.tileCount))))),rows=std::max(1u,(header.tileCount+columns-1u)/columns),width=columns*thumb,height=rows*thumb;
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width)*height*3u,12); index.seekg(static_cast<std::streamoff>(header.tileRecordOffset));
     std::vector<std::byte> compressed,filtered; std::vector<std::int16_t> decoded;
@@ -109,8 +110,18 @@ bool WritePackedDeltaPreview(const std::filesystem::path& indexPath,const std::f
     {
         RuntimeAssets::HeightmapTileRecord record{}; index.read(reinterpret_cast<char*>(&record),sizeof(record)); compressed.resize(record.compressedSize); data.seekg(static_cast<std::streamoff>(record.blobOffset)); data.read(reinterpret_cast<char*>(compressed.data()),record.compressedSize);
         if(!index||!data||!RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4,compressed,record.uncompressedSize,&filtered,error)||!HeightmapTileFilter::Decode(filtered,&decoded,error))return false;
+        if (!std::isfinite(record.sampleScale) || record.sampleScale < 0 || !std::isfinite(record.sampleBias))
+        { *error = "invalid reopened Japan scale/bias"; return false; }
+        for (std::size_t sample = 0; sample < decoded.size(); ++sample)
+        {
+            const float meters = RuntimeAssets::DecodeHeight(decoded[sample], record.sampleScale, record.sampleBias);
+            if (!std::isfinite(meters)) { *error = "non-finite reopened Japan height"; return false; }
+            if ((record.tileX == kMaxTile && sample % 256 == 255) || (record.tileY == kMaxTile && sample / 256 == 255))
+                if (decoded[sample] != RuntimeAssets::kHeightmapExactZeroHeight || meters != 0.0f)
+                { *error = "reopened Japan positive edge is not exact zero"; return false; }
+        }
         const std::uint32_t ox=(i%columns)*thumb,oy=(i/columns)*thumb;
-        for(std::uint32_t py=0;py<thumb;++py)for(std::uint32_t px=0;px<thumb;++px){std::int64_t sum=0;for(std::uint32_t sy=0;sy<block;++sy)for(std::uint32_t sx=0;sx<block;++sx)sum+=decoded[((thumb-1u-py)*block+sy)*256+px*block+sx];const auto color=DeltaColor(static_cast<double>(sum)/(block*block));std::memcpy(pixels.data()+(static_cast<std::size_t>(oy+py)*width+ox+px)*3u,color.data(),3);}
+        for(std::uint32_t py=0;py<thumb;++py)for(std::uint32_t px=0;px<thumb;++px){double sum=0;for(std::uint32_t sy=0;sy<block;++sy)for(std::uint32_t sx=0;sx<block;++sx)sum+=RuntimeAssets::DecodeHeight(decoded[((thumb-1u-py)*block+sy)*256+px*block+sx],record.sampleScale,record.sampleBias);const auto color=DeltaColor(static_cast<double>(sum)/(block*block));std::memcpy(pixels.data()+(static_cast<std::size_t>(oy+py)*width+ox+px)*3u,color.data(),3);}
     }
     return WriteRgbPng(path,width,height,pixels,error);
 }
@@ -391,7 +402,7 @@ public:
     bool open(const std::filesystem::path& indexPath, std::string* error)
     {
         index.open(indexPath, std::ios::binary); if (!index.read(reinterpret_cast<char*>(&header), sizeof(header))) { *error = "could not read ETOPO index"; return false; }
-        if (header.magic != RuntimeAssets::kHeightmapPackMagic || header.projectionVersion != IcosahedralProjection::kVersion) { *error = "incompatible ETOPO pack"; return false; }
+        if (header.magic != RuntimeAssets::kHeightmapPackMagic || header.version != RuntimeAssets::kHeightmapFormatVersion || header.sampleType != static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias) || header.projectionVersion != IcosahedralProjection::kVersion) { *error = "incompatible ETOPO pack"; return false; }
         records.resize(header.tileCount); index.seekg(static_cast<std::streamoff>(header.tileRecordOffset));
         if (!index.read(reinterpret_cast<char*>(records.data()), static_cast<std::streamsize>(records.size() * sizeof(records[0])))) { *error = "could not read ETOPO records"; return false; }
         data.open(indexPath.parent_path() / header.dataFilename.data(), std::ios::binary); if (!data) { *error = "could not open ETOPO height data"; return false; }
@@ -423,19 +434,23 @@ private:
         {
             const auto it = std::lower_bound(records.begin(), records.end(), std::pair{ty, tx}, [](const auto& r, const auto& k) { return std::pair{int(r.tileY), int(r.tileX)} < k; });
             if (it == records.end() || it->tileX != tx || it->tileY != ty) return false;
+            if (!std::isfinite(it->sampleScale) || it->sampleScale < 0 || !std::isfinite(it->sampleBias))
+            { *error = "invalid ETOPO scale/bias"; return false; }
             std::vector<std::byte> compressed(it->compressedSize), filtered;
             data.clear(); data.seekg(static_cast<std::streamoff>(it->blobOffset)); data.read(reinterpret_cast<char*>(compressed.data()), it->compressedSize);
             std::vector<std::int16_t> decoded;
             if (!data || !RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4, compressed, it->uncompressedSize, &filtered, error) ||
                 !HeightmapTileFilter::Decode(filtered, &decoded, error)) return false;
-            cached = tileCache.emplace(key, std::move(decoded)).first;
+            std::vector<float> meters(decoded.size());
+            for (std::size_t i = 0; i < decoded.size(); ++i) meters[i] = decoded[i] == RuntimeAssets::kHeightmapInvalidHeight ? std::numeric_limits<float>::quiet_NaN() : RuntimeAssets::DecodeHeight(decoded[i], it->sampleScale, it->sampleBias);
+            cached = tileCache.emplace(key, std::move(meters)).first;
         }
-        const auto s = cached->second[static_cast<std::size_t>(sy) * 256 + sx]; if (s == RuntimeAssets::kHeightmapInvalidHeight) return false;
+        const auto s = cached->second[static_cast<std::size_t>(sy) * 256 + sx]; if (!std::isfinite(s)) return false;
         *value = s; return true;
     }
     RuntimeAssets::HeightmapPackHeader header{}; std::vector<RuntimeAssets::HeightmapTileRecord> records;
     std::ifstream index, data;
-    std::unordered_map<std::uint32_t, std::vector<std::int16_t>> tileCache;
+    std::unordered_map<std::uint32_t, std::vector<float>> tileCache;
 };
 
 std::array<double, 2> MosaicOrigin(std::size_t i)
@@ -454,7 +469,7 @@ bool WriteMetadata(const std::filesystem::path& path, const std::filesystem::pat
         << "  \"basis\": {\"x\": [" << kXAxisX << ", " << kXAxisY << "], \"y\": [" << kYAxisX << ", " << kYAxisY << "], \"rotationDegrees\": 20.5},\n"
         << "  \"mosaicSizeMeters\": " << kMosaicSize << ",\n  \"positiveEdgesZeroed\": true,\n  \"mosaics\": [\n";
     for (std::size_t i = 0; i < kIds.size(); ++i) { const auto o = MosaicOrigin(i); out << "    {\"id\": \"" << kIds[i] << "\", \"offset\": [" << kOffsets[i][0] << ", " << kOffsets[i][1] << "], \"originAiroceanMeters\": [" << o[0] << ", " << o[1] << "]}" << (i + 1 == kIds.size() ? "\n" : ",\n"); }
-    out << "  ],\n  \"delta\": \"DEM10 bilinear elevation minus bilinear existing Codex ETOPO v2 tile elevation, with a 2000 m fading positive-ETOPO ocean collar, rounded to signed integer meters\"\n}\n";
+    out << "  ],\n  \"delta\": \"DEM10 bilinear elevation minus bilinear existing Codex ETOPO v3 scale/bias decoded tile elevation, with a 2000 m fading positive-ETOPO ocean collar, quantized with independent per-tile scale/bias and exact additive-zero codes\"\n}\n";
     return static_cast<bool>(out);
 }
 
@@ -479,7 +494,7 @@ bool WritePreview(const std::filesystem::path& path, const RasterCatalog& source
 
 bool SelfTest(std::string* error)
 {
-    if (!HeightmapTileFilter::RunSelfTests(error)) return false;
+    if (!HeightmapQuantization::SelfTest(error) || !HeightmapTileFilter::RunSelfTests(error)) return false;
     {
         RasterCatalog catalog;
         Raster west{}, east{};
@@ -528,7 +543,7 @@ bool SelfTest(std::string* error)
 bool JapanDem10Converter::run(const JapanDem10ConversionConfig& config, JapanDem10ConversionSummary* summary, std::string* error)
 {
     *summary = {}; if (!SelfTest(error)) return false;
-    if (config.selfTestOnly) { std::cout << "Japan DEM10 self-tests passed: filter, fixed layout, orthonormal basis, and positive-edge ownership\n"; return true; }
+    if (config.selfTestOnly) { std::cout << "Japan DEM10 self-tests passed: scale/bias quantization, sentinels, filter, cross-raster sampling, ocean collar, fixed layout, orthonormal basis, and positive-edge ownership\n"; return true; }
     RasterCatalog source; if (!source.open(config.sourceRoot, error)) return false; summary->sourceFiles = source.rasters.size();
     if (config.verbose && !source.validateFirstDecode(error)) return false;
     EtopoSampler etopo; if (!etopo.open(config.etopoIndex, error)) return false;
@@ -538,6 +553,9 @@ bool JapanDem10Converter::run(const JapanDem10ConversionConfig& config, JapanDem
         std::error_code removeError; std::filesystem::remove(config.outputRoot/(std::string("japan_dem10_delta_cw")+extension),removeError);
         if(removeError){*error="could not remove obsolete cw mosaic output: "+removeError.message();return false;}
     }
+    HeightmapQuantization::Statistics statistics;
+    double maxCompositionError = 0;
+    std::uint64_t forcedEdgeCount = 0;
     IcosahedralProjection projection;
     for (std::size_t mosaic=0;mosaic<kIds.size();++mosaic)
     {
@@ -561,6 +579,15 @@ bool JapanDem10Converter::run(const JapanDem10ConversionConfig& config, JapanDem
         }
         std::cout << stem << ": " << candidates.size() << " candidate tiles\n";
         std::vector<RuntimeAssets::HeightmapTileRecord> records; Tile tile{};
+        struct TileWork
+        {
+            HeightmapQuantization::FloatTile values{};
+            HeightmapQuantization::Kinds kinds{};
+            std::array<double, RuntimeAssets::kHeightmapTileSampleCount> bases{}, targets{};
+        };
+        auto work = std::make_unique<TileWork>();
+        auto& values = work->values; auto& kinds = work->kinds;
+        auto& bases = work->bases; auto& targets = work->targets;
         std::size_t completedTiles=0;
         const auto mosaicStarted=std::chrono::steady_clock::now();
         auto reportProgress=[&](int tx,int ty,std::uint32_t valid)
@@ -575,10 +602,12 @@ bool JapanDem10Converter::run(const JapanDem10ConversionConfig& config, JapanDem
         };
         for(const auto [ty,tx] : candidates)
         {
-            ++summary->candidateTiles; std::uint32_t valid=0; std::int16_t lo=INT16_MAX,hi=INT16_MIN;
+            ++summary->candidateTiles; std::uint32_t valid=0;
+            kinds.fill(HeightmapQuantization::Kind::ExactZero);
+            targets.fill(std::numeric_limits<double>::quiet_NaN());
             for(int y=0;y<256;++y) for(int x=0;x<256;++x)
             {
-                std::int16_t value=0;
+                float value=0;
                 if (!(tx==kMaxTile&&x==255) && !(ty==kMaxTile&&y==255))
                 {
                     const double lx=(static_cast<double>(tx-kMinTile)*255+x)*kSpacing, ly=(static_cast<double>(ty-kMinTile)*255+y)*kSpacing;
@@ -591,6 +620,8 @@ bool JapanDem10Converter::run(const JapanDem10ConversionConfig& config, JapanDem
                         if (source.sample(lon,lat,&dem,error))
                         {
                             delta = dem - base;
+                            bases[static_cast<std::size_t>(y)*256+x] = base;
+                            targets[static_cast<std::size_t>(y)*256+x] = dem;
                             contributes = true;
                         }
                         else
@@ -604,27 +635,53 @@ bool JapanDem10Converter::run(const JapanDem10ConversionConfig& config, JapanDem
                         }
                         if (contributes)
                         {
-                            value=static_cast<std::int16_t>(std::clamp<long>(std::lround(delta),INT16_MIN+1L,INT16_MAX));
-                            ++valid; ++summary->validSamples; lo=std::min(lo,value); hi=std::max(hi,value);
+                            value=static_cast<float>(delta);
+                            kinds[static_cast<std::size_t>(y)*256+x] = HeightmapQuantization::Kind::Normal;
+                            ++valid; ++summary->validSamples;
                         }
                     }
                 }
-                tile[static_cast<std::size_t>(y)*256+x]=value;
+                values[static_cast<std::size_t>(y)*256+x]=value;
             }
             if(valid==0){++summary->omittedTiles;++completedTiles;reportProgress(tx,ty,valid);continue;}
+            float scale, bias;
+            if (!HeightmapQuantization::Encode(values, kinds, tile, scale, bias, statistics, error)) return false;
             std::vector<std::byte> filtered,compressed;
-            if(!HeightmapTileFilter::Encode(tile,&filtered,error)||!RuntimeAssets::CompressBytes(RuntimeAssets::CompressionType::Lz4,filtered,&compressed,error)) return false;
+            if (!HeightmapQuantization::RoundTrip(tile, filtered, compressed, error)) return false;
+            for (std::size_t i = 0; i < tile.size(); ++i)
+            {
+                const float decoded = RuntimeAssets::DecodeHeight(tile[i], scale, bias);
+                if (std::isfinite(targets[i]))
+                {
+                    const double difference = std::abs(bases[i] + decoded - targets[i]);
+                    const double bound = HeightmapQuantization::ErrorBound(values[i], scale, bias) +
+                        std::abs(double(values[i]) - (targets[i] - bases[i]));
+                    if (difference > bound)
+                    { *error = "composed DEM10 elevation exceeds delta quantization bound"; return false; }
+                    maxCompositionError = std::max(maxCompositionError, difference);
+                }
+                if ((tx == kMaxTile && i % 256 == 255) || (ty == kMaxTile && i / 256 == 255))
+                {
+                    if (tile[i] != RuntimeAssets::kHeightmapExactZeroHeight || decoded != 0.0f)
+                    { *error = "positive mosaic edge lost exact zero"; return false; }
+                    ++forcedEdgeCount;
+                }
+            }
+            statistics.rawBytes += tile.size() * sizeof(std::int16_t);
+            statistics.filteredBytes += filtered.size(); statistics.compressedBytes += compressed.size();
             const auto offset=static_cast<std::uint64_t>(data.tellp()); data.write(reinterpret_cast<const char*>(compressed.data()),compressed.size());
-            lo=std::min<std::int16_t>(lo,0); hi=std::max<std::int16_t>(hi,0);
-            records.push_back({static_cast<std::int8_t>(tx),static_cast<std::int8_t>(ty),0,static_cast<std::uint32_t>(compressed.size()),static_cast<std::uint32_t>(filtered.size()),static_cast<std::uint32_t>(tile.size()),lo,hi,0,offset}); ++summary->storedTiles;
+            if (!data) { *error = "failed writing Japan tile blob"; return false; }
+            records.push_back({static_cast<std::int8_t>(tx),static_cast<std::int8_t>(ty),0,static_cast<std::uint32_t>(compressed.size()),static_cast<std::uint32_t>(filtered.size()),static_cast<std::uint32_t>(tile.size()),scale,bias,offset}); ++summary->storedTiles;
             ++completedTiles; reportProgress(tx,ty,valid);
         }
         const std::array<double,4> bounds{origin[0]+std::min(0.0,kMosaicSize*kYAxisX),origin[1],origin[0]+kMosaicSize*kXAxisX,origin[1]+kMosaicSize*(kXAxisY+kYAxisY)};
-        data.close(); RuntimeAssets::HeightmapPackHeader h{}; h.magic=RuntimeAssets::kHeightmapPackMagic;h.version=RuntimeAssets::kHeightmapFormatVersion;h.flags=RuntimeAssets::kLittleEndianFlag;h.headerSize=sizeof(h);h.tileCount=records.size();h.tileResolution=256;h.tileStride=255;h.sampleType=static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::SignedInt16Meters);h.invalidHeight=RuntimeAssets::kHeightmapInvalidHeight;h.filterType=static_cast<std::uint32_t>(RuntimeAssets::HeightFilterType::SerpentineDeltaZigZagBytePlanes);h.filterVersion=1;h.compressionType=static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4);h.tilePhysicalSizeMeters=kTileSize;h.authalicRadiusMeters=IcosahedralProjection::kAuthalicRadiusMeters;h.orientationDegrees={20.5,0.0,0.0};h.projectedBoundsMeters=bounds;h.projectionVersion=IcosahedralProjection::kVersion;h.projectionName=RuntimeAssets::MakeMagic('J','P','1','0');h.tileRecordOffset=sizeof(h);h.fileSize=sizeof(h)+records.size()*sizeof(records[0]);std::strncpy(h.dataFilename.data(),(stem+".heightbin").c_str(),h.dataFilename.size()-1);std::strncpy(h.sourceDataset.data(),"smartmaps/japan-geotiff-dem/10 delta",h.sourceDataset.size()-1);
+        data.close(); RuntimeAssets::HeightmapPackHeader h{}; h.magic=RuntimeAssets::kHeightmapPackMagic;h.version=RuntimeAssets::kHeightmapFormatVersion;h.flags=RuntimeAssets::kLittleEndianFlag;h.headerSize=sizeof(h);h.tileCount=records.size();h.tileResolution=256;h.tileStride=255;h.sampleType=static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias);h.invalidHeight=RuntimeAssets::kHeightmapInvalidHeight;h.filterType=static_cast<std::uint32_t>(RuntimeAssets::HeightFilterType::SerpentineDeltaZigZagBytePlanes);h.filterVersion=1;h.compressionType=static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4);h.tilePhysicalSizeMeters=kTileSize;h.authalicRadiusMeters=IcosahedralProjection::kAuthalicRadiusMeters;h.orientationDegrees={20.5,0.0,0.0};h.projectedBoundsMeters=bounds;h.projectionVersion=IcosahedralProjection::kVersion;h.projectionName=RuntimeAssets::MakeMagic('J','P','1','0');h.tileRecordOffset=sizeof(h);h.fileSize=sizeof(h)+records.size()*sizeof(records[0]);std::strncpy(h.dataFilename.data(),(stem+".heightbin").c_str(),h.dataFilename.size()-1);std::strncpy(h.sourceDataset.data(),"smartmaps/japan-geotiff-dem/10 delta",h.sourceDataset.size()-1);
         std::ofstream index(indexPath,std::ios::binary|std::ios::trunc);index.write(reinterpret_cast<const char*>(&h),sizeof(h));index.write(reinterpret_cast<const char*>(records.data()),records.size()*sizeof(records[0]));if(!index){*error="failed writing "+indexPath.string();return false;}
         index.close(); if(!WritePackedDeltaPreview(indexPath,dataPath,config.outputRoot/(stem+"_preview.png"),error)) return false;
     }
     if(!WriteMetadata(config.outputRoot/"japan_dem10_delta_metadata.json",config.sourceRoot,source,error)||!WritePreview(config.outputRoot/"japan_dem10_delta_coverage.svg",source,error)) return false;
+    statistics.print("DEM10 delta");
+    std::cout << "Maximum decoded ETOPO + delta versus DEM10 target error: " << maxCompositionError << " m\nForced positive-edge exact-zero samples verified: " << forcedEdgeCount << '\n';
     std::cout<<"Japan DEM10 delta: "<<summary->sourceFiles<<" sources, "<<summary->storedTiles<<" stored / "<<summary->candidateTiles<<" candidate tiles, "<<summary->validSamples<<" valid samples\nValidation: fixed placement, positive edges, manifest-backed EPSG:6668 inputs, sparse output, and ETOPO-relative sampling succeeded\n";
     return true;
 }

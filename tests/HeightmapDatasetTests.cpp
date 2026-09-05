@@ -1,4 +1,6 @@
 #include "HeightmapDataset.hpp"
+#include "HeightmapQuantization.hpp"
+#include <memory>
 #include "assets/RuntimeAssetCompression.hpp"
 
 #include <cstring>
@@ -8,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -49,10 +52,67 @@ WorldGridQuadtreeLeafId minimumLeaf()
         leaf.subdivisionPath = WorldGridQuadtreeLeafId::appendChild(leaf.subdivisionPath, 3);
     return leaf;
 }
+// Optional offline integration check of every generated payload through the
+// production reader, independently compared with the converter's filter decoder.
+bool validateGeneratedPacks(const std::filesystem::path& directory)
+{
+    for (const char* stem : {"etopo2022", "japan_dem10_delta_sw", "japan_dem10_delta_se",
+                            "japan_dem10_delta_ce", "japan_dem10_delta_ne"})
+    {
+        const auto path = directory / (std::string(stem) + ".assetbin");
+        std::string error;
+        const auto dataset = EtopoHeightmapDataset::open(path, error);
+        if (!dataset) { std::cerr << error << '\n'; return false; }
+        std::ifstream index(path, std::ios::binary);
+        RuntimeAssets::HeightmapPackHeader header{};
+        index.read(reinterpret_cast<char*>(&header), sizeof(header));
+        index.seekg(static_cast<std::streamoff>(header.tileRecordOffset));
+        std::ifstream data(directory / header.dataFilename.data(), std::ios::binary);
+        std::uint64_t zeroEdges = 0;
+        for (std::uint32_t tile = 0; tile < header.tileCount; ++tile)
+        {
+            RuntimeAssets::HeightmapTileRecord record{};
+            index.read(reinterpret_cast<char*>(&record), sizeof(record));
+            std::vector<float> samples;
+            if (!index || !dataset->loadTile(record.tileX, record.tileY, samples, error))
+            { std::cerr << error; return false; }
+            std::vector<std::byte> compressed(record.compressedSize), filtered;
+            data.seekg(static_cast<std::streamoff>(record.blobOffset));
+            data.read(reinterpret_cast<char*>(compressed.data()), record.compressedSize);
+            std::vector<std::int16_t> encoded;
+            if (!data || !RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4,
+                    compressed, record.uncompressedSize, &filtered, &error) ||
+                !HeightmapTileFilter::Decode(filtered, &encoded, &error)) return false;
+            std::uint32_t valid = 0;
+            for (std::size_t i = 0; i < encoded.size(); ++i)
+            {
+                const auto code = encoded[i];
+                valid += code != RuntimeAssets::kHeightmapInvalidHeight;
+                const float expected = code <= RuntimeAssets::kHeightmapExactZeroHeight ? 0.0f :
+                    record.sampleBias + float(code) * record.sampleScale;
+                if (!std::isfinite(samples[i]) || samples[i] != expected) return false;
+                if (std::string_view(stem) != "etopo2022" &&
+                    ((record.tileX == 127 && i % 256 == 255) || (record.tileY == 127 && i / 256 == 255)))
+                {
+                    if (code != RuntimeAssets::kHeightmapExactZeroHeight || samples[i] != 0.0f) return false;
+                    ++zeroEdges;
+                }
+            }
+            if (valid != record.validSampleCount) return false;
+        }
+        std::cout << stem << ": " << header.tileCount << " runtime tiles verified; "
+            << zeroEdges << " exact-zero positive-edge samples\n";
+    }
+    return true;
+}
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2) return validateGeneratedPacks(argv[1]) ? 0 : 40;
+    std::string quantizationError;
+    if (!HeightmapQuantization::SelfTest(&quantizationError))
+    { std::cerr << quantizationError; return 30; }
     GridDataset grid;
     SourceHeightmap placement{1, grid.datasetId(), Position{}, {256.0, 0.0}, 2.0, {0.0, 256.0}};
     const auto overlap = collectOverlappingSourceTiles(placement, grid, minimumLeaf());
@@ -86,7 +146,14 @@ int main()
     std::filesystem::remove_all(fixtureDirectory);
     std::filesystem::create_directories(fixtureDirectory);
     std::vector<std::byte> filtered(RuntimeAssets::kHeightmapFilteredTileBytes, std::byte{});
-    filtered[0] = static_cast<std::byte>(123);
+    auto encoded = std::make_unique<HeightmapQuantization::EncodedTile>();
+    encoded->fill(123);
+    (*encoded)[0] = RuntimeAssets::kHeightmapExactZeroHeight;
+    (*encoded)[1] = RuntimeAssets::kHeightmapInvalidHeight;
+    (*encoded)[2] = -32766; (*encoded)[3] = 32767;
+    (*encoded)[256] = RuntimeAssets::kHeightmapExactZeroHeight;
+    (*encoded)[511] = RuntimeAssets::kHeightmapInvalidHeight;
+    if (!HeightmapTileFilter::Encode(*encoded, &filtered, &quantizationError)) return 31;
     std::vector<std::byte> compressed;
     std::string error;
     if (!RuntimeAssets::CompressBytes(RuntimeAssets::CompressionType::Lz4, filtered, &compressed, &error))
@@ -98,7 +165,7 @@ int main()
     header.tileCount = 1;
     header.tileResolution = RuntimeAssets::kHeightmapTileResolution;
     header.tileStride = RuntimeAssets::kHeightmapTileStride;
-    header.sampleType = static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::SignedInt16Meters);
+    header.sampleType = static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias);
     header.invalidHeight = RuntimeAssets::kHeightmapInvalidHeight;
     header.filterType = static_cast<std::uint32_t>(RuntimeAssets::HeightFilterType::SerpentineDeltaZigZagBytePlanes);
     header.compressionType = static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4);
@@ -110,6 +177,8 @@ int main()
     record.compressedSize = static_cast<std::uint32_t>(compressed.size());
     record.uncompressedSize = RuntimeAssets::kHeightmapFilteredTileBytes;
     record.blobOffset = 0;
+    record.sampleScale = 0.125f;
+    record.sampleBias = -8.25f;
     {
         std::ofstream index(fixtureDirectory / "fixture.assetbin", std::ios::binary);
         index.write(reinterpret_cast<const char *>(&header), sizeof(header));
@@ -130,11 +199,20 @@ int main()
         return 22;
     if (samples.size() != RuntimeAssets::kHeightmapTileSampleCount)
         return 23;
-    for (const float sample : samples)
+    for (std::size_t i = 0; i < samples.size(); ++i)
     {
-        if (!std::isfinite(sample) || sample != 123.0f)
-            return 24;
+        const auto code = (*encoded)[i];
+        const float expected = code == RuntimeAssets::kHeightmapInvalidHeight || code == RuntimeAssets::kHeightmapExactZeroHeight
+            ? 0.0f : -8.25f + float(code) * 0.125f;
+        if (!std::isfinite(samples[i]) || samples[i] != expected) return 24;
     }
+    header.version = 2;
+    {
+        std::fstream index(fixtureDirectory / "fixture.assetbin", std::ios::binary | std::ios::in | std::ios::out);
+        index.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    }
+    if (EtopoHeightmapDataset::open(fixtureDirectory / "fixture.assetbin", error) ||
+        error.find("regenerate") == std::string::npos) return 32;
 
     std::filesystem::remove_all(fixtureDirectory);
     return 0;

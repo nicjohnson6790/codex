@@ -77,6 +77,8 @@ tools\build.cmd Assets
 .\build\Assets\Release\converter\converter.exe japan-dem10
 ```
 
+Runtime heightmap format v3 uses per-tile float scale/bias with 16-bit samples and an exact additive-zero code. Older heightmap packs must be regenerated: ETOPO first, then Japan DEM10. Source elevation stays floating point until each completed runtime tile is quantized.
+
 The terrain requires the generated ETOPO pack as its global base heightmap. The optional Japan DEM10 conversion produces four additive, ETOPO-relative delta packs; the runtime streams them over Japan only at terrain pitches of 32 m or finer. Their coastline correction collars suppress positive coarse ETOPO terrain for 2 km beyond valid DEM10 coverage so land does not reappear immediately offshore.
 
 The ETOPO, Japan DEM10, and pine source data are supplied separately and are not part of the repository. Details about their expected source directories and every converter mode are in the [asset converter guide](tools/converter/README.md). Generated heightmap packs remain under the ignored `assets/runtime` tree and are staged into the application by the next normal build.

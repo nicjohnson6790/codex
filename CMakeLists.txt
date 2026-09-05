@@ -387,10 +387,11 @@ if (CODEX_BUILD_TESTS)
 
     add_executable(heightmap_dataset_tests
         tests/HeightmapDatasetTests.cpp
+        tools/converter/HeightmapTileFilter.cpp
         src/HeightmapDataset.cpp
         src/assets/RuntimeAssetCompression.cpp)
     set_target_properties(heightmap_dataset_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
-    target_include_directories(heightmap_dataset_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
+    target_include_directories(heightmap_dataset_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tools/converter ${glm_SOURCE_DIR})
     target_link_libraries(heightmap_dataset_tests PRIVATE lz4_local SDL3::Headers)
     add_test(NAME heightmap_dataset_tests COMMAND $<TARGET_FILE:heightmap_dataset_tests>)
 

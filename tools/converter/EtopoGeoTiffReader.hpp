@@ -16,8 +16,8 @@ public:
     [[nodiscard]] double maxLongitude() const { return m_maxLongitude; }
     [[nodiscard]] double minLatitude() const { return m_minLatitude; }
     [[nodiscard]] double maxLatitude() const { return m_maxLatitude; }
-    [[nodiscard]] std::int16_t sourceMin() const { return m_sourceMin; }
-    [[nodiscard]] std::int16_t sourceMax() const { return m_sourceMax; }
+    [[nodiscard]] float sourceMin() const { return m_sourceMin; }
+    [[nodiscard]] float sourceMax() const { return m_sourceMax; }
     [[nodiscard]] const std::string& sourceSampleDescription() const { return m_sourceSampleDescription; }
 
 private:
@@ -29,8 +29,8 @@ private:
     double m_maxLatitude = 0.0;
     double m_pixelWidth = 0.0;
     double m_pixelHeight = 0.0;
-    std::int16_t m_sourceMin = 0;
-    std::int16_t m_sourceMax = 0;
+    float m_sourceMin = 0;
+    float m_sourceMax = 0;
     std::string m_sourceSampleDescription;
-    std::vector<std::int16_t> m_samples;
+    std::vector<float> m_samples;
 };
