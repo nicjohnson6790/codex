@@ -32,13 +32,23 @@ struct Job
 
 struct TestManager
 {
-    static constexpr std::uint16_t unavailable = 2;
-    FixedAssetCache<int> cache{2, 2, 1};
+    struct CountingHash
+    {
+        std::size_t* calls;
+        std::size_t operator()(int id) const
+        {
+            ++*calls;
+            return std::hash<int>{}(id);
+        }
+    };
+    static constexpr CacheIndex unavailable = kUnavailableCacheIndex;
+    std::size_t hashCalls = 0;
+    FixedAssetCache<int, CacheIndex, CountingHash> cache{2, 2, 1, CountingHash{&hashCalls}};
     GenerationQueue<Job, Fence> jobs{1};
 
     std::uint16_t request(int assetId, std::uint16_t hint = unavailable)
     {
-        auto slot = hint != unavailable && cache.validatesHint(hint, assetId) ? std::optional<std::uint16_t>(hint) : cache.find(assetId);
+        auto slot = cache.find(assetId, hint);
         if (slot)
         {
             cache.touch(*slot);
@@ -169,6 +179,74 @@ int main()
     assert(manager.cache.validatesHint(0, 7));
     assert(manager.request(8, 0) == TestManager::unavailable); // Stale hint falls back to lookup/admission.
     assert(!manager.cache.find(8));                            // Queue-full admission leaves the cache unchanged.
+
+    // A retained node hint avoids the hash lookup on the next frame, but never
+    // overrides readiness or semantic identity after eviction/cache clear.
+    manager.cache.markReady(0);
+    CacheIndex nodeHint = kUnavailableCacheIndex;
+    nodeHint = manager.request(7, nodeHint);
+    assert(nodeHint == 0);
+    manager.cache.age(); // Next frame, same live node and resident asset.
+    const auto beforeDirectLookup = manager.hashCalls;
+    nodeHint = manager.request(7, nodeHint);
+    assert(nodeHint == 0 && manager.hashCalls == beforeDirectLookup);
+    manager.cache.markNotReady(0);
+    nodeHint = manager.request(7, nodeHint);
+    assert(nodeHint == kUnavailableCacheIndex); // Unavailable replaces the old hint.
+    manager.cache.markReady(0);
+    const auto beforeUnavailableLookup = manager.hashCalls;
+    nodeHint = manager.request(7, nodeHint);
+    assert(nodeHint == 0 && manager.hashCalls == beforeUnavailableLookup + 1);
+    manager.cache.assign(0, 8);
+    manager.cache.markReady(0);
+    manager.cache.assign(1, 7);
+    manager.cache.markReady(1);
+    const auto beforeStaleLookup = manager.hashCalls;
+    nodeHint = manager.request(7, nodeHint);
+    assert(nodeHint == 1 && manager.hashCalls == beforeStaleLookup + 1);
+    manager.cache.clear(); // No synchronized hint reset.
+    nodeHint = manager.request(7, nodeHint);
+    assert(nodeHint == kUnavailableCacheIndex);
+    assert(!manager.cache.find(7)); // Pending queue still prevents admission.
+
+    TestManager readOnly;
+    readOnly.cache.assign(0, 42);
+    readOnly.cache.markReady(0);
+    readOnly.cache.age();
+    CacheIndex readHint = kUnavailableCacheIndex;
+    readHint = readOnly.cache.isResident(42, readHint);
+    assert(readHint == 0);
+    const auto hashesBeforeRead = readOnly.hashCalls;
+    readHint = readOnly.cache.isResident(42, readHint);
+    assert(readHint == 0 && readOnly.hashCalls == hashesBeforeRead);
+    assert(readOnly.cache.ageOf(0) == 1 && readOnly.jobs.count() == 0);
+    assert(readOnly.cache.isResident(99, readHint) == kUnavailableCacheIndex);
+    assert(!readOnly.cache.find(99) && readOnly.jobs.count() == 0);
+    readOnly.cache.markNotReady(0);
+    readHint = readOnly.cache.isResident(42, readHint);
+    assert(readHint == kUnavailableCacheIndex && readOnly.cache.ageOf(0) == 1);
+    readOnly.cache.assign(0, 99);
+    readOnly.cache.markReady(0);
+    readOnly.cache.assign(1, 42);
+    readOnly.cache.markReady(1);
+    readHint = readOnly.cache.isResident(42, 0);
+    assert(readHint == 1); // Reused hint cannot return a different semantic asset.
+    readOnly.cache.clear();
+    readHint = readOnly.cache.isResident(42, readHint);
+    assert(readHint == kUnavailableCacheIndex && !readOnly.cache.find(42));
+
+    // Collision tiles retain timestamp precision beyond the default 8-bit ages.
+    FixedAssetCache<int, CacheIndex, std::hash<int>, std::equal_to<int>, std::uint64_t> longLived(2, 2, 1);
+    longLived.assign(1, 1);
+    longLived.age(300);
+    longLived.assign(0, 2);
+    longLived.age(500);
+    assert(longLived.ageOf(1) == 800 && longLived.ageOf(0) == 500);
+    assert(longLived.findAllocationCandidate() == 1);
+    longLived.touch(1);
+    assert(longLived.findAllocationCandidate() == 0);
+    longLived.age(std::numeric_limits<std::uint64_t>::max());
+    assert(longLived.ageOf(0) == std::numeric_limits<std::uint64_t>::max());
 
     GenerationQueue<Job, Fence> wrapQueue(2);
     auto wrapA = wrapQueue.tryPush({1, 0}).value();

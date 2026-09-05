@@ -54,7 +54,7 @@ class WorldGridQuadtreeHeightmapManager
 {
   public:
     static constexpr std::uint16_t kCapacity = static_cast<std::uint16_t>(AppConfig::Terrain::kHeightmapSliceCapacity);
-    static constexpr std::uint16_t kUnavailable = kCapacity;
+    static constexpr std::uint16_t kUnavailable = kUnavailableCacheIndex;
     static constexpr std::uint16_t kSourceTileCapacity = static_cast<std::uint16_t>(AppConfig::Terrain::kSourceHeightmapCacheCapacity);
     static constexpr std::uint16_t kSourceUnavailable = kSourceTileCapacity;
     static constexpr std::uint16_t kMaxFinalHeightmapsPerDispatch =
@@ -85,7 +85,8 @@ class WorldGridQuadtreeHeightmapManager
     void invalidateSourceTile(const SourceTileId &id);
     void ageMap();
     [[nodiscard]] std::uint16_t requestAsset(const WorldGridQuadtreeLeafId &leafId, std::uint16_t hint = kUnavailable);
-    bool makeCpuResident(const WorldGridQuadtreeLeafId &leafId, QuadtreeMeshRenderer &meshRenderer);
+    [[nodiscard]] CacheIndex requestCpuAsset(const WorldGridQuadtreeLeafId &leafId, QuadtreeMeshRenderer &meshRenderer,
+                                            CacheIndex hint = kUnavailable);
     void requestLeaf(const WorldGridQuadtreeLeafId &leafId, QuadtreeMeshRenderer &meshRenderer);
     void scheduleQueuedGenerations(QuadtreeMeshRenderer &meshRenderer);
     void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence> &fence);
@@ -94,9 +95,9 @@ class WorldGridQuadtreeHeightmapManager
     void applyGeneratedExtents(const WorldGridQuadtreeLeafId &, std::uint16_t, const HeightmapExtents &, GenerationJobHandle);
     void clearCache();
     void shutdownAfterGpuIdle();
-    [[nodiscard]] bool getExtents(const WorldGridQuadtreeLeafId &, HeightmapExtents &) const;
-    [[nodiscard]] bool getResidentSliceIndex(const WorldGridQuadtreeLeafId &, std::uint16_t &) const;
-    [[nodiscard]] bool tryGetCpuResidentHeightmap(const WorldGridQuadtreeLeafId &, CpuResidentHeightmapView &) const;
+    [[nodiscard]] CacheIndex isResident(const WorldGridQuadtreeLeafId &, CacheIndex hint = kUnavailable) const;
+    [[nodiscard]] bool buildExtents(const WorldGridQuadtreeLeafId &, CacheIndex, HeightmapExtents &) const;
+    [[nodiscard]] bool buildCpuResidentHeightmap(const WorldGridQuadtreeLeafId &, CacheIndex, CpuResidentHeightmapView &) const;
     [[nodiscard]] std::uint16_t computeDispatchBudget() const
     {
         return m_computeDispatchBudget;

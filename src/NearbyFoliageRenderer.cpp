@@ -888,18 +888,18 @@ std::uint32_t NearbyFoliageRenderer::drawCallCount() const
     return m_activeDrawCommandCount;
 }
 
-bool NearbyFoliageRenderer::tryGetCpuResidentPage(
+bool NearbyFoliageRenderer::buildCpuResidentPage(
     const WorldGridQuadtreeLeafId& pageKey,
+    CacheIndex entryIndex,
     CpuResidentPageView& view) const
 {
-    const std::uint16_t entryIndex = findEntryIndex(pageKey);
-    if (entryIndex == FoliageConfig::kNearbyDecodedPageLruCapacity)
+    if (entryIndex >= FoliageConfig::kNearbyDecodedPageLruCapacity)
     {
         return false;
     }
 
     const DecodedPageEntry& entry = m_decodedPages[entryIndex];
-    if (!entry.valid || entry.readbackPending)
+    if (entry.key != pageKey || !entry.valid || entry.readbackPending)
     {
         return false;
     }
@@ -2031,15 +2031,7 @@ void NearbyFoliageRenderer::resetTransientState()
     m_pendingFenceReadbackSlots.fill(0u);
 }
 
-std::uint16_t NearbyFoliageRenderer::findEntryIndex(const WorldGridQuadtreeLeafId& pageKey) const
-{
-    for (std::uint16_t entryIndex = 0; entryIndex < m_decodedPages.size(); ++entryIndex)
-    {
-        const DecodedPageEntry& entry = m_decodedPages[entryIndex];
-        if ((entry.valid || entry.readbackPending) && entry.key == pageKey) return entryIndex;
-    }
-    return FoliageConfig::kNearbyDecodedPageLruCapacity;
-}
+
 
 bool NearbyFoliageRenderer::entryMatchesSource(
     const DecodedPageEntry& entry,

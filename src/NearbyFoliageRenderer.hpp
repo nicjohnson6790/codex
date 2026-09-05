@@ -125,8 +125,9 @@ public:
     [[nodiscard]] std::uint32_t drawCount() const { return m_drawCount; }
     [[nodiscard]] std::uint32_t drawCallCount() const;
     [[nodiscard]] std::uint32_t emittedInstanceCount() const { return m_drawCount; }
-    [[nodiscard]] bool tryGetCpuResidentPage(
+    [[nodiscard]] bool buildCpuResidentPage(
         const WorldGridQuadtreeLeafId& pageKey,
+        CacheIndex slot,
         CpuResidentPageView& view) const;
 
 private:
@@ -195,7 +196,6 @@ private:
     void createDecodeBuffers();
     void createDrawBuffers();
     void resetTransientState();
-    [[nodiscard]] std::uint16_t findEntryIndex(const WorldGridQuadtreeLeafId& pageKey) const;
     [[nodiscard]] bool entryMatchesSource(
         const DecodedPageEntry& entry,
         const WorldGridQuadtreeLeafId& pageKey,

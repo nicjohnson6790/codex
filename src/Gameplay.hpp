@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AssetResidency.hpp"
 #include "CameraManager.hpp"
 #include "FoliageTypes.hpp"
 #include "GamepadInput.hpp"
@@ -63,29 +64,37 @@ public:
     [[nodiscard]] GroundSample sampleGround(const Position& worldPosition) const;
     [[nodiscard]] glm::dvec3 resolveTreeCollisions(const Position& position, double playerRadius) const;
     [[nodiscard]] std::uint32_t readyTileCount() const;
+    [[nodiscard]] CacheIndex isResident(const WorldGridQuadtreeLeafId& key, CacheIndex hint = kUnavailableCacheIndex) const;
 
 private:
     struct CollisionTile
     {
-        WorldGridQuadtreeLeafId key{};
         std::array<float, QuadtreeMeshRenderer::kHeightmapSliceSampleCount> heightmap{};
         std::array<DecodedNearbyFoliageInstance, FoliageConfig::kCandidateSlotCount> treeGrid{};
-        bool used = false;
-        bool heightReady = false;
         bool treesReady = false;
-        std::uint64_t lastUsedFrame = 0;
+        CacheIndex heightmapHint = kUnavailableCacheIndex;
+        CacheIndex foliageHint = kUnavailableCacheIndex;
+        CacheIndex nearbyFoliageHint = kUnavailableCacheIndex;
         std::uint32_t treeContentVersion = 0;
         std::uint16_t treeLiveCount = 0;
     };
 
-    [[nodiscard]] CollisionTile& touchTile(const WorldGridQuadtreeLeafId& key, std::uint64_t frameIndex);
+    [[nodiscard]] CacheIndex touchTile(const WorldGridQuadtreeLeafId& key);
     [[nodiscard]] const CollisionTile* findTile(const WorldGridQuadtreeLeafId& key) const;
     [[nodiscard]] static WorldGridQuadtreeLeafId leafIdForWorldPosition(const glm::dvec3& worldPosition);
     [[nodiscard]] static WorldGridQuadtreeLeafId leafIdForPage(std::int64_t pageX, std::int64_t pageZ);
     [[nodiscard]] static glm::dvec2 pageCoordinatesForWorldPosition(const glm::dvec3& worldPosition);
 
     static constexpr std::uint32_t kTileCacheSize = 16;
+    struct LeafIdHash
+    {
+        [[nodiscard]] std::size_t operator()(const WorldGridQuadtreeLeafId& key) const;
+    };
+    // Full-width ages preserve the former last-used-frame eviction ordering.
+    FixedAssetCache<WorldGridQuadtreeLeafId, CacheIndex, LeafIdHash,
+                    std::equal_to<WorldGridQuadtreeLeafId>, std::uint64_t> m_tileCache{kTileCacheSize, 16, 2};
     std::array<CollisionTile, kTileCacheSize> m_tiles{};
+    std::uint64_t m_lastUpdateFrame = 0;
 };
 
 class CharacterMotor

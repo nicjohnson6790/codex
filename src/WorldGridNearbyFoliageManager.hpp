@@ -14,7 +14,7 @@ class WorldGridNearbyFoliageManager
 {
 public:
     static constexpr std::uint16_t kCapacity = FoliageConfig::kNearbyDecodedPageLruCapacity;
-    static constexpr std::uint16_t kUnavailable = kCapacity;
+    static constexpr std::uint16_t kUnavailable = kUnavailableCacheIndex;
 
     WorldGridNearbyFoliageManager();
 
@@ -26,6 +26,10 @@ public:
         const FoliageReadyPageInfo& sourcePageInfo,
         NearbyFoliageRenderer& renderer,
         std::uint16_t hint = kUnavailable);
+    [[nodiscard]] CacheIndex isResident(const WorldGridQuadtreeLeafId& id, CacheIndex hint = kUnavailable) const
+    {
+        return m_cache.isResident(id, hint);
+    }
     void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence>& fence);
     [[nodiscard]] bool complete(
         GenerationJobHandle job,

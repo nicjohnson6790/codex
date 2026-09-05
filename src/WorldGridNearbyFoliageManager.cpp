@@ -52,9 +52,7 @@ std::uint16_t WorldGridNearbyFoliageManager::requestAsset(
     NearbyFoliageRenderer& renderer,
     std::uint16_t hint)
 {
-    std::optional<std::uint16_t> existing;
-    if (hint != kUnavailable && m_cache.validatesHint(hint, pageKey)) existing = hint;
-    else existing = m_cache.find(pageKey);
+    const auto existing = m_cache.find(pageKey, hint);
 
     if (existing)
     {

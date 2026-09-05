@@ -70,8 +70,8 @@ std::uint16_t WorldGridFoliageCanopyManager::requestAsset(
         .terrainSliceIndex = terrainSliceIndex,
     };
 
-    std::uint16_t residentIndex = m_cache.validatesHint(hint, leafId) ? hint : findResidentIndex(leafId);
-    if (residentIndex != kCapacity)
+    std::uint16_t residentIndex = m_cache.find(leafId, hint).value_or(kUnavailable);
+    if (residentIndex != kUnavailable)
     {
         FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
         m_cache.touch(residentIndex);
@@ -82,13 +82,13 @@ std::uint16_t WorldGridFoliageCanopyManager::requestAsset(
             m_generationJobs.job(activeJob).terrainSource = terrainSource;
             m_generationJobs.job(activeJob).requestFrame = m_requestFrame;
         }
-        return residentHasFlag(entry, ReadyMask) ? residentIndex : kCapacity;
+        return residentHasFlag(entry, ReadyMask) ? residentIndex : kUnavailable;
     }
 
     const auto candidate = m_cache.findAllocationCandidate();
-    if (!candidate) return kCapacity;
+    if (!candidate) return kUnavailable;
     const auto job = m_generationJobs.tryPush({ leafId, *candidate, terrainSource, m_requestFrame });
-    if (!job) return kCapacity;
+    if (!job) return kUnavailable;
     residentIndex = *candidate;
     const bool wasOpen = m_cache.isOpen(residentIndex);
     if (wasOpen)
@@ -102,7 +102,7 @@ std::uint16_t WorldGridFoliageCanopyManager::requestAsset(
     assignResidentCell(residentIndex, leafId);
     m_terrainSources[residentIndex] = terrainSource;
     if (!wasOpen) ++m_residentCount;
-    return kCapacity;
+    return kUnavailable;
 }
 
 void WorldGridFoliageCanopyManager::scheduleQueuedGenerations(FoliageCanopyRenderer& renderer)
@@ -173,28 +173,13 @@ bool WorldGridFoliageCanopyManager::buildReadyCellInfo(
     return true;
 }
 
-bool WorldGridFoliageCanopyManager::getReadyCellInfo(
-    const WorldGridQuadtreeLeafId& leafId,
-    FoliageCanopyReadyCellInfo& cellInfo) const
+CacheIndex WorldGridFoliageCanopyManager::isResident(
+    const WorldGridQuadtreeLeafId& leafId, CacheIndex hint) const
 {
-    const std::uint16_t residentIndex = findResidentIndex(leafId);
-    if (residentIndex == kCapacity)
-    {
-        return false;
-    }
-
-    const FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndex];
-    if (!residentHasFlag(entry, ReadyMask))
-    {
-        return false;
-    }
-
-    cellInfo = {
-        .slotIndex = entry.slotIndex,
-        .seed = static_cast<std::uint32_t>(hashLeafId(entry.leafId)),
-        .residentFrameAge = entry.residentFrameAge,
-    };
-    return true;
+    const auto slot = m_cache.isResident(leafId, hint);
+    if (slot == kUnavailable) return kUnavailable;
+    const auto& entry = m_residentEntries[slot];
+    return residentHasFlag(entry, ReadyMask) ? slot : kUnavailable;
 }
 
 void WorldGridFoliageCanopyManager::emitCanopyDraw(
@@ -222,7 +207,7 @@ void WorldGridFoliageCanopyManager::emitCanopyDraw(
 
     for (std::uint32_t cellIndex = 0; cellIndex < cellCount; ++cellIndex)
     {
-        if (residentIndices[cellIndex] == kCapacity)
+        if (residentIndices[cellIndex] == kUnavailable)
         {
             continue;
         }
@@ -238,7 +223,7 @@ void WorldGridFoliageCanopyManager::emitCanopyDraw(
 void WorldGridFoliageCanopyManager::noteRenderedCell(const WorldGridQuadtreeLeafId& leafId)
 {
     const std::uint16_t residentIndex = findResidentIndex(leafId);
-    if (residentIndex == kCapacity)
+    if (residentIndex == kUnavailable)
     {
         return;
     }
@@ -261,7 +246,7 @@ std::uint16_t WorldGridFoliageCanopyManager::readyCount() const
 
 std::uint16_t WorldGridFoliageCanopyManager::findResidentIndex(const WorldGridQuadtreeLeafId& leafId) const
 {
-    return m_cache.find(leafId).value_or(kCapacity);
+    return m_cache.find(leafId).value_or(kUnavailable);
 }
 
 

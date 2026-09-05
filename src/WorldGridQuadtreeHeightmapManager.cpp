@@ -182,7 +182,7 @@ void WorldGridQuadtreeHeightmapManager::allocateReferences(std::uint16_t slot, c
 
 std::uint16_t WorldGridQuadtreeHeightmapManager::requestAsset(const WorldGridQuadtreeLeafId &leaf, std::uint16_t hint)
 {
-    auto existing = (hint != kUnavailable && m_heightmaps.validatesHint(hint, leaf)) ? std::optional<std::uint16_t>(hint) : findSlot(leaf);
+    auto existing = m_heightmaps.find(leaf, hint);
     if (existing)
     {
         m_heightmaps.touch(*existing);
@@ -536,16 +536,17 @@ void WorldGridQuadtreeHeightmapManager::compactReferences()
     m_sourceReferences.resize(write);
 }
 
-bool WorldGridQuadtreeHeightmapManager::makeCpuResident(const WorldGridQuadtreeLeafId &id, QuadtreeMeshRenderer &renderer)
+CacheIndex WorldGridQuadtreeHeightmapManager::requestCpuAsset(
+    const WorldGridQuadtreeLeafId &id, QuadtreeMeshRenderer &renderer, CacheIndex hint)
 {
-    auto slot = requestAsset(id);
+    const auto slot = requestAsset(id, hint);
     if (slot == kUnavailable)
-        return false;
+        return kUnavailable;
     if (m_cpuHeightmapValid[slot] && m_cpuHeightmapLeafIds[slot] == id)
-        return true;
+        return slot;
     if (!m_cpuHeightmapPending[slot])
         m_cpuHeightmapPending[slot] = renderer.requestHeightmapSliceDownload(id, slot);
-    return false;
+    return kUnavailable;
 }
 void WorldGridQuadtreeHeightmapManager::requestLeaf(const WorldGridQuadtreeLeafId &id, QuadtreeMeshRenderer &renderer)
 {
@@ -553,28 +554,25 @@ void WorldGridQuadtreeHeightmapManager::requestLeaf(const WorldGridQuadtreeLeafI
     if (slot != kUnavailable)
         renderer.addLeaf(id, slot);
 }
-bool WorldGridQuadtreeHeightmapManager::getExtents(const WorldGridQuadtreeLeafId &id, HeightmapExtents &e) const
+CacheIndex WorldGridQuadtreeHeightmapManager::isResident(const WorldGridQuadtreeLeafId &id, CacheIndex hint) const
 {
-    auto s = findSlot(id);
-    if (!s || !m_heightmaps.isReady(*s) || !m_knownExtentsValid[*s])
+    return m_heightmaps.isResident(id, hint);
+}
+bool WorldGridQuadtreeHeightmapManager::buildExtents(
+    const WorldGridQuadtreeLeafId &id, CacheIndex slot, HeightmapExtents &extents) const
+{
+    if (!m_heightmaps.validatesHint(slot, id) || !m_heightmaps.isReady(slot) || !m_knownExtentsValid[slot])
         return false;
-    e = m_knownExtents[*s];
+    extents = m_knownExtents[slot];
     return true;
 }
-bool WorldGridQuadtreeHeightmapManager::getResidentSliceIndex(const WorldGridQuadtreeLeafId &id, std::uint16_t &s) const
+bool WorldGridQuadtreeHeightmapManager::buildCpuResidentHeightmap(
+    const WorldGridQuadtreeLeafId &id, CacheIndex slot, CpuResidentHeightmapView &view) const
 {
-    auto v = findSlot(id);
-    if (!v || !m_heightmaps.isReady(*v))
+    if (!m_heightmaps.validatesHint(slot, id) || !m_heightmaps.isReady(slot) ||
+        !m_cpuHeightmapValid[slot] || m_cpuHeightmapLeafIds[slot] != id)
         return false;
-    s = *v;
-    return true;
-}
-bool WorldGridQuadtreeHeightmapManager::tryGetCpuResidentHeightmap(const WorldGridQuadtreeLeafId &id, CpuResidentHeightmapView &v) const
-{
-    std::uint16_t s;
-    if (!getResidentSliceIndex(id, s) || !m_cpuHeightmapValid[s] || m_cpuHeightmapLeafIds[s] != id)
-        return false;
-    v = {id, s, m_cpuHeightmapSamples[s]};
+    view = {id, slot, m_cpuHeightmapSamples[slot]};
     return true;
 }
 void WorldGridQuadtreeHeightmapManager::collectCompletedCpuReadbacks(QuadtreeMeshRenderer &r)

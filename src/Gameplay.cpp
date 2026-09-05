@@ -108,6 +108,9 @@ void CollisionManager::updateAroundPlayer(
     NearbyFoliageRenderer& nearbyFoliageRenderer,
     QuadtreeMeshRenderer& meshRenderer)
 {
+    if (frameIndex > m_lastUpdateFrame)
+        m_tileCache.age(frameIndex - m_lastUpdateFrame);
+    m_lastUpdateFrame = frameIndex;
     const glm::dvec2 page = pageCoordinatesForWorldPosition(playerPosition.worldPosition());
     const std::int64_t centerPageX = floorToInt64(page.x);
     const std::int64_t centerPageZ = floorToInt64(page.y);
@@ -117,30 +120,36 @@ void CollisionManager::updateAroundPlayer(
         for (std::int64_t dx = -1; dx <= 1; ++dx)
         {
             const WorldGridQuadtreeLeafId key = leafIdForPage(centerPageX + dx, centerPageZ + dz);
-            CollisionTile& tile = touchTile(key, frameIndex);
+            const CacheIndex tileIndex = touchTile(key);
+            if (tileIndex == kUnavailableCacheIndex)
+                continue;
+            CollisionTile& tile = m_tiles[tileIndex];
 
-            if (!tile.heightReady && heightmapManager.makeCpuResident(key, meshRenderer))
+            if (!m_tileCache.isReady(tileIndex))
             {
+                tile.heightmapHint = heightmapManager.requestCpuAsset(key, meshRenderer, tile.heightmapHint);
                 CpuResidentHeightmapView heightmapView{};
-                if (heightmapManager.tryGetCpuResidentHeightmap(key, heightmapView))
+                if (heightmapManager.buildCpuResidentHeightmap(key, tile.heightmapHint, heightmapView))
                 {
                     std::copy(heightmapView.samples.begin(), heightmapView.samples.end(), tile.heightmap.begin());
-                    tile.heightReady = true;
+                    m_tileCache.markReady(tileIndex);
                 }
             }
 
-            std::uint16_t terrainSliceIndex = 0;
-            if (heightmapManager.getResidentSliceIndex(key, terrainSliceIndex))
+            tile.heightmapHint = heightmapManager.isResident(key, tile.heightmapHint);
+            if (tile.heightmapHint != kUnavailableCacheIndex)
             {
-                const std::uint16_t foliageResidentIndex = foliageManager.requestAsset(key, key, terrainSliceIndex);
-                if (foliageResidentIndex != WorldGridFoliageManager::kCapacity)
+                tile.foliageHint = foliageManager.requestAsset(key, key, tile.heightmapHint, tile.foliageHint);
+                if (tile.foliageHint != kUnavailableCacheIndex)
                 {
                     FoliageReadyPageInfo pageInfo{};
-                    if (foliageManager.buildReadyPageInfo(key, foliageResidentIndex, pageInfo) &&
-                        nearbyFoliageManager.requestAsset(key, pageInfo, nearbyFoliageRenderer) != FoliageConfig::kNearbyDecodedPageLruCapacity)
+                    if (foliageManager.buildReadyPageInfo(key, tile.foliageHint, pageInfo))
                     {
+                        tile.nearbyFoliageHint = nearbyFoliageManager.requestAsset(
+                            key, pageInfo, nearbyFoliageRenderer, tile.nearbyFoliageHint);
                         NearbyFoliageRenderer::CpuResidentPageView foliageView{};
-                        if (nearbyFoliageRenderer.tryGetCpuResidentPage(key, foliageView) &&
+                        if (tile.nearbyFoliageHint != kUnavailableCacheIndex &&
+                            nearbyFoliageRenderer.buildCpuResidentPage(key, tile.nearbyFoliageHint, foliageView) &&
                             (!tile.treesReady || tile.treeContentVersion != foliageView.contentVersion))
                         {
                             std::copy(foliageView.instances.begin(), foliageView.instances.end(), tile.treeGrid.begin());
@@ -158,11 +167,12 @@ void CollisionManager::updateAroundPlayer(
 CollisionManager::GroundSample CollisionManager::sampleGround(const Position& worldPosition) const
 {
     const WorldGridQuadtreeLeafId key = leafIdForWorldPosition(worldPosition.worldPosition());
-    const CollisionTile* tile = findTile(key);
-    if (tile == nullptr || !tile->heightReady)
+    const CacheIndex slot = isResident(key);
+    if (slot == kUnavailableCacheIndex)
     {
         return {};
     }
+    const CollisionTile* tile = &m_tiles[slot];
 
     const auto [minCorner, maxCorner] = worldGridQuadtreeLeafBounds(key);
     const glm::dvec3 minWorld = minCorner.worldPosition();
@@ -281,64 +291,50 @@ glm::dvec3 CollisionManager::resolveTreeCollisions(const Position& position, dou
     return correction;
 }
 
+std::size_t CollisionManager::LeafIdHash::operator()(const WorldGridQuadtreeLeafId& key) const
+{
+    auto hash = std::hash<std::int64_t>{}(key.gridX);
+    hash ^= std::hash<std::int64_t>{}(key.gridY) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+    hash ^= std::hash<std::uint64_t>{}(key.subdivisionPath) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+    return hash;
+}
+
+CacheIndex CollisionManager::isResident(const WorldGridQuadtreeLeafId& key, CacheIndex hint) const
+{
+    return m_tileCache.isResident(key, hint);
+}
+
 std::uint32_t CollisionManager::readyTileCount() const
 {
     std::uint32_t count = 0;
-    for (const CollisionTile& tile : m_tiles)
-    {
-        if (tile.used && tile.heightReady)
-        {
+    for (CacheIndex slot = 0; slot < kTileCacheSize; ++slot)
+        if (m_tileCache.isReady(slot))
             ++count;
-        }
-    }
     return count;
 }
 
-CollisionManager::CollisionTile& CollisionManager::touchTile(
-    const WorldGridQuadtreeLeafId& key,
-    std::uint64_t frameIndex)
+CacheIndex CollisionManager::touchTile(const WorldGridQuadtreeLeafId& key)
 {
-    for (CollisionTile& tile : m_tiles)
+    if (const auto slot = m_tileCache.find(key))
     {
-        if (tile.used && tile.key == key)
-        {
-            tile.lastUsedFrame = frameIndex;
-            return tile;
-        }
+        m_tileCache.touch(*slot);
+        return *slot;
     }
 
-    CollisionTile* reusable = nullptr;
-    for (CollisionTile& tile : m_tiles)
-    {
-        if (!tile.used)
-        {
-            reusable = &tile;
-            break;
-        }
-        if (reusable == nullptr || tile.lastUsedFrame < reusable->lastUsedFrame)
-        {
-            reusable = &tile;
-        }
-    }
-
-    *reusable = {};
-    reusable->used = true;
-    reusable->key = key;
-    reusable->lastUsedFrame = frameIndex;
-    return *reusable;
+    const auto slot = m_tileCache.findAllocationCandidate();
+    if (!slot)
+        return kUnavailableCacheIndex;
+    m_tiles[*slot] = {};
+    m_tileCache.assign(*slot, key);
+    return *slot;
 }
 
 const CollisionManager::CollisionTile* CollisionManager::findTile(const WorldGridQuadtreeLeafId& key) const
 {
-    for (const CollisionTile& tile : m_tiles)
-    {
-        if (tile.used && tile.key == key)
-        {
-            return &tile;
-        }
-    }
-
-    return nullptr;
+    // Tree data can be ready before the ground readback, so this queries open
+    // entries and lets the caller check that component's readiness.
+    const auto slot = m_tileCache.find(key);
+    return slot ? &m_tiles[*slot] : nullptr;
 }
 
 WorldGridQuadtreeLeafId CollisionManager::leafIdForWorldPosition(const glm::dvec3& worldPosition)

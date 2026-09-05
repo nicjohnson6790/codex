@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AppConfig.hpp"
+#include "AssetResidency.hpp"
 #include "CameraManager.hpp"
 #include "FoliageTypes.hpp"
 #include "RenderTypes.hpp"
@@ -109,10 +110,29 @@ private:
         Collapse,
     };
 
+    static constexpr std::size_t kFoliagePageCount = 16;
+
+    // Disposable lookup acceleration; semantic IDs remain in the node/derived caches.
+    struct NodeResidencyHints
+    {
+        CacheIndex heightmap = kUnavailableCacheIndex;
+        std::array<CacheIndex, kFoliagePageCount> foliagePages = [] {
+            std::array<CacheIndex, kFoliagePageCount> hints{};
+            hints.fill(kUnavailableCacheIndex);
+            return hints;
+        }();
+        std::array<CacheIndex, FoliageConfig::kCanopyCellCountPerNode> canopyCells = [] {
+            std::array<CacheIndex, FoliageConfig::kCanopyCellCountPerNode> hints{};
+            hints.fill(kUnavailableCacheIndex);
+            return hints;
+        }();
+        CacheIndex nearbyFoliage = kUnavailableCacheIndex;
+    };
+
     struct FoliageCanonicalPageCache
     {
         WorldGridQuadtreeLeafId nodeId{};
-        std::array<WorldGridQuadtreeLeafId, 16> pageIds{};
+        std::array<WorldGridQuadtreeLeafId, kFoliagePageCount> pageIds{};
         std::uint32_t pageCount = 0;
         bool valid = false;
     };
@@ -137,6 +157,7 @@ private:
         std::uint32_t cellCount = 0;
     };
 
+    [[nodiscard]] CacheIndex residentHeightmap(std::uint16_t nodeIndex) const;
     void reset();
     void refreshBaseNodes(const Position& cameraPosition);
     [[nodiscard]] std::uint16_t allocateNode();
@@ -144,7 +165,7 @@ private:
     void freeSubtree(std::uint16_t nodeIndex);
     void ensureChildren(std::uint16_t nodeIndex, const std::array<WorldGridQuadtreeLeafId, 4>& childIds);
     void updateNode(std::uint16_t nodeIndex, const CameraManager::Camera& activeCamera);
-    [[nodiscard]] LodDecision evaluateLodPolicy(const QuadtreeNode& node, const CameraManager::Camera& activeCamera) const;
+    [[nodiscard]] LodDecision evaluateLodPolicy(std::uint16_t nodeIndex, const CameraManager::Camera& activeCamera) const;
     [[nodiscard]] bool nodeOccupied(std::uint16_t nodeIndex) const;
     [[nodiscard]] static bool nodeHasChildren(const QuadtreeNode& node);
     [[nodiscard]] std::uint8_t quadrantInParent(std::uint16_t nodeIndex) const;
@@ -190,6 +211,7 @@ private:
     WorldGridQuadtreeDebugRenderer m_debugRenderer;
     WorldGridQuadtreeHeightmapManager m_heightmapManager;
     std::array<QuadtreeNode, kNodeCapacity> m_nodes{};
+    mutable std::array<NodeResidencyHints, kNodeCapacity> m_residencyHints{};
     mutable std::array<FoliageCanonicalPageCache, kNodeCapacity> m_foliageCanonicalPageCaches{};
     mutable std::array<CanopyCanonicalCellCache, kNodeCapacity> m_canopyCanonicalCellCaches{};
     std::array<std::uint16_t, kNodeCapacity> m_freeNodes{};

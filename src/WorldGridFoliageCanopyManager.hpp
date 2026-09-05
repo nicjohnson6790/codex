@@ -15,6 +15,8 @@ class WorldGridFoliageCanopyManager
 public:
     static constexpr std::uint16_t kCapacity = FoliageConfig::kCanopyCellPoolCapacity;
 
+    static constexpr CacheIndex kUnavailable = kUnavailableCacheIndex;
+
     WorldGridFoliageCanopyManager();
 
     void ageMap();
@@ -26,7 +28,7 @@ public:
         const WorldGridQuadtreeLeafId& leafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex,
-        std::uint16_t hint = kCapacity);
+        std::uint16_t hint = kUnavailable);
     void scheduleQueuedGenerations(FoliageCanopyRenderer& renderer);
     void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence>& fence);
 
@@ -44,9 +46,8 @@ public:
         std::uint8_t drawAgeFrames,
         const std::array<std::uint8_t, 4>& edgeFadeStrengths,
         FoliageCanopyRenderer& renderer) const;
-    [[nodiscard]] bool getReadyCellInfo(
-        const WorldGridQuadtreeLeafId& leafId,
-        FoliageCanopyReadyCellInfo& cellInfo) const;
+    [[nodiscard]] CacheIndex isResident(
+        const WorldGridQuadtreeLeafId& leafId, CacheIndex hint = kUnavailable) const;
     void noteRenderedCell(const WorldGridQuadtreeLeafId& leafId);
 
     [[nodiscard]] std::uint16_t residentCount() const { return m_residentCount; }

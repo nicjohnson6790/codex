@@ -12,6 +12,9 @@
 #include <utility>
 #include <vector>
 
+using CacheIndex = std::uint16_t;
+inline constexpr CacheIndex kUnavailableCacheIndex = std::numeric_limits<CacheIndex>::max();
+
 struct GenerationJobHandle
 {
     std::uint32_t index = std::numeric_limits<std::uint32_t>::max();
@@ -62,7 +65,7 @@ class BitArray
 };
 } // namespace AssetResidencyDetail
 
-template <typename AssetId, typename SlotIndex = std::uint16_t, typename Hash = std::hash<AssetId>, typename Equal = std::equal_to<AssetId>>
+template <typename AssetId, typename SlotIndex = CacheIndex, typename Hash = std::hash<AssetId>, typename Equal = std::equal_to<AssetId>, typename Age = std::uint8_t>
 class FixedAssetCache
 {
   public:
@@ -101,8 +104,10 @@ class FixedAssetCache
         return m_overflowCount;
     }
 
-    [[nodiscard]] std::optional<SlotIndex> find(const AssetId &id) const
+    [[nodiscard]] std::optional<SlotIndex> find(const AssetId &id, SlotIndex hint = kInvalidSlot) const
     {
+        if (hint != kInvalidSlot && validatesHint(hint, id))
+            return hint;
         const std::size_t bucketIndex = m_hash(id) % m_bucketCount;
         const std::size_t bucketStart = bucketIndex * m_entriesPerBucket;
         for (std::size_t entryIndex = 0; entryIndex < m_entriesPerBucket; ++entryIndex)
@@ -119,6 +124,13 @@ class FixedAssetCache
                 return entry.slot;
         }
         return std::nullopt;
+    }
+
+    // Read-only, ready-only lookup. Never touches age or admits/generates assets.
+    [[nodiscard]] SlotIndex isResident(const AssetId &id, SlotIndex hint = kInvalidSlot) const
+    {
+        const auto slot = find(id, hint);
+        return slot && isReady(*slot) ? *slot : kInvalidSlot;
     }
 
     [[nodiscard]] bool validatesHint(SlotIndex slot, const AssetId &id) const
@@ -161,11 +173,11 @@ class FixedAssetCache
         m_ages[slot] = 0;
     }
 
-    void age()
+    void age(Age elapsed = 1)
     {
         for (std::size_t index = 0; index < capacity(); ++index)
-            if (m_open.test(index) && m_ages[index] != std::numeric_limits<std::uint8_t>::max())
-                ++m_ages[index];
+            if (m_open.test(index))
+                m_ages[index] += std::min(elapsed, static_cast<Age>(std::numeric_limits<Age>::max() - m_ages[index]));
     }
 
     [[nodiscard]] bool isOpen(SlotIndex slot) const
@@ -176,7 +188,7 @@ class FixedAssetCache
     {
         return validSlot(slot) && m_ready.test(slot);
     }
-    [[nodiscard]] std::uint8_t ageOf(SlotIndex slot) const
+    [[nodiscard]] Age ageOf(SlotIndex slot) const
     {
         requireOpen(slot);
         return m_ages[slot];
@@ -340,7 +352,7 @@ class FixedAssetCache
     std::vector<AssetId> m_assetIds;
     AssetResidencyDetail::BitArray m_open;
     AssetResidencyDetail::BitArray m_ready;
-    std::vector<std::uint8_t> m_ages;
+    std::vector<Age> m_ages;
     std::vector<GenerationJobHandle> m_activeJobs;
     std::vector<SlotIndex> m_lookupBuckets;
     AssetResidencyDetail::BitArray m_bucketHasOverflow;

@@ -17,6 +17,8 @@ class WorldGridFoliageManager
 public:
     static constexpr std::uint16_t kCapacity = FoliageConfig::kPagePoolCapacity;
 
+    static constexpr CacheIndex kUnavailable = kUnavailableCacheIndex;
+
     WorldGridFoliageManager();
 
     void ageMap();
@@ -28,7 +30,7 @@ public:
         const WorldGridQuadtreeLeafId& leafId,
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex,
-        std::uint16_t hint = kCapacity);
+        std::uint16_t hint = kUnavailable);
     void scheduleQueuedGenerations(QuadtreeMeshRenderer& meshRenderer);
     void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence>& fence);
     void applyGeneratedPageLiveCount(
@@ -47,9 +49,8 @@ public:
         const WorldGridQuadtreeLeafId& terrainLeafId,
         std::uint16_t terrainSliceIndex,
         FoliageImposterRenderer& foliageRenderer) const;
-    [[nodiscard]] bool getReadyPageInfo(
-        const WorldGridQuadtreeLeafId& leafId,
-        FoliageReadyPageInfo& pageInfo) const;
+    [[nodiscard]] CacheIndex isResident(
+        const WorldGridQuadtreeLeafId& leafId, CacheIndex hint = kUnavailable) const;
 
     [[nodiscard]] std::uint16_t residentCount() const { return m_residentCount; }
     [[nodiscard]] std::uint16_t queuedCount() const { return static_cast<std::uint16_t>(m_generationJobs.count()); }
