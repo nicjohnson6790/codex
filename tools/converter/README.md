@@ -40,6 +40,16 @@ The converter currently builds six asset groups:
 
 All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/app/assets/runtime` by the main build. Converter executables are isolated under `build/Assets/<Config>/converter`.
 
+Heightmap tiles must fit the runtime's 128 KiB compressed staging bound. New conversions retry oversized fast-LZ4 output with LZ4-HC and fail explicitly if the lossless result still cannot fit. Existing version 3 packs can be migrated without regenerating elevation or changing quantization:
+
+```powershell
+.\build\Assets\Release\converter\converter.exe heightmap-repack assets\runtime\etopo2022.assetbin
+.\build\Assets\Release\converter\converter.exe heightmap-repack assets\runtime\japan_dem10_delta_ce.assetbin
+.\build\Assets\Release\converter\converter.exe heightmap-repack assets\runtime\japan_dem10_delta_ne.assetbin
+```
+
+Run this explicit offline operation with the app closed, for each pack requiring migration. It verifies decompressed bytes, appends replacement blobs, and switches the index only after writing succeeds. Original blobs remain intact and the original index is retained as `.assetbin.before-bounded` for rollback. Already bounded packs are unchanged. A normal app build stages the migrated packs afterward.
+
 ## Source Assets
 
 ### Pine tree pack

@@ -34,13 +34,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         GenerationJobHandle job{};
     };
 
-    struct CompletedHeightmapSliceReadback
-    {
-        WorldGridQuadtreeLeafId leafId{};
-        std::uint16_t sliceIndex = 0;
-        std::array<float, kHeightmapSliceSampleCount> samples{};
-    };
-
     struct GeneratedFoliagePageLiveCount
     {
         WorldGridQuadtreeLeafId leafId{};
@@ -90,7 +83,10 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     void setActiveCamera(const Position &cameraPosition);
     void setWaterCausticsState(const WaterSettings &settings);
 
-    [[nodiscard]] bool queueSourceHeightmapUpload(std::uint16_t sliceIndex, std::span<const float> samples);
+    // SDL mapping/unmapping stays on the render thread. The loader may write
+    // the returned destination until finishSourceHeightmapUpload is called.
+    [[nodiscard]] std::span<std::int16_t> beginSourceHeightmapUpload(std::uint16_t sliceIndex);
+    void finishSourceHeightmapUpload(std::uint16_t sliceIndex, bool success);
     [[nodiscard]] bool queueHeightmapGeneration(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex,
                                                 std::span<const HeightmapSourceGpuDescriptor> sources, GenerationJobHandle job);
 
@@ -100,7 +96,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     struct BridgeHeightmaps
     {
         std::uint16_t inner = 0, outer = 0, firstCorner = 0, secondCorner = 0;
-        std::uint32_t firstCornerSample = 0, secondCornerSample = 0;
+        std::uint8_t firstCornerSelector = 0, secondCornerSelector = 0;
         std::uint8_t coarseHalf = 0;
     };
     void addBridge(const WorldGridQuadtreeLeafId &leafId, const BridgeHeightmaps &heightmaps, std::uint8_t edgeIndex);
@@ -113,7 +109,8 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     // buffer.
     void dispatchHeightmapGenerations(SDL_GPUCommandBuffer *commandBuffer);
     void queueHeightmapExtentsDownload(SDL_GPUCopyPass *copyPass);
-    [[nodiscard]] bool requestHeightmapSliceDownload(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
+    [[nodiscard]] bool hasHeightmapReadbackSlot() const;
+    [[nodiscard]] bool requestHeightmapSliceDownload(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, GenerationJobHandle job);
     void queueHeightmapSliceDownloads(SDL_GPUCopyPass *copyPass);
     [[nodiscard]] bool queueFoliagePageGeneration(const WorldGridQuadtreeLeafId &foliageLeafId,
                                                   const WorldGridQuadtreeLeafId &terrainLeafId, std::uint16_t terrainSliceIndex,
@@ -123,7 +120,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     void attachSubmittedFence(const std::shared_ptr<SubmittedGpuFence> &fence, WorldGridQuadtreeHeightmapManager &heightmapManager,
                               class WorldGridFoliageManager &foliageManager);
     void collectCompletedHeightmapExtents(std::vector<GeneratedHeightmapExtents> &completedExtents);
-    void collectCompletedHeightmapSliceReadbacks(std::vector<CompletedHeightmapSliceReadback> &completedReadbacks);
+    void collectCompletedHeightmapSliceReadbacks(WorldGridQuadtreeHeightmapManager &manager);
     void collectCompletedFoliagePageLiveCounts(std::vector<GeneratedFoliagePageLiveCount> &completedLiveCounts);
 
     // Issues the terrain draws for all queued leaf instances.
@@ -155,8 +152,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         float position[3]{};
         std::uint32_t packedMetadata = 0;
         std::uint32_t heightmapIndices[4]{};
-        std::uint32_t cornerSampleCoords[2]{};
-        std::uint32_t reserved[2]{};
     };
 
     struct MeshResources
@@ -197,6 +192,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
 
     struct PendingHeightmapSliceReadback
     {
+        GenerationJobHandle job{};
         SDL_GPUTransferBuffer *transferBuffer = nullptr;
         std::shared_ptr<SubmittedGpuFence> fence{};
         WorldGridQuadtreeLeafId leafId{};
@@ -225,9 +221,9 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     static_assert(sizeof(InstanceData) == 16, "Terrain instance data must stay 16 bytes.");
     static_assert(offsetof(InstanceData, position) == 0, "Terrain instance position must start at offset 0.");
     static_assert(offsetof(InstanceData, packedMetadata) == 12, "Terrain packed metadata must stay at offset 12.");
-    static_assert(sizeof(BridgeInstanceData) == 48, "Terrain bridge instance data must stay 48 bytes.");
+    static_assert(sizeof(BridgeInstanceData) == 32, "Terrain bridge instance data must stay 32 bytes.");
     static_assert(sizeof(HeightmapGenerationDescriptor) == 16);
-    static_assert(sizeof(HeightmapSourceGpuDescriptor) == 64);
+    static_assert(sizeof(HeightmapSourceGpuDescriptor) == 80);
 
     [[nodiscard]] static std::uint32_t packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow, std::uint8_t edgeIndex = 0);
 
@@ -294,7 +290,8 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     SDL_GPUBuffer *m_heightmapSourceDescriptorBuffer = nullptr;
     SDL_GPUTransferBuffer *m_heightmapSourceDescriptorTransferBuffer = nullptr;
     SDL_GPUBuffer *m_sourceHeightmapBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_sourceHeightmapTransferBuffer = nullptr;
+    std::array<SDL_GPUTransferBuffer *, WorldGridQuadtreeHeightmapManager::kSourceTileCapacity> m_sourceHeightmapTransferBuffers{};
+    std::array<bool, WorldGridQuadtreeHeightmapManager::kSourceTileCapacity> m_sourceHeightmapUploadMapped{};
     SDL_GPUBuffer *m_heightmapBuffer = nullptr;
     SDL_GPUBuffer *m_heightmapExtentsBuffer = nullptr;
     SDL_GPUTransferBuffer *m_heightmapExtentsInitTransferBuffer = nullptr;
@@ -326,7 +323,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     std::array<GenerationJobHandle, FoliageConfig::kGenerationBudgetPerFrame> m_lastDispatchedFoliageJobs{};
     static constexpr std::size_t kHeightmapReadbackSlotCount = 8;
     std::array<PendingExtentsReadback, kHeightmapReadbackSlotCount> m_pendingExtentsReadbacks{};
-    std::array<PendingHeightmapSliceReadback, kHeightmapReadbackSlotCount> m_pendingHeightmapSliceReadbacks{};
+    std::array<PendingHeightmapSliceReadback, AppConfig::Terrain::kHeightmapReadbackCapacity> m_pendingHeightmapSliceReadbacks{};
     std::array<PendingFoliageLiveCountReadback, kHeightmapReadbackSlotCount> m_pendingFoliageLiveCountReadbacks{};
     std::uint16_t m_instanceCount = 0;
     std::uint16_t m_bridgeInstanceCount = 0;
@@ -341,7 +338,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     std::uint16_t m_pendingFoliageInstanceGenerationCount = 0;
     std::uint16_t m_lastDispatchedFoliageInstanceGenerationCount = 0;
     std::uint16_t m_pendingFenceReadbackSlot = UINT16_MAX;
-    std::array<std::uint16_t, kHeightmapReadbackSlotCount> m_pendingHeightmapSliceFenceSlots{};
+    std::array<std::uint16_t, AppConfig::Terrain::kHeightmapReadbackCapacity> m_pendingHeightmapSliceFenceSlots{};
     std::uint16_t m_pendingHeightmapSliceFenceSlotCount = 0;
     std::uint16_t m_pendingFoliageLiveCountFenceReadbackSlot = UINT16_MAX;
     std::uint16_t m_nextReadbackSlot = 0;

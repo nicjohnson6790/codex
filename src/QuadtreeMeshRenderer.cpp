@@ -1,4 +1,6 @@
 #include "QuadtreeMeshRenderer.hpp"
+#include "TerrainBridgeMetadata.hpp"
+#include <cassert>
 #include "PeriodicWorldPhase.hpp"
 
 #include "AppConfig.hpp"
@@ -417,14 +419,18 @@ void QuadtreeMeshRenderer::initialize(SDL_GPUDevice *device, SDL_GPUTextureForma
 
     SDL_GPUBufferCreateInfo sourceHeightmapInfo{};
     sourceHeightmapInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
-    sourceHeightmapInfo.size = static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount *
+    sourceHeightmapInfo.size = static_cast<Uint32>(sizeof(std::int16_t) * RuntimeAssets::kHeightmapTileSampleCount *
                                                    WorldGridQuadtreeHeightmapManager::kSourceTileCapacity);
     m_sourceHeightmapBuffer = SDL_CreateGPUBuffer(m_device, &sourceHeightmapInfo);
     SDL_GPUTransferBufferCreateInfo sourceHeightmapTransferInfo{};
     sourceHeightmapTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    sourceHeightmapTransferInfo.size = sourceHeightmapInfo.size;
-    m_sourceHeightmapTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &sourceHeightmapTransferInfo);
-    if (!m_sourceHeightmapBuffer || !m_sourceHeightmapTransferBuffer)
+    sourceHeightmapTransferInfo.size = RuntimeAssets::kHeightmapFilteredTileBytes;
+    for (auto &transfer : m_sourceHeightmapTransferBuffers)
+    {
+        transfer = SDL_CreateGPUTransferBuffer(m_device, &sourceHeightmapTransferInfo);
+        if (!transfer) throwSdlError("Failed to create source heightmap upload buffer.");
+    }
+    if (!m_sourceHeightmapBuffer)
         throwSdlError("Failed to create source heightmap tile buffers.");
 
     SDL_GPUBufferCreateInfo extentsInfo{};
@@ -523,10 +529,15 @@ void QuadtreeMeshRenderer::initialize(SDL_GPUDevice *device, SDL_GPUTextureForma
 
 void QuadtreeMeshRenderer::shutdown()
 {
-    if (m_sourceHeightmapTransferBuffer)
+    for (std::size_t slot = 0; slot < m_sourceHeightmapTransferBuffers.size(); ++slot)
     {
-        SDL_ReleaseGPUTransferBuffer(m_device, m_sourceHeightmapTransferBuffer);
-        m_sourceHeightmapTransferBuffer = nullptr;
+        auto &transfer = m_sourceHeightmapTransferBuffers[slot];
+        if (!transfer) continue;
+        // Manager shutdown joins the decoder before renderer storage is released.
+        if (m_sourceHeightmapUploadMapped[slot]) SDL_UnmapGPUTransferBuffer(m_device, transfer);
+        m_sourceHeightmapUploadMapped[slot] = false;
+        SDL_ReleaseGPUTransferBuffer(m_device, transfer);
+        transfer = nullptr;
     }
     if (m_sourceHeightmapBuffer)
     {
@@ -745,17 +756,29 @@ void QuadtreeMeshRenderer::setWaterCausticsState(const WaterSettings &settings)
     m_waterSettings = settings;
 }
 
-bool QuadtreeMeshRenderer::queueSourceHeightmapUpload(std::uint16_t sliceIndex, std::span<const float> samples)
+std::span<std::int16_t> QuadtreeMeshRenderer::beginSourceHeightmapUpload(std::uint16_t sliceIndex)
 {
-    if (sliceIndex >= WorldGridQuadtreeHeightmapManager::kSourceTileCapacity ||
-        samples.size() != RuntimeAssets::kHeightmapTileSampleCount || m_pendingSourceUploadCount >= m_pendingSourceUploadSlots.size())
-        return false;
-    float *mapped = static_cast<float *>(SDL_MapGPUTransferBuffer(m_device, m_sourceHeightmapTransferBuffer, true));
-    std::memcpy(mapped + static_cast<std::size_t>(sliceIndex) * RuntimeAssets::kHeightmapTileSampleCount, samples.data(),
-                samples.size_bytes());
-    SDL_UnmapGPUTransferBuffer(m_device, m_sourceHeightmapTransferBuffer);
-    m_pendingSourceUploadSlots[m_pendingSourceUploadCount++] = sliceIndex;
-    return true;
+    if (sliceIndex >= m_sourceHeightmapTransferBuffers.size() || m_sourceHeightmapUploadMapped[sliceIndex])
+        return {};
+    // The source cache pins this slot through decoding and upload completion.
+    // Its previous upload fence has already signaled, so cycling is unnecessary.
+    auto *mapped = static_cast<std::int16_t *>(SDL_MapGPUTransferBuffer(
+        m_device, m_sourceHeightmapTransferBuffers[sliceIndex], false));
+    if (!mapped) return {};
+    m_sourceHeightmapUploadMapped[sliceIndex] = true;
+    return {mapped, RuntimeAssets::kHeightmapTileSampleCount};
+}
+
+void QuadtreeMeshRenderer::finishSourceHeightmapUpload(std::uint16_t sliceIndex, bool success)
+{
+    assert(sliceIndex < m_sourceHeightmapTransferBuffers.size() && m_sourceHeightmapUploadMapped[sliceIndex]);
+    SDL_UnmapGPUTransferBuffer(m_device, m_sourceHeightmapTransferBuffers[sliceIndex]);
+    m_sourceHeightmapUploadMapped[sliceIndex] = false;
+    if (success)
+    {
+        assert(m_pendingSourceUploadCount < m_pendingSourceUploadSlots.size());
+        m_pendingSourceUploadSlots[m_pendingSourceUploadCount++] = sliceIndex;
+    }
 }
 
 bool QuadtreeMeshRenderer::queueHeightmapGeneration(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex,
@@ -815,10 +838,9 @@ void QuadtreeMeshRenderer::addBridge(const WorldGridQuadtreeLeafId &leafId, cons
             localMinCorner.y,
             localMinCorner.z,
         },
-        .packedMetadata = packMetadata(heightmaps.inner, worldGridQuadtreeLeafScalePow(leafId), edgeIndex) |
-                          (static_cast<std::uint32_t>(heightmaps.coarseHalf & 1u) << 26u),
+        .packedMetadata = terrainBridgeMetadata(worldGridQuadtreeLeafScalePow(leafId), edgeIndex,
+            heightmaps.coarseHalf, heightmaps.firstCornerSelector, heightmaps.secondCornerSelector),
         .heightmapIndices{heightmaps.inner, heightmaps.outer, heightmaps.firstCorner, heightmaps.secondCorner},
-        .cornerSampleCoords{heightmaps.firstCornerSample, heightmaps.secondCornerSample},
     };
 }
 
@@ -840,10 +862,9 @@ void QuadtreeMeshRenderer::addCoarseBridge(const WorldGridQuadtreeLeafId &leafId
             localMinCorner.y,
             localMinCorner.z,
         },
-        .packedMetadata = packMetadata(heightmaps.inner, worldGridQuadtreeLeafScalePow(leafId), edgeIndex) |
-                          (static_cast<std::uint32_t>(heightmaps.coarseHalf & 1u) << 26u),
+        .packedMetadata = terrainBridgeMetadata(worldGridQuadtreeLeafScalePow(leafId), edgeIndex,
+            heightmaps.coarseHalf, heightmaps.firstCornerSelector, heightmaps.secondCornerSelector),
         .heightmapIndices{heightmaps.inner, heightmaps.outer, heightmaps.firstCorner, heightmaps.secondCorner},
-        .cornerSampleCoords{heightmaps.firstCornerSample, heightmaps.secondCornerSample},
     };
 }
 
@@ -855,11 +876,10 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
     for (std::uint16_t index = 0; index < m_pendingSourceUploadCount; ++index)
     {
         const std::uint16_t slot = m_pendingSourceUploadSlots[index];
-        SDL_GPUTransferBufferLocation source{m_sourceHeightmapTransferBuffer,
-                                             static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount * slot)};
+        SDL_GPUTransferBufferLocation source{m_sourceHeightmapTransferBuffers[slot], 0};
         SDL_GPUBufferRegion destination{m_sourceHeightmapBuffer,
-                                        static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount * slot),
-                                        static_cast<Uint32>(sizeof(float) * RuntimeAssets::kHeightmapTileSampleCount)};
+                                        static_cast<Uint32>(sizeof(std::int16_t) * RuntimeAssets::kHeightmapTileSampleCount * slot),
+                                        static_cast<Uint32>(sizeof(std::int16_t) * RuntimeAssets::kHeightmapTileSampleCount)};
         SDL_UploadToGPUBuffer(copyPass, &source, &destination, false);
         m_submittedSourceUploadSlots[index] = slot;
     }
@@ -1110,17 +1130,15 @@ void QuadtreeMeshRenderer::queueHeightmapExtentsDownload(SDL_GPUCopyPass *copyPa
     }
 }
 
-bool QuadtreeMeshRenderer::requestHeightmapSliceDownload(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex)
+bool QuadtreeMeshRenderer::hasHeightmapReadbackSlot() const
 {
-    for (const PendingHeightmapSliceReadback &readback : m_pendingHeightmapSliceReadbacks)
-    {
-        if ((readback.requested || readback.queued || readback.fence != nullptr) && readback.leafId == leafId &&
-            readback.sliceIndex == sliceIndex)
-        {
-            return true;
-        }
-    }
+    return std::any_of(m_pendingHeightmapSliceReadbacks.begin(), m_pendingHeightmapSliceReadbacks.end(),
+        [](const auto &r) { return !r.requested && !r.queued && !r.fence; });
+}
 
+bool QuadtreeMeshRenderer::requestHeightmapSliceDownload(
+    const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex, GenerationJobHandle job)
+{
     for (PendingHeightmapSliceReadback &readback : m_pendingHeightmapSliceReadbacks)
     {
         if (readback.requested || readback.queued || readback.fence != nullptr)
@@ -1130,6 +1148,7 @@ bool QuadtreeMeshRenderer::requestHeightmapSliceDownload(const WorldGridQuadtree
 
         readback.leafId = leafId;
         readback.sliceIndex = sliceIndex;
+        readback.job = job;
         readback.requested = true;
         readback.queued = false;
         return true;
@@ -1357,6 +1376,7 @@ void QuadtreeMeshRenderer::attachSubmittedFence(const std::shared_ptr<SubmittedG
     {
         PendingHeightmapSliceReadback &readback = m_pendingHeightmapSliceReadbacks[m_pendingHeightmapSliceFenceSlots[pendingIndex]];
         readback.fence = fence;
+        heightmapManager.markCpuReadbackSubmitted(readback.job, fence);
     }
     m_pendingHeightmapSliceFenceSlotCount = 0;
 
@@ -1404,7 +1424,7 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapExtents(std::vector<Generate
     }
 }
 
-void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(std::vector<CompletedHeightmapSliceReadback> &completedReadbacks)
+void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(WorldGridQuadtreeHeightmapManager &manager)
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::CollectCompletedHeightmapSliceReadbacks");
 
@@ -1415,16 +1435,10 @@ void QuadtreeMeshRenderer::collectCompletedHeightmapSliceReadbacks(std::vector<C
             continue;
         }
 
-        CompletedHeightmapSliceReadback completed{};
-        completed.leafId = readback.leafId;
-        completed.sliceIndex = readback.sliceIndex;
-
         const float *mappedSamples = static_cast<const float *>(SDL_MapGPUTransferBuffer(m_device, readback.transferBuffer, false));
-        std::memcpy(completed.samples.data(), mappedSamples, sizeof(float) * completed.samples.size());
-        SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
-
-        completedReadbacks.push_back(std::move(completed));
-
+        manager.completeCpuReadback(readback.job, mappedSamples ? std::span<const float>{mappedSamples, kHeightmapSliceSampleCount} : std::span<const float>{});
+        if (mappedSamples) SDL_UnmapGPUTransferBuffer(m_device, readback.transferBuffer);
+        readback.job = {};
         readback.fence.reset();
         readback.leafId = {};
         readback.sliceIndex = 0;

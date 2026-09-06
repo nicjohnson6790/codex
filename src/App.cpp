@@ -547,6 +547,14 @@ PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
 void App::syncRenderStateForActiveCamera(Extent2D viewportExtent)
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncRenderState");
+    if (m_options.stressHeightmapPipeline)
+    {
+        m_playerFollowCameraEnabled = false;
+        // Visit indexed ETOPO and DEM10 coverage, settling before each move.
+        m_cameraManager.activeCamera().position =
+            m_worldGridQuadtree.heightmapManager().traversalPositionForValidation((m_frameIndex / 90) % 80);
+        m_cameraManager.activeCamera().forward = {0.0, -0.8, -0.6};
+    }
     const Position &cameraPosition = m_cameraManager.activeCameraPosition();
     m_renderer.setViewportSize(viewportExtent);
     m_renderer.setActiveCamera(cameraPosition, m_triangleRenderer, m_quadtreeMeshRenderer, m_foliageCanopyRenderer, m_foliageRenderer,
@@ -730,6 +738,8 @@ void App::emitWorldDraws()
 void App::scheduleGenerationWork()
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::ScheduleFoliageGenerations");
+    if (m_options.stressHeightmapPipeline)
+        m_worldGridQuadtree.heightmapManager().stressResidencyForValidation(m_quadtreeMeshRenderer, m_frameIndex);
     if constexpr (AppConfig::Foliage::kCanopyEnabled)
     {
         m_foliageCanopyManager.scheduleQueuedGenerations(m_foliageCanopyRenderer);
@@ -770,6 +780,21 @@ void App::finishFrame()
         if (m_options.verifyHeightmapPipeline)
         {
             const auto diagnostics = m_worldGridQuadtree.heightmapDiagnostics();
+            if (m_options.stressHeightmapPipeline)
+            {
+                SDL_Log("Heightmap stress: uploads=%llu finals=%llu CPU completed=%llu evicted=%llu discarded=%llu stale-retired=%llu cache-blocked=%llu readback-blocked=%llu staging-blocked=%llu readback-high-water=%u decode-batch-high-water=%u upload-batch-high-water=%u",
+                    (unsigned long long)diagnostics.sourceUploads, (unsigned long long)diagnostics.completedFinalGenerationsWithSources,
+                    (unsigned long long)diagnostics.cpuCompleted, (unsigned long long)diagnostics.cpuEvictions,
+                    (unsigned long long)diagnostics.cpuDiscarded, (unsigned long long)diagnostics.cpuStaleRetired,
+                    (unsigned long long)diagnostics.cpuCacheBlocked, (unsigned long long)diagnostics.readbackBlocked,
+                    (unsigned long long)diagnostics.sourceStagingBlocked, diagnostics.readbackHighWater,
+                    diagnostics.sourceDecodeBatchHighWater, diagnostics.sourceUploadBatchHighWater);
+                if (diagnostics.sourceUploads <= 64 || diagnostics.completedFinalGenerationsWithSources <= 512 ||
+                    diagnostics.cpuCompleted == 0 || diagnostics.cpuEvictions == 0 || diagnostics.cpuStaleRetired == 0 ||
+                    diagnostics.cpuCacheBlocked == 0 || diagnostics.readbackBlocked == 0 ||
+                    diagnostics.sourceDecodeBatchHighWater < 2 || diagnostics.sourceUploadBatchHighWater < 2)
+                    throw std::runtime_error("Heightmap stress did not exercise all required transitions; run more frames");
+            }
             if (diagnostics.sourceUploads == 0 || diagnostics.completedFinalGenerationsWithSources == 0 || diagnostics.descriptorOverflows != 0)
                 throw std::runtime_error("Heightmap pipeline verification did not "
                                          "observe a completed composed heightmap.");

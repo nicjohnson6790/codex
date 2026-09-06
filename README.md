@@ -46,6 +46,9 @@ Useful launch options:
 
 # Exercise asynchronous source uploads and composed-heightmap completion
 .\build\Debug\app\terrain_sandbox.exe --disable-steam --quit-after-frames 120 --verify-heightmap-pipeline
+
+# Stress bounded heightmap staging, CPU readbacks, and invalidation during traversal
+.\build\Release\app\terrain_sandbox.exe --disable-steam --quit-after-frames 3600 --stress-heightmap-pipeline
 ```
 
 For an optimized build:

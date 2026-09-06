@@ -127,6 +127,7 @@ void CollisionManager::updateAroundPlayer(
 
             if (!m_tileCache.isReady(tileIndex))
             {
+                // This hint belongs to the separate CPU heightmap cache, not the GPU slice cache.
                 tile.heightmapHint = heightmapManager.requestCpuAsset(key, meshRenderer, tile.heightmapHint);
                 CpuResidentHeightmapView heightmapView{};
                 if (heightmapManager.buildCpuResidentHeightmap(key, tile.heightmapHint, heightmapView))

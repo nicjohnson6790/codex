@@ -458,7 +458,7 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
         std::vector<std::byte> filtered, compressed, decompressed;
         std::vector<std::int16_t> decoded;
         if (!HeightmapTileFilter::Encode(tile, &filtered, error) ||
-            !RuntimeAssets::CompressBytes(RuntimeAssets::CompressionType::Lz4, filtered, &compressed, error) ||
+            !HeightmapQuantization::CompressFiltered(filtered, compressed, error) ||
             !RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4, compressed, filtered.size(), &decompressed, error) ||
             !HeightmapTileFilter::Decode(decompressed, &decoded, error) || !std::equal(decoded.begin(), decoded.end(), tile.begin()))
         { if (error && error->empty()) *error = "tile filter/compression round-trip mismatch"; return false; }

@@ -27,8 +27,6 @@ struct TerrainInstance
     vec3 position;
     uint packedMetadata;
     uvec4 heightmapIndices;
-    uvec2 cornerSampleCoords;
-    uvec2 reserved;
 };
 
 layout(set=0, binding=1, std430) readonly buffer InstanceBuffer
@@ -119,9 +117,11 @@ void rotateBridgeCoords(uint edgeIndex, out vec2 localCoord, out ivec2 sampleCoo
         float(kHeightmapMaxCoord) - baseSampleCoord.x);
 }
 
-ivec2 unpackSampleCoord(uint packedCoord)
+ivec2 cornerSampleCoord(uint selector)
 {
-    return ivec2(int(packedCoord & 0xFFFFu), int(packedCoord >> 16u));
+    // Row-major 3x3 perimeter, omitting the center: SW,S,SE,W,E,NW,N,NE.
+    uint position = selector < 4u ? selector : selector + 1u;
+    return ivec2(position % 3u, position / 3u) * 128 + ivec2(1);
 }
 
 ivec2 coarseOuterSampleCoord(uint edgeIndex, uint coarseHalf, vec2 localCoord)
@@ -163,13 +163,13 @@ void main()
     if (firstCorner)
     {
         sliceIndex = instance.heightmapIndices.z;
-        sampleCoord = unpackSampleCoord(instance.cornerSampleCoords.x);
+        sampleCoord = cornerSampleCoord(instance.packedMetadata & 7u);
         heightSampleSpacing = sliceIndex == instance.heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
     }
     else if (secondCorner)
     {
         sliceIndex = instance.heightmapIndices.w;
-        sampleCoord = unpackSampleCoord(instance.cornerSampleCoords.y);
+        sampleCoord = cornerSampleCoord((instance.packedMetadata >> 3u) & 7u);
         heightSampleSpacing = sliceIndex == instance.heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
     }
     float height = sampleHeight(sliceIndex, sampleCoord);

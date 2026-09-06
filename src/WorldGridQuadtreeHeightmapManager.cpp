@@ -4,6 +4,7 @@
 #include "QuadtreeMeshRenderer.hpp"
 
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_log.h>
 
 #include <algorithm>
 #include <bit>
@@ -12,6 +13,8 @@
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
+#include <cstring>
+#include <cassert>
 
 namespace
 {
@@ -50,9 +53,13 @@ std::size_t WorldGridQuadtreeHeightmapManager::SourceTileHash::operator()(const 
 WorldGridQuadtreeHeightmapManager::WorldGridQuadtreeHeightmapManager()
     : m_heightmaps(kCapacity, 256, 8), m_sourceTiles(kSourceTileCapacity, AppConfig::Terrain::kSourceHeightmapHashBucketCount,
                                                      AppConfig::Terrain::kSourceHeightmapHashLookupDepth),
-      m_generationJobs(kCapacity)
+      m_generationJobs(kCapacity), m_cpuHeightmaps(kCpuCapacity, 16, 4),
+      m_cpuReadbacks(AppConfig::Terrain::kHeightmapReadbackCapacity),
+      m_cpuHeightmapSamples(std::make_unique<float[]>(kCpuCapacity * kFinalSampleCount)),
+      m_sourceCompressedStaging(std::make_unique<std::byte[]>(RuntimeAssets::kHeightmapFilteredTileBytes)),
+      m_sourceDecompressedStaging(std::make_unique<std::byte[]>(RuntimeAssets::kHeightmapFilteredTileBytes)),
+      m_sourceReferences(std::make_unique<FinalSourceReference[]>(kCapacity * kSourceTileCapacity))
 {
-    m_sourceReferences.reserve(kCapacity * 8);
     std::string error;
     std::filesystem::path assetDirectory = TERRAIN_SANDBOX_ASSET_DIR;
     if (!std::filesystem::exists(assetDirectory / "etopo2022.assetbin"))
@@ -160,7 +167,7 @@ std::optional<std::uint16_t> WorldGridQuadtreeHeightmapManager::findSlot(const W
 void WorldGridQuadtreeHeightmapManager::allocateReferences(std::uint16_t slot, const WorldGridQuadtreeLeafId &leaf)
 {
     FinalMetadata &meta = m_finalMetadata[slot];
-    meta.referenceFront = static_cast<std::uint32_t>(m_sourceReferences.size());
+    meta.overflow = false;
     meta.referenceCount = 0;
     for (const auto &source : m_sources)
     {
@@ -172,12 +179,19 @@ void WorldGridQuadtreeHeightmapManager::allocateReferences(std::uint16_t slot, c
             continue;
         for (const SourceTileCoordinate tile : collectOverlappingSourceTiles(source, *dataset, leaf))
         {
-            m_sourceReferences.push_back(
-                {source.sourceHeightmapId, tile.x, tile.y, dataset->tileRevision(tile.x, tile.y), kSourceUnavailable});
+            if (meta.referenceCount == kSourceTileCapacity)
+            {
+                meta.overflow = true;
+                ++m_stats.referenceOverflows;
+                return;
+            }
+            m_sourceReferences[slot * kSourceTileCapacity + meta.referenceCount] =
+                {source.sourceHeightmapId, tile.x, tile.y, dataset->tileRevision(tile.x, tile.y), kSourceUnavailable};
             ++meta.referenceCount;
+            m_stats.referenceHighWater = std::max(m_stats.referenceHighWater, meta.referenceCount);
         }
     }
-    m_stats.referenceHighWater = std::max<std::uint32_t>(m_stats.referenceHighWater, static_cast<std::uint32_t>(m_sourceReferences.size()));
+    m_stats.referenceHighWater = std::max<std::uint32_t>(m_stats.referenceHighWater, meta.referenceCount);
 }
 
 std::uint16_t WorldGridQuadtreeHeightmapManager::requestAsset(const WorldGridQuadtreeLeafId &leaf, std::uint16_t hint)
@@ -221,33 +235,31 @@ std::uint16_t WorldGridQuadtreeHeightmapManager::requestSourceTile(const SourceT
     {
         auto &readFences = m_sourceReadFences[*found];
         std::erase_if(readFences, [](const auto &fence) { return !fence || fence->isSignaled(); });
-        if (!readFences.empty() || (m_sourceUploads[*found].fence && !m_sourceUploads[*found].fence->isSignaled()))
+        if (!readFences.empty() || !m_sourceTiles.isReady(*found) ||
+            (m_sourceUploads[*found].fence && !m_sourceUploads[*found].fence->isSignaled()))
             return kSourceUnavailable;
     }
     const auto candidate = found ? found : findSourceAllocationCandidate();
     if (!candidate)
+    {
+        ++m_stats.sourceCacheBlocked;
         return kSourceUnavailable;
+    }
     if (m_sourceTiles.isOpen(*candidate))
         ++m_stats.sourceEvictions;
     const auto datasetIt =
         std::find_if(m_datasets.begin(), m_datasets.end(), [&](const auto &value) { return value->datasetId() == id.datasetId; });
     if (datasetIt == m_datasets.end())
         return kSourceUnavailable;
-    const std::shared_ptr<HeightmapDataset> dataset = *datasetIt;
-    auto load = std::async(std::launch::async, [dataset, id]() {
-        SourceTileLoadResult result;
-        dataset->loadTile(id.tileX, id.tileY, result.samples, result.error);
-        return result;
-    });
+    // Each source slot owns one fixed pending-load record. Admission reserves
+    // that record without allocating sample storage or waiting for the decoder.
     m_sourceTiles.assign(*candidate, id);
     m_sourceRevisions[*candidate] = revision;
     SourceUpload &upload = m_sourceUploads[*candidate];
-    upload.samples.clear();
     upload.revision = revision;
+    upload.decoding = false;
     upload.queuedToRenderer = false;
     upload.fence.reset();
-    upload.load = std::move(load);
-    ++m_stats.sourceLoads;
     return kSourceUnavailable;
 }
 
@@ -261,7 +273,8 @@ std::optional<std::uint16_t> WorldGridQuadtreeHeightmapManager::findSourceAlloca
         auto &fences = m_sourceReadFences[slot];
         std::erase_if(fences, [](const auto &fence) { return !fence || fence->isSignaled(); });
         const auto &upload = m_sourceUploads[slot];
-        if (m_sourceTiles.ageOf(slot) == 0 || !fences.empty() || (upload.fence && !upload.fence->isSignaled()) || upload.load.valid())
+        if (!m_sourceTiles.isReady(slot) || m_sourceTiles.ageOf(slot) == 0 || !fences.empty() ||
+            (upload.fence && !upload.fence->isSignaled()))
             continue;
         if (!oldest || m_sourceTiles.ageOf(slot) > m_sourceTiles.ageOf(*oldest))
             oldest = slot;
@@ -271,6 +284,7 @@ std::optional<std::uint16_t> WorldGridQuadtreeHeightmapManager::findSourceAlloca
 
 void WorldGridQuadtreeHeightmapManager::discardCurrentJob(std::uint16_t slot)
 {
+    invalidateCpuForFinal(slot);
     if (!m_heightmaps.isOpen(slot))
         return;
     const auto job = m_heightmaps.activeJob(slot);
@@ -286,9 +300,10 @@ bool WorldGridQuadtreeHeightmapManager::makeResident(std::uint16_t slot)
 {
     bool available = true;
     auto &meta = m_finalMetadata[slot];
+    if (meta.overflow) return false;
     for (std::uint32_t i = 0; i < meta.referenceCount; ++i)
     {
-        auto &ref = m_sourceReferences[meta.referenceFront + i];
+        auto &ref = m_sourceReferences[slot * kSourceTileCapacity + i];
         const auto *source = findSource(ref.sourceHeightmapId);
         const auto *dataset = source ? findDataset(source->datasetId) : nullptr;
         if (!dataset)
@@ -333,7 +348,7 @@ bool WorldGridQuadtreeHeightmapManager::buildDescriptors(std::uint16_t slot, std
     const auto &meta = m_finalMetadata[slot];
     for (std::uint32_t i = 0; i < meta.referenceCount; ++i)
     {
-        auto &ref = m_sourceReferences[meta.referenceFront + i];
+        auto &ref = m_sourceReferences[slot * kSourceTileCapacity + i];
         const auto *s = findSource(ref.sourceHeightmapId);
         if (!s)
             return false;
@@ -356,7 +371,8 @@ bool WorldGridQuadtreeHeightmapManager::buildDescriptors(std::uint16_t slot, std
                        {static_cast<float>(sx.x), static_cast<float>(sx.y), static_cast<float>(sy.x), static_cast<float>(sy.y)},
                        {0.0f, 0.0f, 255.0f, 255.0f},
                        {*sourceSlot, dataset && !dataset->containsTile(ref.tileX - 1, ref.tileY) ? 1u : 0u,
-                        dataset && !dataset->containsTile(ref.tileX, ref.tileY - 1) ? 1u : 0u, 0u}});
+                        dataset && !dataset->containsTile(ref.tileX, ref.tileY - 1) ? 1u : 0u, 0u},
+                       {m_sourceQuantization[*sourceSlot].scale, m_sourceQuantization[*sourceSlot].bias, 0, 0}});
     }
     return true;
 }
@@ -364,28 +380,104 @@ bool WorldGridQuadtreeHeightmapManager::buildDescriptors(std::uint16_t slot, std
 void WorldGridQuadtreeHeightmapManager::scheduleQueuedGenerations(QuadtreeMeshRenderer &renderer)
 {
     HELLO_PROFILE_SCOPE("WorldGridQuadtreeHeightmapManager::ScheduleQueuedGenerations");
-    for (std::uint16_t slot = 0; slot < kSourceTileCapacity; ++slot)
-        if (m_sourceTiles.isOpen(slot) && !m_sourceTiles.isReady(slot) && !m_sourceUploads[slot].queuedToRenderer)
+    if (m_sourceLoad.valid() && m_sourceLoad.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+    {
+        const auto completed = m_sourceLoad.get();
+        std::uint32_t uploads = 0;
+        for (std::uint16_t i = 0; i < completed.count; ++i)
         {
-            auto &upload = m_sourceUploads[slot];
-            if (upload.load.valid())
+            const auto &tile = completed.tiles[i];
+            renderer.finishSourceHeightmapUpload(tile.slot, tile.success);
+            auto &upload = m_sourceUploads[tile.slot];
+            upload.decoding = false;
+            if (tile.success)
             {
-                if (upload.load.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
-                    continue;
-                SourceTileLoadResult loaded = upload.load.get();
-                if (!loaded.error.empty() || loaded.samples.size() != RuntimeAssets::kHeightmapTileSampleCount)
-                {
-                    m_sourceTiles.release(slot);
-                    continue;
-                }
-                upload.samples = std::move(loaded.samples);
-            }
-            if (!upload.samples.empty() && renderer.queueSourceHeightmapUpload(slot, upload.samples))
-            {
+                m_sourceQuantization[tile.slot] = tile.quantization;
                 upload.queuedToRenderer = true;
                 ++m_stats.sourceUploads;
+                ++uploads;
+            }
+            else
+            {
+                SDL_Log("Source heightmap decode failed: %s", tile.error.c_str());
+                m_sourceTiles.release(tile.slot);
             }
         }
+        m_stats.sourceUploadBatchHighWater = std::max(m_stats.sourceUploadBatchHighWater, uploads);
+    }
+    if (!m_sourceLoad.valid())
+    {
+        std::array<SourceDecodeJob, kSourceTileCapacity> jobs{};
+        std::uint16_t jobCount = 0;
+        for (CacheIndex slot = 0; slot < kSourceTileCapacity; ++slot)
+        {
+            auto &upload = m_sourceUploads[slot];
+            if (!m_sourceTiles.isOpen(slot) || m_sourceTiles.isReady(slot) || upload.decoding || upload.queuedToRenderer)
+                continue;
+            const auto id = m_sourceTiles.assetId(slot);
+            const auto dataset = std::find_if(m_datasets.begin(), m_datasets.end(),
+                [&](const auto &d) { return d->datasetId() == id.datasetId; });
+            if (dataset == m_datasets.end()) continue;
+            const auto destination = renderer.beginSourceHeightmapUpload(slot);
+            if (destination.empty())
+            {
+                ++m_stats.sourceUploadBlocked;
+                continue;
+            }
+            upload.decoding = true;
+            jobs[jobCount++] = {*dataset, id, slot, destination};
+        }
+        if (jobCount)
+        {
+            try
+            {
+                m_sourceLoad = std::async(std::launch::async, [this, jobs, jobCount]() {
+                    SourceLoadBatchResult result;
+                    result.count = jobCount;
+                    // A single worker reuses the same two stages for the whole
+                    // batch. No tile waits for a frame boundary or a GPU fence
+                    // before the following tile can use the staging pair.
+                    for (std::uint16_t i = 0; i < jobCount; ++i)
+                    {
+                        const auto &job = jobs[i];
+                        auto &tile = result.tiles[i];
+                        tile.slot = job.slot;
+                        try
+                        {
+                            tile.success = job.dataset->loadTile(job.id.tileX, job.id.tileY,
+                                {m_sourceCompressedStaging.get(), RuntimeAssets::kHeightmapFilteredTileBytes},
+                                {m_sourceDecompressedStaging.get(), RuntimeAssets::kHeightmapFilteredTileBytes},
+                                tile.quantization, tile.error);
+                            if (tile.success)
+                                HeightmapDataset::reconstructTile(
+                                    {m_sourceDecompressedStaging.get(), RuntimeAssets::kHeightmapFilteredTileBytes}, job.destination);
+                        }
+                        catch (const std::exception &error) { tile.success = false; tile.error = error.what(); }
+                    }
+                    return result;
+                });
+            }
+            catch (...)
+            {
+                for (std::uint16_t i = 0; i < jobCount; ++i)
+                {
+                    renderer.finishSourceHeightmapUpload(jobs[i].slot, false);
+                    m_sourceUploads[jobs[i].slot].decoding = false;
+                }
+                throw;
+            }
+            m_stats.sourceLoads += jobCount;
+            m_stats.sourceDecodeBatchHighWater = std::max(m_stats.sourceDecodeBatchHighWater, std::uint32_t(jobCount));
+        }
+    }
+    else
+    {
+        // Only metadata waits for the shared decoder, never full tile buffers.
+        for (CacheIndex slot = 0; slot < kSourceTileCapacity; ++slot)
+            if (m_sourceTiles.isOpen(slot) && !m_sourceTiles.isReady(slot) &&
+                !m_sourceUploads[slot].decoding && !m_sourceUploads[slot].queuedToRenderer)
+                ++m_stats.sourceStagingBlocked;
+    }
     std::uint16_t count = 0;
     std::uint32_t descriptorsUsed = 0;
     bool stopBatch = false;
@@ -438,7 +530,7 @@ void WorldGridQuadtreeHeightmapManager::markSubmitted(GenerationJobHandle job, c
             const auto &meta = m_finalMetadata[slot];
             for (std::uint32_t i = 0; i < meta.referenceCount; ++i)
             {
-                const auto &ref = m_sourceReferences[meta.referenceFront + i];
+                const auto &ref = m_sourceReferences[slot * kSourceTileCapacity + i];
                 const auto *source = findSource(ref.sourceHeightmapId);
                 if (!source)
                     continue;
@@ -454,13 +546,18 @@ void WorldGridQuadtreeHeightmapManager::ageMap()
 {
     m_generationJobs.retireSignaledDiscarded();
     m_heightmaps.age();
+    m_cpuHeightmaps.age();
+    m_cpuReadbacks.forEachActive([&](GenerationJobHandle h) {
+        const auto slot = m_cpuReadbacks.job(h).cpuSlot;
+        if (m_cpuHeightmaps.isOpen(slot) && m_cpuHeightmaps.activeJob(slot) == h)
+            m_cpuHeightmaps.touch(slot);
+    });
     m_sourceTiles.age();
     for (std::uint16_t slot = 0; slot < kSourceTileCapacity; ++slot)
         if (m_sourceTiles.isOpen(slot) && !m_sourceTiles.isReady(slot) && m_sourceUploads[slot].fence &&
             m_sourceUploads[slot].fence->isSignaled())
         {
             m_sourceTiles.markReady(slot);
-            m_sourceUploads[slot].samples.clear();
             m_sourceUploads[slot].fence.reset();
         }
     for (auto &fences : m_sourceReadFences)
@@ -474,7 +571,7 @@ void WorldGridQuadtreeHeightmapManager::ageMap()
             const auto &meta = m_finalMetadata[finalSlot];
             for (std::uint32_t i = 0; i < meta.referenceCount; ++i)
             {
-                const auto &ref = m_sourceReferences[meta.referenceFront + i];
+                const auto &ref = m_sourceReferences[finalSlot * kSourceTileCapacity + i];
                 const auto *source = findSource(ref.sourceHeightmapId);
                 if (!source)
                     continue;
@@ -483,7 +580,6 @@ void WorldGridQuadtreeHeightmapManager::ageMap()
                     m_sourceTiles.touch(*sourceSlot);
             }
         }
-    compactReferences();
 }
 void WorldGridQuadtreeHeightmapManager::invalidateSourceTile(const SourceTileId &id)
 {
@@ -493,59 +589,80 @@ void WorldGridQuadtreeHeightmapManager::invalidateSourceTile(const SourceTileId 
             auto &meta = m_finalMetadata[slot];
             for (std::uint32_t i = 0; i < meta.referenceCount; ++i)
             {
-                auto &r = m_sourceReferences[meta.referenceFront + i];
+                auto &r = m_sourceReferences[slot * kSourceTileCapacity + i];
                 const auto *s = findSource(r.sourceHeightmapId);
                 if (s && SourceTileId{s->datasetId, r.tileX, r.tileY} == id)
                 {
                     discardCurrentJob(slot);
                     m_heightmaps.markNotReady(slot);
                     m_knownExtentsValid[slot] = false;
-                    m_cpuHeightmapValid[slot] = false;
                     break;
                 }
             }
         }
 }
-void WorldGridQuadtreeHeightmapManager::compactReferences()
+void WorldGridQuadtreeHeightmapManager::invalidateCpuForFinal(std::uint16_t finalSlot)
 {
-    std::vector<std::uint16_t> slots;
-    for (std::uint16_t i = 0; i < kCapacity; ++i)
-        if (m_heightmaps.isOpen(i) && m_finalMetadata[i].referenceCount)
-            slots.push_back(i);
-    for (std::size_t i = 1; i < slots.size(); ++i)
+    for (CacheIndex slot = 0; slot < kCpuCapacity; ++slot)
     {
-        auto v = slots[i];
-        std::size_t j = i;
-        while (j && m_finalMetadata[slots[j - 1]].referenceFront > m_finalMetadata[v].referenceFront)
+        if (!m_cpuHeightmaps.isOpen(slot) || m_cpuFinalSlots[slot] != finalSlot) continue;
+        const auto job = m_cpuHeightmaps.activeJob(slot);
+        if (m_cpuReadbacks.contains(job))
         {
-            slots[j] = slots[j - 1];
-            --j;
+            // Keep the destination assigned until the renderer retires this job.
+            // A queued (not yet submitted) download also still owns its destination.
+            if (!m_cpuReadbacks.isDiscarded(job)) ++m_stats.cpuDiscarded;
+            m_cpuReadbacks.discard(job, true);
+            m_cpuHeightmaps.markNotReady(slot);
         }
-        slots[j] = v;
+        else
+            m_cpuHeightmaps.release(slot);
     }
-    std::uint32_t write = 0;
-    for (auto slot : slots)
-    {
-        auto &m = m_finalMetadata[slot];
-        if (m.referenceFront != write)
-            std::move(m_sourceReferences.begin() + m.referenceFront, m_sourceReferences.begin() + m.referenceFront + m.referenceCount,
-                      m_sourceReferences.begin() + write);
-        m.referenceFront = write;
-        write += m.referenceCount;
-    }
-    m_sourceReferences.resize(write);
 }
 
 CacheIndex WorldGridQuadtreeHeightmapManager::requestCpuAsset(
     const WorldGridQuadtreeLeafId &id, QuadtreeMeshRenderer &renderer, CacheIndex hint)
 {
-    const auto slot = requestAsset(id, hint);
-    if (slot == kUnavailable)
+    if (const auto existing = m_cpuHeightmaps.find(id, hint))
+    {
+        m_cpuHeightmaps.touch(*existing);
+        return m_cpuHeightmaps.isReady(*existing) ? *existing : kUnavailable;
+    }
+    ++m_stats.cpuMisses;
+    const auto finalSlot = requestAsset(id);
+    if (finalSlot == kUnavailable) return kUnavailable;
+    // Pending jobs are touched before allocation, including discarded jobs whose
+    // renderer download has not retired yet.
+    m_cpuReadbacks.forEachActive([&](GenerationJobHandle h) {
+        const auto slot = m_cpuReadbacks.job(h).cpuSlot;
+        if (m_cpuHeightmaps.isOpen(slot) && m_cpuHeightmaps.activeJob(slot) == h)
+            m_cpuHeightmaps.touch(slot);
+    });
+    const auto candidate = m_cpuHeightmaps.findAllocationCandidate();
+    if (!candidate)
+    {
+        ++m_stats.cpuCacheBlocked;
         return kUnavailable;
-    if (m_cpuHeightmapValid[slot] && m_cpuHeightmapLeafIds[slot] == id)
-        return slot;
-    if (!m_cpuHeightmapPending[slot])
-        m_cpuHeightmapPending[slot] = renderer.requestHeightmapSliceDownload(id, slot);
+    }
+    if (m_cpuReadbacks.full() || !renderer.hasHeightmapReadbackSlot())
+    {
+        ++m_stats.readbackBlocked;
+        return kUnavailable;
+    }
+    const auto job = m_cpuReadbacks.tryPush({id, *candidate, finalSlot});
+    assert(job);
+    if (!renderer.requestHeightmapSliceDownload(id, finalSlot, *job))
+    {
+        m_cpuReadbacks.markCompleted(*job);
+        m_cpuReadbacks.retireCompletedFront();
+        ++m_stats.readbackBlocked;
+        return kUnavailable;
+    }
+    if (m_cpuHeightmaps.isOpen(*candidate)) ++m_stats.cpuEvictions;
+    m_cpuHeightmaps.assign(*candidate, id);
+    m_cpuFinalSlots[*candidate] = finalSlot;
+    m_cpuHeightmaps.setActiveJob(*candidate, *job);
+    m_stats.readbackHighWater = std::max(m_stats.readbackHighWater, static_cast<std::uint32_t>(m_cpuReadbacks.count()));
     return kUnavailable;
 }
 void WorldGridQuadtreeHeightmapManager::requestLeaf(const WorldGridQuadtreeLeafId &id, QuadtreeMeshRenderer &renderer)
@@ -569,27 +686,44 @@ bool WorldGridQuadtreeHeightmapManager::buildExtents(
 bool WorldGridQuadtreeHeightmapManager::buildCpuResidentHeightmap(
     const WorldGridQuadtreeLeafId &id, CacheIndex slot, CpuResidentHeightmapView &view) const
 {
-    if (!m_heightmaps.validatesHint(slot, id) || !m_heightmaps.isReady(slot) ||
-        !m_cpuHeightmapValid[slot] || m_cpuHeightmapLeafIds[slot] != id)
+    if (!m_cpuHeightmaps.validatesHint(slot, id) || !m_cpuHeightmaps.isReady(slot))
         return false;
-    view = {id, slot, m_cpuHeightmapSamples[slot]};
+    view = {id, slot, {m_cpuHeightmapSamples.get() + slot * kFinalSampleCount, kFinalSampleCount}};
     return true;
 }
 void WorldGridQuadtreeHeightmapManager::collectCompletedCpuReadbacks(QuadtreeMeshRenderer &r)
 {
-    std::vector<QuadtreeMeshRenderer::CompletedHeightmapSliceReadback> done;
-    r.collectCompletedHeightmapSliceReadbacks(done);
-    for (auto &x : done)
+    r.collectCompletedHeightmapSliceReadbacks(*this);
+}
+void WorldGridQuadtreeHeightmapManager::markCpuReadbackSubmitted(
+    GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence> &fence)
+{
+    if (m_cpuReadbacks.contains(job)) m_cpuReadbacks.markSubmitted(job, fence);
+}
+void WorldGridQuadtreeHeightmapManager::completeCpuReadback(GenerationJobHandle handle, std::span<const float> samples)
+{
+    if (!m_cpuReadbacks.contains(handle)) return;
+    const auto job = m_cpuReadbacks.job(handle);
+    const auto fence = m_cpuReadbacks.fence(handle);
+    if (!fence || !fence->isSignaled()) return;
+    if (m_cpuHeightmaps.validatesHint(job.cpuSlot, job.leafId) && m_cpuHeightmaps.activeJob(job.cpuSlot) == handle)
     {
-        auto s = findSlot(x.leafId);
-        if (s && *s == x.sliceIndex && m_heightmaps.isReady(*s))
+        if (!m_cpuReadbacks.isDiscarded(handle) && m_heightmaps.validatesHint(job.finalSlot, job.leafId) &&
+            m_heightmaps.isReady(job.finalSlot) && samples.size() == kFinalSampleCount)
         {
-            m_cpuHeightmapSamples[*s].assign(x.samples.begin(), x.samples.end());
-            m_cpuHeightmapLeafIds[*s] = x.leafId;
-            m_cpuHeightmapValid[*s] = true;
-            m_cpuHeightmapPending[*s] = false;
+            std::memcpy(m_cpuHeightmapSamples.get() + job.cpuSlot * kFinalSampleCount, samples.data(), samples.size_bytes());
+            m_cpuHeightmaps.markReady(job.cpuSlot);
+            m_cpuHeightmaps.clearActiveJob(job.cpuSlot, handle);
+            ++m_stats.cpuCompleted;
+        }
+        else
+        {
+            ++m_stats.cpuStaleRetired;
+            m_cpuHeightmaps.release(job.cpuSlot);
         }
     }
+    m_cpuReadbacks.markCompleted(handle);
+    m_cpuReadbacks.retireCompletedFront();
 }
 void WorldGridQuadtreeHeightmapManager::applyGeneratedExtents(const WorldGridQuadtreeLeafId &id, std::uint16_t slot,
                                                               const HeightmapExtents &e, GenerationJobHandle job)
@@ -616,14 +750,12 @@ void WorldGridQuadtreeHeightmapManager::invalidateSlotMetadata(std::uint16_t s)
     m_finalMetadata[s] = {};
     m_knownExtents[s] = {};
     m_knownExtentsValid[s] = false;
-    m_cpuHeightmapSamples[s].clear();
-    m_cpuHeightmapValid[s] = m_cpuHeightmapPending[s] = false;
+    invalidateCpuForFinal(s);
 }
 void WorldGridQuadtreeHeightmapManager::clearCache()
 {
     m_heightmaps.clear();
     m_generationJobs.discardAll();
-    m_sourceReferences.clear();
     m_residentCount = 0;
     for (std::uint16_t i = 0; i < kCapacity; ++i)
         invalidateSlotMetadata(i);
@@ -633,12 +765,13 @@ void WorldGridQuadtreeHeightmapManager::shutdownAfterGpuIdle()
     m_heightmaps.clear();
     m_sourceTiles.clear();
     m_generationJobs.clear();
+    m_cpuHeightmaps.clear();
+    m_cpuReadbacks.clear();
+    if (m_sourceLoad.valid()) m_sourceLoad.wait();
     for (auto &upload : m_sourceUploads)
     {
-        if (upload.load.valid())
-            upload.load.wait();
-        upload.samples.clear();
         upload.fence.reset();
+        upload.decoding = false;
         upload.queuedToRenderer = false;
     }
     for (auto &fences : m_sourceReadFences)
@@ -653,8 +786,18 @@ WorldGridQuadtreeHeightmapManager::Diagnostics WorldGridQuadtreeHeightmapManager
     auto d = m_stats;
     d.submittedJobs = 0;
     d.queuedGenerationJobs = 0;
-    d.referenceCount = static_cast<std::uint32_t>(m_sourceReferences.size());
-    d.referenceCapacity = static_cast<std::uint32_t>(m_sourceReferences.capacity());
+    d.referenceCount = 0;
+    d.referenceCapacity = kCapacity * kSourceTileCapacity;
+    for (const auto &meta : m_finalMetadata) d.referenceCount += meta.referenceCount;
+    d.sourceStagingBusy = m_sourceLoad.valid() && m_sourceLoad.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+    d.readbacks = static_cast<std::uint32_t>(m_cpuReadbacks.count());
+    for (CacheIndex slot = 0; slot < kCpuCapacity; ++slot)
+        if (m_cpuHeightmaps.isOpen(slot))
+        {
+            ++d.cpuOccupied;
+            if (m_cpuHeightmaps.isReady(slot)) ++d.cpuReady;
+            else ++d.cpuLoading;
+        }
     d.sourceHashOccupied = static_cast<std::uint32_t>(m_sourceTiles.hashOccupiedCount());
     d.sourceHashCapacity = static_cast<std::uint32_t>(m_sourceTiles.hashTableSize());
     d.sourceHashCollisions = static_cast<std::uint32_t>(m_sourceTiles.hashCollisionCount());
@@ -684,4 +827,69 @@ WorldGridQuadtreeHeightmapManager::Diagnostics WorldGridQuadtreeHeightmapManager
             ++d.queuedGenerationJobs;
     });
     return d;
+}
+
+Position WorldGridQuadtreeHeightmapManager::traversalPositionForValidation(std::uint64_t stop) const
+{
+    const auto &source = m_sources.at(stop % m_sources.size());
+    const auto *dataset = findDataset(source.datasetId);
+    const auto range = dataset->tileRange();
+    const unsigned width = range.maxX - range.minX + 1, height = range.maxY - range.minY + 1;
+    const auto first = static_cast<unsigned>((stop * 977) % (width * height));
+    for (unsigned offset = 0; offset < width * height; ++offset)
+    {
+        const unsigned tile = (first + offset) % (width * height);
+        const int x = range.minX + tile % width, y = range.minY + tile / width;
+        if (!dataset->containsTile(x, y)) continue;
+        const auto local = (double(x) + 0.5) * source.xTileAxis + (double(y) + 0.5) * source.zTileAxis;
+        return source.basePosition.translated({local.x, 200.0, local.y});
+    }
+    throw std::runtime_error("Heightmap stress: no indexed source tile");
+}
+
+void WorldGridQuadtreeHeightmapManager::stressResidencyForValidation(QuadtreeMeshRenderer &renderer, std::uint64_t frame)
+{
+    // Request more than both fixed capacities, using deliberately stale hints.
+    // This also exercises source-cache churn from normal camera traversal.
+    unsigned requested = 0;
+    for (CacheIndex offset = 0; offset < kCapacity && requested < kCpuCapacity + AppConfig::Terrain::kHeightmapReadbackCapacity; ++offset)
+    {
+        const auto slot = static_cast<CacheIndex>((offset + frame / 8) % kCapacity);
+        if (!m_heightmaps.isReady(slot)) continue;
+        const auto id = m_heightmaps.assetId(slot);
+        const auto hint = requestCpuAsset(id, renderer, static_cast<CacheIndex>(frame % kCpuCapacity));
+        CpuResidentHeightmapView view;
+        if (hint != kUnavailable)
+        {
+            if (!buildCpuResidentHeightmap(id, hint, view) || view.samples.size() != kFinalSampleCount)
+                throw std::runtime_error("CPU heightmap stress: invalid ready view");
+            for (float height : view.samples)
+                if (!std::isfinite(height)) throw std::runtime_error("CPU heightmap stress: non-finite sample");
+        }
+        ++requested;
+    }
+    // Invalidate both renderer-queued and previously submitted downloads through
+    // the production source dependency path. The actual GPU work retires normally.
+    if (frame % 17 == 0)
+    {
+        std::optional<SourceTileId> invalidate;
+        m_cpuReadbacks.forEachActive([&](GenerationJobHandle h) {
+            if (invalidate || m_cpuReadbacks.isDiscarded(h) || m_cpuReadbacks.isCompleted(h)) return;
+            const auto finalSlot = m_cpuReadbacks.job(h).finalSlot;
+            if (!m_finalMetadata[finalSlot].referenceCount) return;
+            const auto &ref = m_sourceReferences[finalSlot * kSourceTileCapacity];
+            if (const auto *source = findSource(ref.sourceHeightmapId))
+                invalidate = SourceTileId{source->datasetId, ref.tileX, ref.tileY};
+        });
+        if (invalidate) invalidateSourceTile(*invalidate);
+    }
+    const auto d = diagnostics();
+    if (d.cpuOccupied > kCpuCapacity || d.readbacks > AppConfig::Terrain::kHeightmapReadbackCapacity ||
+        d.sourceOccupied > kSourceTileCapacity || d.referenceCount > kCapacity * kSourceTileCapacity)
+        throw std::runtime_error("Heightmap stress: fixed capacity exceeded");
+    for (CacheIndex slot = 0; slot < kCpuCapacity; ++slot)
+        if (m_cpuHeightmaps.isReady(slot) &&
+            (!m_heightmaps.validatesHint(m_cpuFinalSlots[slot], m_cpuHeightmaps.assetId(slot)) ||
+             !m_heightmaps.isReady(m_cpuFinalSlots[slot])))
+            throw std::runtime_error("Heightmap stress: stale upstream CPU dependency");
 }

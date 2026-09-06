@@ -93,6 +93,7 @@ endif()
 
 add_library(lz4_local STATIC
     ${lz4_SOURCE_DIR}/lib/lz4.c
+    ${lz4_SOURCE_DIR}/lib/lz4hc.c
 )
 
 target_include_directories(lz4_local
@@ -396,6 +397,11 @@ if (CODEX_BUILD_TESTS)
     add_test(NAME heightmap_dataset_tests COMMAND $<TARGET_FILE:heightmap_dataset_tests>)
 
     add_executable(periodic_world_phase_tests tests/PeriodicWorldPhaseTests.cpp)
+    add_executable(terrain_corner_neighbor_tests tests/TerrainCornerNeighborTests.cpp)
+    set_target_properties(terrain_corner_neighbor_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
+    target_include_directories(terrain_corner_neighbor_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
+    target_link_libraries(terrain_corner_neighbor_tests PRIVATE SDL3::Headers)
+    add_test(NAME terrain_corner_neighbor_tests COMMAND $<TARGET_FILE:terrain_corner_neighbor_tests>)
     set_target_properties(periodic_world_phase_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
     target_include_directories(periodic_world_phase_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
     add_test(NAME periodic_world_phase_tests COMMAND $<TARGET_FILE:periodic_world_phase_tests>)

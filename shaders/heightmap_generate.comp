@@ -9,12 +9,13 @@ struct SourceDescriptor
     vec4 uvSteps;
     vec4 ownershipBounds;
     uvec4 source;
+    vec4 quantization;
 };
 struct HeightmapExtents { int minHeightCentimeters; int maxHeightCentimeters; };
 
 layout(set=0, binding=0, std430) readonly buffer FinalGenerationBuffer { FinalGenerationDescriptor entries[]; } finals;
 layout(set=0, binding=1, std430) readonly buffer SourceDescriptorBuffer { SourceDescriptor entries[]; } sources;
-layout(set=0, binding=2, std430) readonly buffer SourceTileBuffer { float heights[]; } tiles;
+layout(set=0, binding=2, std430) readonly buffer SourceTileBuffer { uint words[]; } tiles;
 layout(set=1, binding=0, std430) buffer HeightmapBuffer { float heights[]; } outputHeightmaps;
 layout(set=1, binding=1, std430) buffer HeightmapExtentsBuffer { HeightmapExtents extents[]; } outputExtents;
 
@@ -22,17 +23,27 @@ const uint kFinalResolution = 259u;
 const uint kSourceResolution = 256u;
 const float kMissingSourceHeight = -12000.0;
 
-float sampleTile(uint sliceIndex, vec2 coord)
+float sampleHeight(uint index, vec2 quantization)
+{
+    uint packed = tiles.words[index / 2u];
+    int code = int(packed << (index % 2u == 0u ? 16u : 0u)) >> 16;
+    if (code == 0) return 0.0;
+    // CPU normalization swaps quantized zero and the exact-zero marker.
+    if (code == -32767) code = 0;
+    return quantization.y + float(code) * quantization.x;
+}
+
+float sampleTile(uint sliceIndex, vec2 coord, vec2 quantization)
 {
     vec2 c = clamp(coord, vec2(0.0), vec2(255.0));
     ivec2 a = ivec2(floor(c));
     ivec2 b = min(a + ivec2(1), ivec2(255));
     vec2 f = fract(c);
     uint base = sliceIndex * kSourceResolution * kSourceResolution;
-    float h00 = tiles.heights[base + uint(a.y) * kSourceResolution + uint(a.x)];
-    float h10 = tiles.heights[base + uint(a.y) * kSourceResolution + uint(b.x)];
-    float h01 = tiles.heights[base + uint(b.y) * kSourceResolution + uint(a.x)];
-    float h11 = tiles.heights[base + uint(b.y) * kSourceResolution + uint(b.x)];
+    float h00 = sampleHeight(base + uint(a.y) * kSourceResolution + uint(a.x), quantization);
+    float h10 = sampleHeight(base + uint(a.y) * kSourceResolution + uint(b.x), quantization);
+    float h01 = sampleHeight(base + uint(b.y) * kSourceResolution + uint(a.x), quantization);
+    float h11 = sampleHeight(base + uint(b.y) * kSourceResolution + uint(b.x), quantization);
     return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
 }
 
@@ -52,7 +63,7 @@ void main()
         bool ownsY = (coord.y > source.ownershipBounds.y || (source.source.z != 0u && coord.y >= source.ownershipBounds.y)) && coord.y <= source.ownershipBounds.w;
         if (ownsX && ownsY)
         {
-            height += sampleTile(source.source.x, coord) * source.uvOriginAndHeightScale.z;
+            height += sampleTile(source.source.x, coord, source.quantization.xy) * source.uvOriginAndHeightScale.z;
             hasContribution = true;
         }
     }

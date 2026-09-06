@@ -8,6 +8,8 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <lz4.h>
+#include <cassert>
 
 namespace
 {
@@ -176,7 +178,8 @@ std::uint64_t EtopoHeightmapDataset::tileRevision(std::int32_t tileX, std::int32
     return containsTile(tileX, tileY) ? 1 : 0;
 }
 
-bool EtopoHeightmapDataset::loadTile(std::int32_t tileX, std::int32_t tileY, std::vector<float> &samples, std::string &error) const
+bool EtopoHeightmapDataset::loadTile(std::int32_t tileX, std::int32_t tileY, std::span<std::byte> compressed,
+    std::span<std::byte> filtered, TileQuantization &quantization, std::string &error) const
 {
     const auto *record = findRecord(tileX, tileY);
     if (!record)
@@ -184,27 +187,43 @@ bool EtopoHeightmapDataset::loadTile(std::int32_t tileX, std::int32_t tileY, std
         error = "requested ETOPO tile is not indexed";
         return false;
     }
+    if (compressed.size() != RuntimeAssets::kHeightmapFilteredTileBytes ||
+        filtered.size() != RuntimeAssets::kHeightmapFilteredTileBytes || record->compressedSize == 0 ||
+        record->compressedSize > compressed.size() || record->uncompressedSize != filtered.size())
+    {
+        error = "invalid heightmap tile staging/encoded size";
+        return false;
+    }
     std::ifstream input(m_dataPath, std::ios::binary);
-    std::vector<std::byte> compressed(record->compressedSize);
     input.seekg(static_cast<std::streamoff>(record->blobOffset));
-    if (!input.read(reinterpret_cast<char *>(compressed.data()), static_cast<std::streamsize>(compressed.size())))
+    if (!input.read(reinterpret_cast<char *>(compressed.data()), record->compressedSize))
     {
         error = "could not read ETOPO tile blob";
         return false;
     }
-    std::vector<std::byte> filtered;
-    if (!RuntimeAssets::DecompressBytes(static_cast<RuntimeAssets::CompressionType>(m_header.compressionType), compressed,
-                                        record->uncompressedSize, &filtered, &error))
-        return false;
-    if (filtered.size() != RuntimeAssets::kHeightmapFilteredTileBytes)
+    if (LZ4_decompress_safe(reinterpret_cast<const char *>(compressed.data()), reinterpret_cast<char *>(filtered.data()),
+                            static_cast<int>(record->compressedSize), static_cast<int>(filtered.size())) != static_cast<int>(filtered.size()))
     {
         error = "ETOPO tile has invalid filtered size";
         return false;
     }
-    samples.assign(RuntimeAssets::kHeightmapTileSampleCount, 0.0f);
+    quantization = {record->sampleScale, record->sampleBias};
+    return true;
+}
+
+void HeightmapDataset::reconstructTile(std::span<const std::byte> filtered, std::span<std::int16_t> samples)
+{
+    assert(filtered.size() == RuntimeAssets::kHeightmapFilteredTileBytes && samples.size() == RuntimeAssets::kHeightmapTileSampleCount);
+    // Zero in upload storage means exactly zero meters. Swap the valid quantized
+    // code 0 with the exact-zero code so nonzero tile bias remains lossless.
+    auto normalize = [](std::uint16_t bits) -> std::int16_t {
+        const auto code = std::bit_cast<std::int16_t>(bits);
+        if (code == RuntimeAssets::kHeightmapInvalidHeight || code == RuntimeAssets::kHeightmapExactZeroHeight) return 0;
+        return code == 0 ? RuntimeAssets::kHeightmapExactZeroHeight : code;
+    };
     std::uint16_t previous = static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[0])) |
                              static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[1]) << 8u);
-    samples[rasterIndex(0)] = RuntimeAssets::DecodeHeight(std::bit_cast<std::int16_t>(previous), record->sampleScale, record->sampleBias);
+    samples[rasterIndex(0)] = normalize(previous);
     constexpr std::size_t low = 2;
     constexpr std::size_t high = 2 + RuntimeAssets::kHeightmapTileSampleCount - 1;
     for (std::size_t i = 1; i < RuntimeAssets::kHeightmapTileSampleCount; ++i)
@@ -212,7 +231,6 @@ bool EtopoHeightmapDataset::loadTile(std::int32_t tileX, std::int32_t tileY, std
         const std::uint16_t folded = static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[low + i - 1])) |
                                      static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(filtered[high + i - 1]) << 8u);
         previous = static_cast<std::uint16_t>(previous + zigZagDecode(folded));
-        samples[rasterIndex(i)] = RuntimeAssets::DecodeHeight(std::bit_cast<std::int16_t>(previous), record->sampleScale, record->sampleBias);
+        samples[rasterIndex(i)] = normalize(previous);
     }
-    return true;
 }

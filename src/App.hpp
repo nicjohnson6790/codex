@@ -46,6 +46,7 @@ class App
         bool quitAfterFirstFrame = false;
         std::uint64_t quitAfterFrameCount = 0;
         bool verifyHeightmapPipeline = false;
+        bool stressHeightmapPipeline = false;
         bool enableSteam = true;
     };
 

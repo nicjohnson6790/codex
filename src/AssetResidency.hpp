@@ -448,11 +448,13 @@ template <typename Job, typename Fence> class GenerationQueue
         m_fences[handle.index] = std::move(fence);
     }
 
-    void discard(GenerationJobHandle handle)
+    // Renderer-accepted work can own external staging before GPU submission.
+    // In that case its owner must explicitly complete it, even when discarded.
+    void discard(GenerationJobHandle handle, bool awaitExternalCompletion = false)
     {
         require(handle);
         m_discarded.set(handle.index);
-        if (!m_submitted.test(handle.index))
+        if (!m_submitted.test(handle.index) && !awaitExternalCompletion)
             m_completed.set(handle.index);
     }
 

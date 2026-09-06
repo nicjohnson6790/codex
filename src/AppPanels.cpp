@@ -464,6 +464,18 @@ void AppPanels::drawDebugTab(Context &context)
     ImGui::Text("Resident slices: %u", context.worldGridQuadtree.residentCount());
     ImGui::Text("Queued leaves: %u", context.worldGridQuadtree.queuedCount());
     const auto heightmaps = context.worldGridQuadtree.heightmapDiagnostics();
+    ImGui::Text("CPU heightmaps: %u / %u (ready %u, loading %u)", heightmaps.cpuOccupied, heightmaps.cpuCapacity,
+                heightmaps.cpuReady, heightmaps.cpuLoading);
+    ImGui::Text("CPU misses / evictions: %llu / %llu", (unsigned long long)heightmaps.cpuMisses, (unsigned long long)heightmaps.cpuEvictions);
+    ImGui::Text("Readbacks: %u / %u (high-water %u)", heightmaps.readbacks, heightmaps.readbackCapacity, heightmaps.readbackHighWater);
+    ImGui::Text("CPU cache / readback blocked: %llu / %llu", (unsigned long long)heightmaps.cpuCacheBlocked, (unsigned long long)heightmaps.readbackBlocked);
+    ImGui::Text("Source decode staging: %s (256 KiB)", heightmaps.sourceStagingBusy ? "busy" : "available");
+    ImGui::Text("Source decode / upload batch high-water: %u / %u", heightmaps.sourceDecodeBatchHighWater,
+                heightmaps.sourceUploadBatchHighWater);
+    ImGui::Text("Source cache / staging / upload blocked: %llu / %llu / %llu", (unsigned long long)heightmaps.sourceCacheBlocked,
+                (unsigned long long)heightmaps.sourceStagingBlocked, (unsigned long long)heightmaps.sourceUploadBlocked);
+    ImGui::Text("References per final high-water / overflows: %u / %llu", heightmaps.referenceHighWater,
+                (unsigned long long)heightmaps.referenceOverflows);
     ImGui::Text("Source Tile Cache: %u / %u", heightmaps.sourceOccupied, WorldGridQuadtreeHeightmapManager::kSourceTileCapacity);
     ImGui::Text("Ready / loading / age-0: %u / %u / %u", heightmaps.sourceReady, heightmaps.sourceLoading, heightmaps.sourceAgeZero);
     ImGui::Text("Hash LUT: %u / %u, depth %u, collisions %u", heightmaps.sourceHashOccupied, heightmaps.sourceHashCapacity,

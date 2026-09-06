@@ -53,6 +53,11 @@ int main(int argc, char **argv)
             {
                 options.verifyHeightmapPipeline = true;
             }
+            else if (std::strcmp(argv[index], "--stress-heightmap-pipeline") == 0)
+            {
+                options.verifyHeightmapPipeline = true;
+                options.stressHeightmapPipeline = true;
+            }
             else
             {
                 std::cerr << "Unknown argument: " << argv[index] << '\n';

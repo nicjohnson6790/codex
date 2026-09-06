@@ -1,6 +1,7 @@
 #include "PineTreePackConverter.hpp"
 #include "EtopoHeightmapConverter.hpp"
 #include "JapanDem10Converter.hpp"
+#include "HeightmapRepack.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -63,6 +64,7 @@ void PrintUsage()
         << "  converter.exe skybox\n"
         << "  converter.exe pbr\n"
         << "  converter.exe roboto\n"
+        << "  converter.exe heightmap-repack <assetbin>\n"
         << "  converter.exe etopo2022 [--source <tif>] [--out <directory>] [--verbose|--self-test]\n"
         << "  converter.exe japan-dem10 [--source <directory>] [--etopo <assetbin>] [--out <directory>] [--verbose|--self-test]\n"
         << "  converter.exe --source <path> --out <path> --name <pack>\n";
@@ -179,6 +181,16 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (argc >= 2 && std::string_view(argv[1]) == "heightmap-repack")
+    {
+        try
+        {
+            if (argc != 3) throw std::runtime_error("usage: converter.exe heightmap-repack <assetbin>");
+            RepackHeightmap(argv[2]);
+            SDL_Quit(); return 0;
+        }
+        catch (const std::exception &e) { std::cerr << e.what() << '\n'; SDL_Quit(); return 1; }
+    }
     if (argc >= 2 && std::string_view(argv[1]) == "etopo2022")
     {
         std::string etopoError;

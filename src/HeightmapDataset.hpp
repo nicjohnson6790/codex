@@ -54,7 +54,11 @@ class HeightmapDataset
     [[nodiscard]] virtual TileRange tileRange() const = 0;
     [[nodiscard]] virtual bool containsTile(std::int32_t tileX, std::int32_t tileY) const = 0;
     [[nodiscard]] virtual std::uint64_t tileRevision(std::int32_t tileX, std::int32_t tileY) const = 0;
-    virtual bool loadTile(std::int32_t tileX, std::int32_t tileY, std::vector<float> &samples, std::string &error) const = 0;
+    struct TileQuantization { float scale = 1.0f, bias = 0.0f; };
+    // Two caller-owned 128 KiB stages; reconstruction writes directly to GPU upload storage.
+    virtual bool loadTile(std::int32_t tileX, std::int32_t tileY, std::span<std::byte> compressed,
+                          std::span<std::byte> filtered, TileQuantization &quantization, std::string &error) const = 0;
+    static void reconstructTile(std::span<const std::byte> filtered, std::span<std::int16_t> samples);
 };
 
 class EtopoHeightmapDataset final : public HeightmapDataset
@@ -77,7 +81,8 @@ class EtopoHeightmapDataset final : public HeightmapDataset
     }
     [[nodiscard]] bool containsTile(std::int32_t tileX, std::int32_t tileY) const override;
     [[nodiscard]] std::uint64_t tileRevision(std::int32_t tileX, std::int32_t tileY) const override;
-    bool loadTile(std::int32_t tileX, std::int32_t tileY, std::vector<float> &samples, std::string &error) const override;
+    bool loadTile(std::int32_t tileX, std::int32_t tileY, std::span<std::byte> compressed,
+                  std::span<std::byte> filtered, TileQuantization &quantization, std::string &error) const override;
 
     [[nodiscard]] const RuntimeAssets::HeightmapPackHeader &header() const
     {

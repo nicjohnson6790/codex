@@ -48,6 +48,7 @@ struct HeightmapSourceGpuDescriptor
     glm::vec4 uvSteps{0.0f};                // step for destination X (xy), destination Y (zw)
     glm::vec4 ownershipBounds{0.0f};        // min x/y, max x/y in dataset sample coordinates
     glm::uvec4 source{0u};                  // source slice, outer-min flags x/y
+    glm::vec4 quantization{0.0f};           // per-tile scale/bias; yScale remains independent
 };
 
 class WorldGridQuadtreeHeightmapManager
@@ -55,6 +56,8 @@ class WorldGridQuadtreeHeightmapManager
   public:
     static constexpr std::uint16_t kCapacity = static_cast<std::uint16_t>(AppConfig::Terrain::kHeightmapSliceCapacity);
     static constexpr std::uint16_t kUnavailable = kUnavailableCacheIndex;
+    static constexpr std::uint16_t kCpuCapacity = AppConfig::Terrain::kCpuHeightmapCacheCapacity;
+    static constexpr std::size_t kFinalSampleCount = AppConfig::Terrain::kHeightmapResolution * AppConfig::Terrain::kHeightmapResolution;
     static constexpr std::uint16_t kSourceTileCapacity = static_cast<std::uint16_t>(AppConfig::Terrain::kSourceHeightmapCacheCapacity);
     static constexpr std::uint16_t kSourceUnavailable = kSourceTileCapacity;
     static constexpr std::uint16_t kMaxFinalHeightmapsPerDispatch =
@@ -66,6 +69,14 @@ class WorldGridQuadtreeHeightmapManager
 
     struct Diagnostics
     {
+        std::uint32_t cpuOccupied = 0, cpuReady = 0, cpuLoading = 0, cpuCapacity = kCpuCapacity;
+        std::uint32_t readbacks = 0, readbackCapacity = AppConfig::Terrain::kHeightmapReadbackCapacity, readbackHighWater = 0;
+        std::uint64_t cpuMisses = 0, cpuEvictions = 0, cpuCacheBlocked = 0, readbackBlocked = 0;
+        std::uint64_t cpuCompleted = 0, cpuDiscarded = 0, cpuStaleRetired = 0;
+        std::uint64_t sourceStagingBlocked = 0, sourceCacheBlocked = 0, sourceUploadBlocked = 0, referenceOverflows = 0;
+        bool sourceStagingBusy = false;
+        std::uint32_t sourceCapacity = kSourceTileCapacity;
+        std::uint32_t sourceDecodeBatchHighWater = 0, sourceUploadBatchHighWater = 0;
         std::uint32_t sourceOccupied = 0, sourceReady = 0, sourceLoading = 0, sourceAgeZero = 0;
         std::uint32_t sourceHashOccupied = 0, sourceHashCapacity = 0, sourceHashCollisions = 0;
         std::uint64_t sourceHits = 0, sourceMisses = 0, sourceLoads = 0, sourceUploads = 0, sourceEvictions = 0;
@@ -92,6 +103,8 @@ class WorldGridQuadtreeHeightmapManager
     void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence> &fence);
     void markSourceUploadsSubmitted(std::span<const std::uint16_t> slots, const std::shared_ptr<SubmittedGpuFence> &fence);
     void collectCompletedCpuReadbacks(QuadtreeMeshRenderer &meshRenderer);
+    void markCpuReadbackSubmitted(GenerationJobHandle, const std::shared_ptr<SubmittedGpuFence> &);
+    void completeCpuReadback(GenerationJobHandle, std::span<const float>);
     void applyGeneratedExtents(const WorldGridQuadtreeLeafId &, std::uint16_t, const HeightmapExtents &, GenerationJobHandle);
     void clearCache();
     void shutdownAfterGpuIdle();
@@ -112,6 +125,9 @@ class WorldGridQuadtreeHeightmapManager
         return static_cast<std::uint16_t>(m_generationJobs.count());
     }
     [[nodiscard]] Diagnostics diagnostics() const;
+    // Explicit command-line GPU stress validation; never used by normal traversal.
+    void stressResidencyForValidation(QuadtreeMeshRenderer &, std::uint64_t frame);
+    [[nodiscard]] Position traversalPositionForValidation(std::uint64_t stop) const;
 
   private:
     struct LeafIdHash
@@ -128,21 +144,39 @@ class WorldGridQuadtreeHeightmapManager
     };
     struct SourceTileLoadResult
     {
-        std::vector<float> samples;
+        CacheIndex slot = kSourceUnavailable;
+        HeightmapDataset::TileQuantization quantization;
+        bool success = false;
         std::string error;
+    };
+    struct SourceDecodeJob
+    {
+        std::shared_ptr<HeightmapDataset> dataset;
+        SourceTileId id;
+        CacheIndex slot = kSourceUnavailable;
+        std::span<std::int16_t> destination;
+    };
+    struct SourceLoadBatchResult
+    {
+        std::array<SourceTileLoadResult, kSourceTileCapacity> tiles;
+        std::uint16_t count = 0;
     };
     struct SourceUpload
     {
-        std::future<SourceTileLoadResult> load;
-        std::vector<float> samples;
         std::uint64_t revision = 0;
+        bool decoding = false;
         bool queuedToRenderer = false;
         std::shared_ptr<SubmittedGpuFence> fence;
     };
     struct FinalMetadata
     {
-        std::uint32_t referenceFront = 0;
         std::uint32_t referenceCount = 0;
+        bool overflow = false;
+    };
+    struct CpuReadbackJob
+    {
+        WorldGridQuadtreeLeafId leafId;
+        CacheIndex cpuSlot, finalSlot;
     };
 
     using HeightmapCache = FixedAssetCache<WorldGridQuadtreeLeafId, std::uint16_t, LeafIdHash>;
@@ -156,25 +190,29 @@ class WorldGridQuadtreeHeightmapManager
     std::uint16_t requestSourceTile(const SourceTileId &, std::uint64_t revision, std::uint16_t hint);
     std::optional<std::uint16_t> findSourceAllocationCandidate();
     bool buildDescriptors(std::uint16_t finalSlot, std::vector<HeightmapSourceGpuDescriptor> &out);
-    void compactReferences();
+    void invalidateCpuForFinal(std::uint16_t finalSlot);
     void discardCurrentJob(std::uint16_t finalSlot);
     void invalidateSlotMetadata(std::uint16_t slot);
 
     HeightmapCache m_heightmaps;
     SourceCache m_sourceTiles;
     HeightmapQueue m_generationJobs;
+    HeightmapCache m_cpuHeightmaps;
+    GenerationQueue<CpuReadbackJob, SubmittedGpuFence> m_cpuReadbacks;
+    std::array<CacheIndex, kCpuCapacity> m_cpuFinalSlots{};
+    std::unique_ptr<float[]> m_cpuHeightmapSamples;
+    std::unique_ptr<std::byte[]> m_sourceCompressedStaging, m_sourceDecompressedStaging;
+    std::future<SourceLoadBatchResult> m_sourceLoad;
+    std::array<HeightmapDataset::TileQuantization, kSourceTileCapacity> m_sourceQuantization{};
     std::array<SourceUpload, kSourceTileCapacity> m_sourceUploads{};
     std::array<std::vector<std::shared_ptr<SubmittedGpuFence>>, kSourceTileCapacity> m_sourceReadFences{};
     std::array<std::uint64_t, kSourceTileCapacity> m_sourceRevisions{};
     std::array<FinalMetadata, kCapacity> m_finalMetadata{};
-    std::vector<FinalSourceReference> m_sourceReferences;
+    std::unique_ptr<FinalSourceReference[]> m_sourceReferences;
     std::vector<std::shared_ptr<HeightmapDataset>> m_datasets;
     std::vector<SourceHeightmap> m_sources;
     std::array<HeightmapExtents, kCapacity> m_knownExtents{};
     std::array<bool, kCapacity> m_knownExtentsValid{};
-    std::array<std::vector<float>, kCapacity> m_cpuHeightmapSamples{};
-    std::array<WorldGridQuadtreeLeafId, kCapacity> m_cpuHeightmapLeafIds{};
-    std::array<bool, kCapacity> m_cpuHeightmapValid{}, m_cpuHeightmapPending{};
     std::uint16_t m_residentCount = 0, m_computeDispatchBudget = 4;
     mutable Diagnostics m_stats{};
 };

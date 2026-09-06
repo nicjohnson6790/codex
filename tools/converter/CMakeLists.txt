@@ -198,6 +198,7 @@ endif()
 
 add_library(lz4_local STATIC
     ${lz4_SOURCE_DIR}/lib/lz4.c
+    ${lz4_SOURCE_DIR}/lib/lz4hc.c
 )
 
 target_include_directories(lz4_local

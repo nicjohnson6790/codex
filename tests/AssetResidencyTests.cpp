@@ -270,6 +270,24 @@ int main()
     assert(clearQueue.count() == 0);
 
     MultiCacheManager multi;
+    // A renderer-accepted readback owns its destination before a GPU fence is
+    // attached. Discard must retain its handle until external completion.
+    GenerationQueue<Job, Fence> readbacks(2);
+    const auto queuedReadback = readbacks.tryPush({1, 0}).value();
+    const auto laterReadback = readbacks.tryPush({2, 1}).value();
+    readbacks.discard(queuedReadback, true);
+    readbacks.markCompleted(laterReadback);
+    assert(readbacks.retireCompletedFront() == 0 && readbacks.full());
+    assert(!readbacks.isSubmitted(queuedReadback) && !readbacks.isCompleted(queuedReadback));
+    auto readbackFence = std::make_shared<Fence>();
+    readbacks.markSubmitted(queuedReadback, readbackFence);
+    bool copiedDiscarded = false;
+    readbackFence->signaled = true;
+    readbacks.processSignaled([&](auto, const auto &) { copiedDiscarded = true; });
+    assert(!copiedDiscarded && readbacks.count() == 0);
+    const auto reusedReadback = readbacks.tryPush({3, 0}).value();
+    assert(!readbacks.contains(queuedReadback) && reusedReadback != queuedReadback);
+
     multi.generated.assign(0, 11);
     multi.references.assign(0, 22);
     auto generatedJob = multi.generatedJobs.tryPush({11, 0}).value();

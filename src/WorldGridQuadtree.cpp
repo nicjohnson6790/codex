@@ -6,6 +6,8 @@
 #include "PerformanceCapture.hpp"
 #include "QuadtreeMeshRenderer.hpp"
 #include "RenderEngines.hpp"
+#include "TerrainCornerNeighbor.hpp"
+#include "TerrainBridgeMetadata.hpp"
 #include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
 #include "WorldGridNearbyFoliageManager.hpp"
@@ -708,38 +710,35 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
 
     struct CornerOwner
     {
-        WorldGridQuadtreeLeafId leafId{};
         std::uint16_t sliceIndex = 0;
+        std::uint8_t selector = 0;
         bool coarse = false;
     };
     std::array<CornerOwner, 4> corners{}; // southwest, southeast, northeast, northwest
-    for (auto &corner : corners)
-        corner = {node.nodeId, sliceIndex, false};
+    for (std::uint8_t cornerIndex = 0; cornerIndex < 4u; ++cornerIndex)
+        corners[cornerIndex] = {sliceIndex, terrainOwnCornerSelector(cornerIndex), false};
     constexpr std::array<std::array<std::uint8_t, 2>, 4> edgeCorners{{{{0, 3}}, {{1, 0}}, {{2, 1}}, {{3, 2}}}};
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
         if (coarseNeighbors[edgeIndex])
             for (const std::uint8_t cornerIndex : edgeCorners[edgeIndex])
                 if (!corners[cornerIndex].coarse)
-                    corners[cornerIndex] = {m_nodes[coarseNeighbors[edgeIndex]->nodeIndex].nodeId,
-                                            coarseNeighbors[edgeIndex]->sliceIndex, true};
+                    corners[cornerIndex] = {coarseNeighbors[edgeIndex]->sliceIndex,
+                        terrainEdgeCornerSelector(edgeIndex, coarseNeighbors[edgeIndex]->half, cornerIndex), true};
 
-    const auto [nodeMin, nodeMax] = worldGridQuadtreeLeafBounds(node.nodeId);
-    const std::array<Position, 4> cornerPositions{{nodeMin,
-                                                   Position(nodeMax.gridX(), nodeMin.gridY(),
-                                                            {nodeMax.localPosition().x, 0.0, nodeMin.localPosition().z}),
-                                                   nodeMax,
-                                                   Position(nodeMin.gridX(), nodeMax.gridY(),
-                                                            {nodeMin.localPosition().x, 0.0, nodeMax.localPosition().z})}};
-    const auto packCornerSample = [&](std::uint8_t cornerIndex) {
-        const auto [ownerMin, ownerMax] = worldGridQuadtreeLeafBounds(corners[cornerIndex].leafId);
-        (void)ownerMax;
-        const glm::dvec3 offset = cornerPositions[cornerIndex].localCoordinatesInCellOf(ownerMin);
-        const double pitch = worldGridQuadtreeLeafSize(corners[cornerIndex].leafId) /
-                             AppConfig::Terrain::kHeightmapLeafIntervalCount;
-        const std::uint32_t x = static_cast<std::uint32_t>(std::llround(offset.x / pitch)) + AppConfig::Terrain::kHeightmapLeafHalo;
-        const std::uint32_t z = static_cast<std::uint32_t>(std::llround(offset.z / pitch)) + AppConfig::Terrain::kHeightmapLeafHalo;
-        return x | (z << 16u);
-    };
+    for (std::uint8_t cornerIndex = 0; cornerIndex < 4u; ++cornerIndex)
+    {
+        if (corners[cornerIndex].coarse)
+            continue;
+        const auto diagonal = terrainCoarseDiagonalNeighbor(
+            node.nodeId, cornerIndex, QuadtreeNode::NullNodeIndex,
+            [this](std::int64_t x, std::int64_t z) { return findBaseNode(x, z); },
+            [this](std::uint16_t index) -> const QuadtreeNode& { return m_nodes[index]; });
+        if (diagonal == QuadtreeNode::NullNodeIndex)
+            continue;
+        const auto diagonalSlice = residentHeightmap(diagonal);
+        if (diagonalSlice != kUnavailableCacheIndex)
+            corners[cornerIndex] = {diagonalSlice, terrainDiagonalCornerSelector(cornerIndex), true};
+    }
 
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
     {
@@ -749,8 +748,8 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
             coarseNeighbors[edgeIndex] ? coarseNeighbors[edgeIndex]->sliceIndex : sliceIndex,
             corners[cornerIds[0]].sliceIndex,
             corners[cornerIds[1]].sliceIndex,
-            packCornerSample(cornerIds[0]),
-            packCornerSample(cornerIds[1]),
+            corners[cornerIds[0]].selector,
+            corners[cornerIds[1]].selector,
             coarseNeighbors[edgeIndex] ? coarseNeighbors[edgeIndex]->half : 0u,
         };
         if (coarseNeighbors[edgeIndex])
