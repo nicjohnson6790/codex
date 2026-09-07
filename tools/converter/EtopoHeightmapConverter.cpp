@@ -3,9 +3,11 @@
 #include "EtopoGeoTiffReader.hpp"
 #include "HeightmapTileFilter.hpp"
 #include "HeightmapQuantization.hpp"
+#include "HeightmapTileWorkers.hpp"
 #include "IcosahedralProjection.hpp"
 #include "assets/RuntimeAssetCompression.hpp"
 #include "assets/RuntimeHeightmapFormat.hpp"
+#include "assets/RuntimeHeightmapIndex.hpp"
 
 #include <algorithm>
 #include <array>
@@ -210,12 +212,10 @@ bool WritePackedTilePreview(const std::filesystem::path& indexPath, const std::f
     std::ifstream index(indexPath, std::ios::binary);
     std::ifstream data(dataPath, std::ios::binary);
     RuntimeAssets::HeightmapPackHeader header{};
-    index.read(reinterpret_cast<char*>(&header), sizeof(header));
-    if (!index || !data || header.magic != RuntimeAssets::kHeightmapPackMagic || header.version != RuntimeAssets::kHeightmapFormatVersion ||
-        header.sampleType != static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias))
-    { if (error) *error = "failed reopening packed heightmap for thumbnail preview"; return false; }
-    const std::uint32_t columns = static_cast<std::uint32_t>(std::ceil(std::sqrt(static_cast<double>(header.tileCount))));
-    const std::uint32_t rows = (header.tileCount + columns - 1u) / columns;
+    std::vector<HeightmapTileRecord> table;
+    if (!data || !RuntimeAssets::ReadHeightmapIndex(index, header, table, error)) return false;
+    const std::uint32_t columns = std::max(1u, static_cast<std::uint32_t>(std::ceil(std::sqrt(static_cast<double>(header.tileCount)))));
+    const std::uint32_t rows = std::max(1u, (header.tileCount + columns - 1u) / columns);
     const std::uint32_t width = columns * thumbnailSize;
     const std::uint32_t height = rows * thumbnailSize;
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 3u);
@@ -224,21 +224,21 @@ bool WritePackedTilePreview(const std::filesystem::path& indexPath, const std::f
     index.seekg(static_cast<std::streamoff>(header.tileRecordOffset));
     std::vector<std::byte> compressed, filtered;
     std::vector<std::int16_t> decoded;
-    for (std::uint32_t tileIndex = 0; tileIndex < header.tileCount; ++tileIndex)
+    std::uint32_t tileIndex = 0;
+    for (const auto& record : table)
     {
-        HeightmapTileRecord record{};
-        index.read(reinterpret_cast<char*>(&record), sizeof(record));
-        if (!index) { if (error) *error = "failed reading tile record for thumbnail preview"; return false; }
+        if (!record.compressedSize) continue;
         compressed.resize(record.compressedSize);
         data.seekg(static_cast<std::streamoff>(record.blobOffset));
         data.read(reinterpret_cast<char*>(compressed.data()), record.compressedSize);
         if (!data || !RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4, compressed,
                 record.uncompressedSize, &filtered, error) || !HeightmapTileFilter::Decode(filtered, &decoded, error)) return false;
 
-        // Records are written in heightbin order. Pack them densely left to
+        // Present records are in spatial order. Pack them densely left to
         // right, then top to bottom, without reserving cells for omitted tiles.
         const std::uint32_t tilePixelX = (tileIndex % columns) * thumbnailSize;
         const std::uint32_t tilePixelY = (tileIndex / columns) * thumbnailSize;
+        ++tileIndex;
         for (std::uint32_t py = 0; py < thumbnailSize; ++py)
         for (std::uint32_t px = 0; px < thumbnailSize; ++px)
         {
@@ -317,15 +317,15 @@ bool ReopenAndValidate(const std::filesystem::path& indexPath, const std::filesy
         header.projectionVersion != RuntimeAssets::kHeightmapProjectionVersion ||
         header.orientationDegrees != IcosahedralProjection::kOrientationDegrees ||
         header.atlasRotationDegrees != IcosahedralProjection::kAtlasRotationDegrees ||
-        header.tileRecordOffset + static_cast<std::uint64_t>(header.tileCount) * sizeof(HeightmapTileRecord) != indexSize)
+        header.tileRecordOffset + RuntimeAssets::kHeightmapTileTableBytes != indexSize)
     { if (error) *error = "generated heightmap index header is invalid"; return false; }
-    index.seekg(static_cast<std::streamoff>(header.tileRecordOffset));
+    std::vector<HeightmapTileRecord> table;
+    if (!RuntimeAssets::ReadHeightmapIndex(index, header, table, error)) return false;
     std::set<std::pair<int, int>> coordinates;
     std::vector<std::byte> compressed;
-    for (std::uint32_t i = 0; i < header.tileCount; ++i)
+    for (const auto& record : table)
     {
-        HeightmapTileRecord record{};
-        index.read(reinterpret_cast<char*>(&record), sizeof(record));
+        if (!record.compressedSize) continue;
         if (!index || !coordinates.emplace(record.tileX, record.tileY).second || record.compressedSize == 0 ||
             record.uncompressedSize != RuntimeAssets::kHeightmapFilteredTileBytes || record.validSampleCount == 0 ||
             record.blobOffset + record.compressedSize > dataSize || !std::isfinite(record.sampleScale) || record.sampleScale < 0 || !std::isfinite(record.sampleBias))
@@ -413,9 +413,10 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
         Tile tile{};
         HeightmapQuantization::FloatTile values{};
         HeightmapQuantization::Kinds kinds{};
+        std::vector<std::byte> filtered, compressed, decompressed;
+        std::vector<std::int16_t> decoded;
     };
-    auto work = std::make_unique<TileWork>();
-    auto& tile = work->tile; auto& values = work->values; auto& kinds = work->kinds;
+    std::mutex appendMutex, progressMutex;
     HeightmapQuantization::Statistics statistics;
     std::int32_t completedTiles = 0;
     const auto conversionStarted = std::chrono::steady_clock::now();
@@ -428,58 +429,75 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
                   << " valid, " << compressedBytes << " bytes, " << summary->storedTiles << " stored, elapsed "
                   << FormatDuration(elapsed) << ", ETA " << FormatDuration(eta) << '\n';
     };
+    std::vector<HeightmapTileWorkers::Coordinate> candidates;
     for (int ty = minY; ty <= maxY; ++ty)
-    for (int tx = minX; tx <= maxX; ++tx)
-    {
-        std::uint32_t validCount = 0;
-        float tileMin = INFINITY, tileMax = -INFINITY;
-        for (std::size_t y = 0; y < kResolution; ++y)
-        for (std::size_t x = 0; x < kResolution; ++x)
-        {
-            const std::int64_t latticeX = static_cast<std::int64_t>(tx) * RuntimeAssets::kHeightmapTileStride + static_cast<std::int64_t>(x);
-            const std::int64_t latticeY = static_cast<std::int64_t>(ty) * RuntimeAssets::kHeightmapTileStride + static_cast<std::int64_t>(y);
-            const double px = static_cast<double>(latticeX) * tileSize / RuntimeAssets::kHeightmapTileStride;
-            const double py = static_cast<double>(latticeY) * tileSize / RuntimeAssets::kHeightmapTileStride;
-            double lon = 0.0, lat = 0.0, elevation = 0.0;
-            float value = std::numeric_limits<float>::quiet_NaN();
-            if (projection.inverse(px, py, &lon, &lat) && source.sampleBilinear(lon, lat, &elevation))
+        for (int tx = minX; tx <= maxX; ++tx) candidates.emplace_back(ty, tx);
+    records.resize(RuntimeAssets::kHeightmapTileTableCount);
+    if (!HeightmapTileWorkers::Run(candidates, "ETOPO", [] { return std::make_unique<TileWork>(); },
+        [&](std::size_t, int tx, int ty, TileWork& work) {
+            const auto tileIndex = RuntimeAssets::HeightmapTileTableIndex(tx, ty);
+            auto& tile = work.tile; auto& values = work.values; auto& kinds = work.kinds;
+            auto& filtered = work.filtered; auto& compressed = work.compressed;
+            auto& decompressed = work.decompressed; auto& decoded = work.decoded;
+            HeightmapQuantization::Statistics tileStatistics;
+            std::string tileError;
+            auto* error = &tileError;
+            std::uint32_t validCount = 0;
+            float tileMin = INFINITY, tileMax = -INFINITY;
+            for (std::size_t y = 0; y < kResolution; ++y)
+            for (std::size_t x = 0; x < kResolution; ++x)
             {
-                value = static_cast<float>(elevation);
-                ++validCount; tileMin = std::min(tileMin, value); tileMax = std::max(tileMax, value);
+                const std::int64_t latticeX = static_cast<std::int64_t>(tx) * RuntimeAssets::kHeightmapTileStride + static_cast<std::int64_t>(x);
+                const std::int64_t latticeY = static_cast<std::int64_t>(ty) * RuntimeAssets::kHeightmapTileStride + static_cast<std::int64_t>(y);
+                const double px = static_cast<double>(latticeX) * tileSize / RuntimeAssets::kHeightmapTileStride;
+                const double py = static_cast<double>(latticeY) * tileSize / RuntimeAssets::kHeightmapTileStride;
+                double lon = 0.0, lat = 0.0, elevation = 0.0;
+                float value = std::numeric_limits<float>::quiet_NaN();
+                if (projection.inverse(px, py, &lon, &lat) && source.sampleBilinear(lon, lat, &elevation))
+                {
+                    value = static_cast<float>(elevation);
+                    ++validCount; tileMin = std::min(tileMin, value); tileMax = std::max(tileMax, value);
+                }
+                values[y * kResolution + x] = value;
+                kinds[y * kResolution + x] = std::isfinite(value) ? HeightmapQuantization::Kind::Normal : HeightmapQuantization::Kind::Invalid;
             }
-            values[y * kResolution + x] = value;
-            kinds[y * kResolution + x] = std::isfinite(value) ? HeightmapQuantization::Kind::Normal : HeightmapQuantization::Kind::Invalid;
-        }
-        if (validCount == 0) { ++summary->omittedTiles; reportProgress(tx, ty, 0, 0); continue; }
-        if (validCount != tile.size()) ++summary->partialTiles;
+            if (validCount == 0)
+            {
+                std::lock_guard lock(progressMutex);
+                ++summary->omittedTiles; reportProgress(tx, ty, 0, 0); return;
+            }
 
-        float scale, bias;
-        if (!HeightmapQuantization::Encode(values, kinds, tile, scale, bias, statistics, error)) return false;
-        std::vector<std::byte> filtered, compressed, decompressed;
-        std::vector<std::int16_t> decoded;
-        if (!HeightmapTileFilter::Encode(tile, &filtered, error) ||
-            !HeightmapQuantization::CompressFiltered(filtered, compressed, error) ||
-            !RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4, compressed, filtered.size(), &decompressed, error) ||
-            !HeightmapTileFilter::Decode(decompressed, &decoded, error) || !std::equal(decoded.begin(), decoded.end(), tile.begin()))
-        { if (error && error->empty()) *error = "tile filter/compression round-trip mismatch"; return false; }
+            float scale, bias;
+            if (!HeightmapQuantization::Encode(values, kinds, tile, scale, bias, tileStatistics, error)) throw std::runtime_error(tileError);
+            if (!HeightmapTileFilter::Encode(tile, &filtered, error) ||
+                !HeightmapQuantization::CompressFiltered(filtered, compressed, error) ||
+                !RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4, compressed, filtered.size(), &decompressed, error) ||
+                !HeightmapTileFilter::Decode(decompressed, &decoded, error) || !std::equal(decoded.begin(), decoded.end(), tile.begin()))
+            { throw std::runtime_error(tileError.empty() ? "tile filter/compression round-trip mismatch" : tileError); }
 
-        const std::uint64_t blobOffset = static_cast<std::uint64_t>(data.tellp());
-        data.write(reinterpret_cast<const char*>(compressed.data()), static_cast<std::streamsize>(compressed.size()));
-        if (!data) { if (error) *error = "failed writing height tile blob"; return false; }
-        records.push_back({ static_cast<std::int8_t>(tx), static_cast<std::int8_t>(ty), 0,
-            static_cast<std::uint32_t>(compressed.size()), static_cast<std::uint32_t>(filtered.size()), validCount,
-            scale, bias, blobOffset });
-        TileEdges edge;
-        edge.scale = scale; edge.bias = bias;
-        auto meters = [&](std::size_t i) { return tile[i] == RuntimeAssets::kHeightmapInvalidHeight ? std::numeric_limits<float>::quiet_NaN() : RuntimeAssets::DecodeHeight(tile[i], scale, bias); };
-        for (std::size_t i = 0; i < kResolution; ++i)
-        { edge.left[i] = meters(i * kResolution); edge.right[i] = meters(i * kResolution + kResolution - 1); edge.bottom[i] = meters(i); edge.top[i] = meters((kResolution - 1) * kResolution + i); }
-        edges.emplace(std::make_pair(tx, ty), edge);
-        ++summary->storedTiles;
-        summary->rawBytes += tile.size() * sizeof(std::int16_t); summary->filteredBytes += filtered.size(); summary->compressedBytes += compressed.size();
-        summary->minHeight = std::min(summary->minHeight, tileMin); summary->maxHeight = std::max(summary->maxHeight, tileMax);
-        reportProgress(tx, ty, validCount, compressed.size());
-    }
+            {
+                std::lock_guard lock(appendMutex);
+                const std::uint64_t blobOffset = static_cast<std::uint64_t>(data.tellp());
+                data.write(reinterpret_cast<const char*>(compressed.data()), static_cast<std::streamsize>(compressed.size()));
+                if (!data) throw std::runtime_error("failed writing height tile blob");
+                records[tileIndex] = { static_cast<std::int8_t>(tx), static_cast<std::int8_t>(ty), 0,
+                    static_cast<std::uint32_t>(compressed.size()), static_cast<std::uint32_t>(filtered.size()), validCount,
+                    scale, bias, blobOffset };
+            }
+            TileEdges edge;
+            edge.scale = scale; edge.bias = bias;
+            auto meters = [&](std::size_t i) { return tile[i] == RuntimeAssets::kHeightmapInvalidHeight ? std::numeric_limits<float>::quiet_NaN() : RuntimeAssets::DecodeHeight(tile[i], scale, bias); };
+            for (std::size_t i = 0; i < kResolution; ++i)
+            { edge.left[i] = meters(i * kResolution); edge.right[i] = meters(i * kResolution + kResolution - 1); edge.bottom[i] = meters(i); edge.top[i] = meters((kResolution - 1) * kResolution + i); }
+            std::lock_guard lock(progressMutex);
+            edges.emplace(std::make_pair(tx, ty), edge);
+            statistics.merge(tileStatistics);
+            if (validCount != tile.size()) ++summary->partialTiles;
+            ++summary->storedTiles;
+            summary->rawBytes += tile.size() * sizeof(std::int16_t); summary->filteredBytes += filtered.size(); summary->compressedBytes += compressed.size();
+            summary->minHeight = std::min(summary->minHeight, tileMin); summary->maxHeight = std::max(summary->maxHeight, tileMax);
+            reportProgress(tx, ty, validCount, compressed.size());
+    }, error)) return false;
     data.close();
     statistics.rawBytes = summary->rawBytes; statistics.filteredBytes = summary->filteredBytes; statistics.compressedBytes = summary->compressedBytes;
     statistics.print("ETOPO");
@@ -487,7 +505,7 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
 
     RuntimeAssets::HeightmapPackHeader header{};
     header.magic = RuntimeAssets::kHeightmapPackMagic; header.version = RuntimeAssets::kHeightmapFormatVersion;
-    header.flags = RuntimeAssets::kLittleEndianFlag; header.headerSize = sizeof(header); header.tileCount = static_cast<std::uint32_t>(records.size());
+    header.flags = RuntimeAssets::kLittleEndianFlag; header.headerSize = sizeof(header); header.tileCount = summary->storedTiles;
     header.tileResolution = RuntimeAssets::kHeightmapTileResolution; header.tileStride = RuntimeAssets::kHeightmapTileStride;
     header.sampleType = static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias);
     header.invalidHeight = RuntimeAssets::kHeightmapInvalidHeight; header.filterType = static_cast<std::uint32_t>(RuntimeAssets::HeightFilterType::SerpentineDeltaZigZagBytePlanes);
@@ -520,7 +538,7 @@ bool EtopoHeightmapConverter::run(const EtopoConversionConfig& config, EtopoConv
         << "Raw/filtered/compressed: " << summary->rawBytes << " / " << summary->filteredBytes << " / " << summary->compressedBytes
         << " bytes; ratio " << (summary->compressedBytes ? static_cast<double>(summary->rawBytes) / summary->compressedBytes : 0.0) << ":1\n"
         << "Generated elevation range: " << summary->minHeight << ".." << summary->maxHeight << " m\n"
-        << "Previews: etopo2022_preview.png and etopo2022_tiles_preview.png (dense 32x32 decoded tile thumbnails in blob order)\n";
+        << "Previews: etopo2022_preview.png and etopo2022_tiles_preview.png (dense 32x32 decoded tile thumbnails in canonical index order)\n";
     if (!ValidateBorders(edges, error)) return false;
     std::cout << "Validation: quantization, filter, LZ4, shared borders, index, and reopened pack succeeded\n";
     return true;

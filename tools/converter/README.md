@@ -40,7 +40,7 @@ The converter currently builds six asset groups:
 
 All generated outputs are written to `assets/runtime` and then staged into `build/<Config>/app/assets/runtime` by the main build. Converter executables are isolated under `build/Assets/<Config>/converter`.
 
-Heightmap tiles must fit the runtime's 128 KiB compressed staging bound. New conversions retry oversized fast-LZ4 output with LZ4-HC and fail explicitly if the lossless result still cannot fit. Existing version 3 packs can be migrated without regenerating elevation or changing quantization:
+Heightmap tiles must fit the runtime's 128 KiB compressed staging bound (at most 131,072 bytes). New conversions use `LZ4_compress_HC` directly for every tile at `LZ4HC_CLEVEL_MAX`, the same configuration formerly used for oversized-tile retries. An oversized HC result fails with the mosaic/tile coordinate and compressed size. The LZ4 block format and runtime decompressor are unchanged. Existing version 3 packs can be migrated without regenerating elevation or changing quantization:
 
 ```powershell
 .\build\Assets\Release\converter\converter.exe heightmap-repack assets\runtime\etopo2022.assetbin
@@ -115,6 +115,24 @@ The configuration argument is optional and defaults to Release. These commands
 build the standalone converter into `build\Assets\Release\converter` and
 `build\Assets\Debug\converter`, respectively. They do not generate any asset packs;
 conversions are explicit offline operations.
+
+ETOPO and Japan DEM10 convert tiles with a fixed number of long-lived
+`std::async(std::launch::async, ...)` workers, based on hardware concurrency
+(at least one, capped by candidate tile count). Each worker reuses conversion,
+filter, compression-output, and round-trip buffers. The existing stateless HC
+API is safe for independent calls. ETOPO shares its immutable decoded float
+raster; each Japan worker owns its own eight-raster FIFO cache, TIFF read
+buffer, retained decoded ETOPO cache, and ETOPO file streams. Evicted raster
+allocations are reused. There is no source-cache synchronization or new tuning
+option. Japan workers retain their contexts across all four mosaics.
+
+Completed payloads append under a short output lock in completion order.
+Sampling, quantization, compression, and verification run outside that lock.
+Index records remain canonical (`tileY`, then `tileX`), independent of physical
+blob order. Format v4 stores every spatial slot and runtime lookup directly
+indexes the table without binary search. Progress counts completed tiles, and the final worker report
+includes peak concurrent tile conversions. Worker failures are joined and
+reported with dataset/mosaic and tile context before index publication.
 
 All converters report progress unconditionally. File-based packs print each
 source file, generated item, and serialized blob as it is processed. The ETOPO
@@ -197,22 +215,28 @@ The dependency-independent filter/projection checks can be run without the TIFF:
 
 The output is:
 
-- `etopo2022.assetbin`: compact header and tile-coordinate index;
+- `etopo2022.assetbin`: header and full 256×256 spatial tile table;
 - `etopo2022.heightbin`: independently compressed tile blobs;
 - `etopo2022_preview.png`: diagnostic hypsometric projection preview with tile lines (not runtime data).
-- `etopo2022_tiles_preview.png`: dense near-square contact sheet of 32x32 thumbnails decoded from every indexed LZ4 tile blob, in index/blob order. Fully invalid discarded tiles consume no cell; only unused cells at the end of the final row are empty (not runtime data).
+- `etopo2022_tiles_preview.png`: dense near-square contact sheet of 32x32 thumbnails decoded from every indexed LZ4 tile blob, in canonical index order. Fully invalid discarded tiles consume no cell; only unused cells at the end of the final row are empty (not runtime data).
 
-Projection version 3 is a fixed Airocean "one-island" icosahedral gnomonic net on the authalic sphere (radius `6,371,007.180918475 m`). Its face tree keeps the north-pole faces connected and routes most cuts through oceans; three faces are subdivided so the cuts pass around Japan and Australia. The globe orientation is `(-83.65929, 25.44458, -87.45184)` degrees and the unfolded net is rotated `-60 degrees` in atlas space. All three orientation components and the atlas rotation are stored explicitly in format-version-3 pack headers, while the precise cut topology is identified by projection version 3. This is an Airocean-layout gnomonic implementation, not Fuller's proprietary per-face transform. The atlas coordinate system is independent of Codex's `Position` grid and does not bake in runtime terrain resolution or world placement.
+Projection version 3 is a fixed Airocean "one-island" icosahedral gnomonic net on the authalic sphere (radius `6,371,007.180918475 m`). Its face tree keeps the north-pole faces connected and routes most cuts through oceans; three faces are subdivided so the cuts pass around Japan and Australia. The globe orientation is `(-83.65929, 25.44458, -87.45184)` degrees and the unfolded net is rotated `-60 degrees` in atlas space. All three orientation components and the atlas rotation are stored explicitly in format-version-4 pack headers, while the precise cut topology is identified by projection version 3. This is an Airocean-layout gnomonic implementation, not Fuller's proprietary per-face transform. The atlas coordinate system is independent of Codex's `Position` grid and does not bake in runtime terrain resolution or world placement.
 
 Tiles have a physical footprint of exactly `524,288 m` and signed `int8` coordinates. Tile `(x,y)` begins at atlas coordinate `(x * 524288, y * 524288)`. Each tile stores `256x256` signed 16-bit quantized samples with per-tile float scale and bias on a global lattice with a stride of 255 intervals, so neighboring tiles duplicate the floating-point border before independent quantization. Normal codes `-32766..32767` decode as bias + code * scale; `INT16_MIN + 1` decodes to exact zero independently of metadata. `INT16_MIN` marks samples outside the unfolded projection; only completely invalid tiles are omitted. Ocean and bathymetry remain in the pack.
 
-Each tile is filtered independently using serpentine spatial traversal, modulo-16-bit first differences, signed ZigZag folding, and low/high byte planes, then compressed as its own normal LZ4 blob. The small index contains every tile's signed coordinate, blob offset, compressed size, fixed filtered size, valid sample count, and float scale/bias in a 32-byte record, so tile lookup never requires scanning `heightbin`.
+Each tile is filtered independently using serpentine spatial traversal, modulo-16-bit first differences, signed ZigZag folding, and low/high byte planes, then HC-compressed as an ordinary LZ4 block. The full table contains 65,536 32-byte records. Slot `(tileY + 128) * 256 + (tileX + 128)` describes one signed-coordinate tile; callers reject coordinates outside -128..127 before indexing. Present records retain coordinate, blob offset, compressed size, filtered size, valid count, and float scale/bias. Absent records are entirely zero; `compressedSize == 0` is the presence sentinel, so blob offset zero remains valid.
 
-Index records are sorted deterministically by `tileY`, then `tileX`.
+Every index is exactly 2,097,384 bytes: a 232-byte header followed by the 2 MiB table. Header `tileCount` counts present tiles, not table slots. Runtime and converter sampling use direct O(1) spatial lookup; previews skip absent slots and retain their dense thumbnail layout.
 
-ETOPO caches the source raster as float and preserves floating-point precision through projection and bilinear sampling, quantizing only completed tiles. This intentionally increases offline RAM usage. Format version 3 rejects old packs: regenerate ETOPO first, then all Japan DEM10 packs. Converter diagnostics report quantization steps, maximum/RMS error, decoded ranges, and decoded shared-border mismatch with the participating steps and expected bound.
+ETOPO caches the source raster as float and preserves floating-point precision through projection and bilinear sampling, quantizing only completed tiles. This intentionally increases offline RAM usage. Format v4 rejects sparse v3 indices at runtime. Use `converter.exe heightmap-reindex <assetbin>` on each v3 pack to rewrite only its index, preserving all compressed payloads and offsets; the original index is saved as `.assetbin.before-spatial`. The command validates an already-v4 pack without rewriting it. If an old v3 pack has oversized blobs, run `heightmap-repack` before reindexing. Packs older than v3 still need regeneration in ETOPO-then-DEM10 order. Converter diagnostics report quantization steps, maximum/RMS error, decoded ranges, and decoded shared-border mismatch with the participating steps and expected bound.
 
 `build/Release/tests/heightmap_dataset_tests.exe assets/runtime` optionally checks all five generated packs through the production runtime reader, including exact-zero positive edges. The default test invocation uses synthetic fixtures and requires no generated assets.
+
+The synthetic tests also force unordered parallel appends, verify context reuse
+and worker failure propagation, and compare HC output with the reference API.
+`heightmap_dataset_tests.exe --compare <first.assetbin> <second.assetbin>` checks
+logical equality of tile presence, quantization metadata, and decompressed
+filtered bytes while allowing different compressed sizes and physical offsets.
 
 Generation validates source dimensions/georeferencing/sample type, exhaustively self-tests the reversible residual transform, round-trips every filtered/compressed tile, compares every emitted shared edge, validates index ranges and uniqueness, then closes and reopens both output files and decodes all blobs. Runtime sampling, affine world placement, and final terrain composition are implemented by the runtime; user-created heightmap layers remain outside this converter stage.
 

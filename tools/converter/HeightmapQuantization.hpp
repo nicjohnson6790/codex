@@ -37,6 +37,16 @@ struct Statistics
     double maxError = 0, squaredError = 0;
     std::uint64_t count = 0, exactZeros = 0, rawBytes = 0, filteredBytes = 0, compressedBytes = 0;
 
+    void merge(const Statistics& other)
+    {
+        minimum = std::min(minimum, other.minimum); maximum = std::max(maximum, other.maximum);
+        decodedMinimum = std::min(decodedMinimum, other.decodedMinimum); decodedMaximum = std::max(decodedMaximum, other.decodedMaximum);
+        minStep = std::min(minStep, other.minStep); maxStep = std::max(maxStep, other.maxStep);
+        maxError = std::max(maxError, other.maxError); squaredError += other.squaredError;
+        count += other.count; exactZeros += other.exactZeros;
+        rawBytes += other.rawBytes; filteredBytes += other.filteredBytes; compressedBytes += other.compressedBytes;
+    }
+
     void print(const char* label) const
     {
         std::cout << std::setprecision(9) << label << " floating-point range: " << minimum << ".." << maximum
@@ -108,16 +118,15 @@ inline bool Encode(const FloatTile& values, const Kinds& kinds, EncodedTile& enc
 inline bool CompressFiltered(std::span<const std::byte> filtered, std::vector<std::byte>& compressed, std::string* error)
 {
     if (filtered.size() != RuntimeAssets::kHeightmapFilteredTileBytes) return false;
-    if (!RuntimeAssets::CompressBytes(RuntimeAssets::CompressionType::Lz4, filtered, &compressed, error)) return false;
-    if (compressed.size() <= filtered.size()) return true;
-    // LZ4's fast encoder may expand a tile. Keep the unchanged format while
-    // enforcing the runtime's fixed input capacity with an offline HC retry.
-    compressed.resize(filtered.size());
+    // Keep the existing stateless HC API and level. The full output bound lets
+    // failures report the actual size, without changing the <=128 KiB policy.
+    compressed.resize(LZ4_compressBound(static_cast<int>(filtered.size())));
     const int size = LZ4_compress_HC(reinterpret_cast<const char*>(filtered.data()), reinterpret_cast<char*>(compressed.data()),
         static_cast<int>(filtered.size()), static_cast<int>(compressed.size()), LZ4HC_CLEVEL_MAX);
-    if (size <= 0)
+    if (size <= 0 || static_cast<std::size_t>(size) > filtered.size())
     {
-        if (error) *error = "heightmap tile cannot fit the 128 KiB compressed runtime bound";
+        if (error) *error = "LZ4_HC heightmap tile compressed size " + std::to_string(size) +
+            " bytes exceeds the 131072-byte runtime bound or compression failed";
         compressed.clear();
         return false;
     }
@@ -126,10 +135,9 @@ inline bool CompressFiltered(std::span<const std::byte> filtered, std::vector<st
 }
 
 inline bool RoundTrip(const EncodedTile& tile, std::vector<std::byte>& filtered,
-    std::vector<std::byte>& compressed, std::string* error)
+    std::vector<std::byte>& compressed, std::vector<std::byte>& restored,
+    std::vector<std::int16_t>& decoded, std::string* error)
 {
-    std::vector<std::byte> restored;
-    std::vector<std::int16_t> decoded;
     if (!HeightmapTileFilter::Encode(tile, &filtered, error) ||
         !CompressFiltered(filtered, compressed, error) ||
         !RuntimeAssets::DecompressBytes(RuntimeAssets::CompressionType::Lz4, compressed, filtered.size(), &restored, error) ||
@@ -137,6 +145,14 @@ inline bool RoundTrip(const EncodedTile& tile, std::vector<std::byte>& filtered,
     if (!std::equal(tile.begin(), tile.end(), decoded.begin(), decoded.end()))
     { if (error) *error = "quantized tile compression round-trip failed"; return false; }
     return true;
+}
+
+inline bool RoundTrip(const EncodedTile& tile, std::vector<std::byte>& filtered,
+    std::vector<std::byte>& compressed, std::string* error)
+{
+    std::vector<std::byte> restored;
+    std::vector<std::int16_t> decoded;
+    return RoundTrip(tile, filtered, compressed, restored, decoded, error);
 }
 
 inline bool SelfTest(std::string* error)

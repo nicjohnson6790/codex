@@ -2,6 +2,7 @@
 #include "EtopoHeightmapConverter.hpp"
 #include "JapanDem10Converter.hpp"
 #include "HeightmapRepack.hpp"
+#include "HeightmapReindex.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -65,6 +66,7 @@ void PrintUsage()
         << "  converter.exe pbr\n"
         << "  converter.exe roboto\n"
         << "  converter.exe heightmap-repack <assetbin>\n"
+        << "  converter.exe heightmap-reindex <assetbin>\n"
         << "  converter.exe etopo2022 [--source <tif>] [--out <directory>] [--verbose|--self-test]\n"
         << "  converter.exe japan-dem10 [--source <directory>] [--etopo <assetbin>] [--out <directory>] [--verbose|--self-test]\n"
         << "  converter.exe --source <path> --out <path> --name <pack>\n";
@@ -181,6 +183,16 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (argc >= 2 && std::string_view(argv[1]) == "heightmap-reindex")
+    {
+        try
+        {
+            if (argc != 3) throw std::runtime_error("usage: converter.exe heightmap-reindex <assetbin>");
+            ReindexHeightmap(argv[2]);
+            return 0;
+        }
+        catch (const std::exception& ex) { std::cerr << "Heightmap reindex failed: " << ex.what() << '\n'; return 1; }
+    }
     if (argc >= 2 && std::string_view(argv[1]) == "heightmap-repack")
     {
         try

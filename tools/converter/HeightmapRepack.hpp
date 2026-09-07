@@ -1,6 +1,7 @@
 #pragma once
 
 #include "HeightmapQuantization.hpp"
+#include "assets/RuntimeHeightmapIndex.hpp"
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -12,10 +13,11 @@ inline void RepackHeightmap(const std::filesystem::path &indexPath)
     std::ifstream index(indexPath, std::ios::binary);
     RuntimeAssets::HeightmapPackHeader header{};
     index.read(reinterpret_cast<char *>(&header), sizeof(header));
-    if (!index || header.magic != RuntimeAssets::kHeightmapPackMagic || header.version != RuntimeAssets::kHeightmapFormatVersion ||
+    if (!index || header.magic != RuntimeAssets::kHeightmapPackMagic || (header.version != 3 && header.version != RuntimeAssets::kHeightmapFormatVersion) ||
         header.compressionType != static_cast<unsigned>(RuntimeAssets::CompressionType::Lz4))
-        throw std::runtime_error("repack requires a version 3 LZ4 heightmap pack");
-    std::vector<RuntimeAssets::HeightmapTileRecord> records(header.tileCount);
+        throw std::runtime_error("repack requires a version 3 or 4 LZ4 heightmap pack");
+    if (header.tileCount > RuntimeAssets::kHeightmapTileTableCount) throw std::runtime_error("invalid heightmap tile count");
+    std::vector<RuntimeAssets::HeightmapTileRecord> records(header.version == 3 ? header.tileCount : RuntimeAssets::kHeightmapTileTableCount);
     index.seekg(header.tileRecordOffset);
     index.read(reinterpret_cast<char *>(records.data()), records.size() * sizeof(records[0]));
     if (!index) throw std::runtime_error("cannot read heightmap index");

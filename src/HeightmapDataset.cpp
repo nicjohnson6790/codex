@@ -1,6 +1,7 @@
 #include "HeightmapDataset.hpp"
 
 #include "assets/RuntimeAssetCompression.hpp"
+#include "assets/RuntimeHeightmapIndex.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -106,49 +107,21 @@ std::shared_ptr<EtopoHeightmapDataset> EtopoHeightmapDataset::open(const std::fi
     std::ifstream input(indexPath, std::ios::binary);
     auto result = std::shared_ptr<EtopoHeightmapDataset>(new EtopoHeightmapDataset());
     result->m_datasetId = datasetId;
-    if (!input.read(reinterpret_cast<char *>(&result->m_header), sizeof(result->m_header)))
-    {
-        error = "could not read ETOPO heightmap header: " + indexPath.string();
-        return {};
-    }
+    if (!RuntimeAssets::ReadHeightmapIndex(input, result->m_header, result->m_records, &error)) return {};
     const auto &h = result->m_header;
-    if (h.magic != RuntimeAssets::kHeightmapPackMagic || h.version != RuntimeAssets::kHeightmapFormatVersion ||
-        h.tileResolution != RuntimeAssets::kHeightmapTileResolution || h.tileStride != RuntimeAssets::kHeightmapTileStride ||
-        h.sampleType != static_cast<std::uint32_t>(RuntimeAssets::HeightSampleType::QuantizedInt16ScaleBias) ||
-        h.filterType != static_cast<std::uint32_t>(RuntimeAssets::HeightFilterType::SerpentineDeltaZigZagBytePlanes) ||
-        h.compressionType != static_cast<std::uint32_t>(RuntimeAssets::CompressionType::Lz4))
+    bool first = true;
+    for (const auto &record : result->m_records)
     {
-        error = "unsupported runtime heightmap format; regenerate ETOPO, then Japan DEM10 packs";
-        return {};
-    }
-    result->m_records.resize(h.tileCount);
-    input.seekg(static_cast<std::streamoff>(h.tileRecordOffset));
-    if (!input.read(reinterpret_cast<char *>(result->m_records.data()),
-                    static_cast<std::streamsize>(result->m_records.size() * sizeof(result->m_records.front()))))
-    {
-        error = "could not read ETOPO tile index";
-        return {};
-    }
-    if (!result->m_records.empty())
-    {
-        result->m_tileRange = {
-            result->m_records.front().tileX,
-            result->m_records.front().tileY,
-            result->m_records.front().tileX,
-            result->m_records.front().tileY,
-        };
-        for (const auto &record : result->m_records)
+        if (!record.compressedSize) continue;
+        if (first)
         {
-            if (!std::isfinite(record.sampleScale) || record.sampleScale < 0 || !std::isfinite(record.sampleBias))
-            {
-                error = "invalid heightmap scale/bias";
-                return {};
-            }
-            result->m_tileRange.minX = std::min<std::int32_t>(result->m_tileRange.minX, record.tileX);
-            result->m_tileRange.minY = std::min<std::int32_t>(result->m_tileRange.minY, record.tileY);
-            result->m_tileRange.maxX = std::max<std::int32_t>(result->m_tileRange.maxX, record.tileX);
-            result->m_tileRange.maxY = std::max<std::int32_t>(result->m_tileRange.maxY, record.tileY);
+            result->m_tileRange = {record.tileX, record.tileY, record.tileX, record.tileY};
+            first = false;
         }
+        result->m_tileRange.minX = std::min<std::int32_t>(result->m_tileRange.minX, record.tileX);
+        result->m_tileRange.minY = std::min<std::int32_t>(result->m_tileRange.minY, record.tileY);
+        result->m_tileRange.maxX = std::max<std::int32_t>(result->m_tileRange.maxX, record.tileX);
+        result->m_tileRange.maxY = std::max<std::int32_t>(result->m_tileRange.maxY, record.tileY);
     }
     result->m_dataPath = indexPath.parent_path() / h.dataFilename.data();
     if (!std::filesystem::exists(result->m_dataPath))
@@ -161,11 +134,9 @@ std::shared_ptr<EtopoHeightmapDataset> EtopoHeightmapDataset::open(const std::fi
 
 const RuntimeAssets::HeightmapTileRecord *EtopoHeightmapDataset::findRecord(std::int32_t tileX, std::int32_t tileY) const
 {
-    const auto it = std::lower_bound(
-        m_records.begin(), m_records.end(), std::pair{tileY, tileX}, [](const RuntimeAssets::HeightmapTileRecord &record, const auto &key) {
-            return std::pair{static_cast<std::int32_t>(record.tileY), static_cast<std::int32_t>(record.tileX)} < key;
-        });
-    return it != m_records.end() && it->tileX == tileX && it->tileY == tileY ? &*it : nullptr;
+    if (!RuntimeAssets::HeightmapTileInRange(tileX, tileY)) return nullptr;
+    const auto &record = m_records[RuntimeAssets::HeightmapTileTableIndex(tileX, tileY)];
+    return record.compressedSize ? &record : nullptr;
 }
 
 bool EtopoHeightmapDataset::containsTile(std::int32_t tileX, std::int32_t tileY) const
