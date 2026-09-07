@@ -65,6 +65,7 @@ layout(location = 2) in float fragShoreFactor;
 layout(location = 3) in float fragLocalDepth;
 layout(location = 4) flat in uint fragHasTerrainSlice;
 layout(location = 5) in float fragViewDistance;
+layout(location = 6) in vec2 fragWaveDisplacementXZ;
 
 layout(location = 0) out vec4 outColor;
 
@@ -213,6 +214,9 @@ void main()
             farFoamFade;
     }
     bool evaluateFoam = drawFoam && farFoamFade > 0.0;
+    // Attach the entire sampled foam pattern to the rendered surface, including
+    // coverage and its warp. Displacement already includes LOD/shallow damping.
+    vec2 foamXZ = localXZ - fragWaveDisplacementXZ;
     vec4 historyNoiseSample = vec4(0.5);
     vec2 historyOffsetWorld = vec2(0.0);
     bool historyOffsetReady = false;
@@ -261,11 +265,11 @@ void main()
             if (!historyOffsetReady)
             {
                 historyNoiseSample = texture(foamDetailNoiseTexture,
-                    water.foamOriginPhasesA.xy + localXZ * water.foamDetailShape.z);
+                    water.foamOriginPhasesA.xy + foamXZ * water.foamDetailShape.z);
                 historyOffsetWorld = (historyNoiseSample.rg - vec2(0.5)) * water.foamDetailShape.w;
                 historyOffsetReady = true;
             }
-            vec2 historyUv = cascadeOriginPhase(cascadeIndex) + (localXZ + historyOffsetWorld) / worldSize;
+            vec2 historyUv = cascadeOriginPhase(cascadeIndex) + (foamXZ + historyOffsetWorld) / worldSize;
             float cascadeFoam = saturate(texture(foamTexture, vec3(historyUv, float(cascadeIndex))).r);
             foamCoverage = max(
                 foamCoverage,
@@ -282,9 +286,9 @@ void main()
     {
         vec4 worldNoiseSample = historyOffsetReady
             ? historyNoiseSample
-            : texture(foamDetailNoiseTexture, water.foamOriginPhasesA.xy + localXZ * water.foamDetailShape.z);
+            : texture(foamDetailNoiseTexture, water.foamOriginPhasesA.xy + foamXZ * water.foamDetailShape.z);
         vec4 breakupNoiseSample = texture(foamDetailNoiseTexture,
-            water.foamOriginPhasesA.zw + localXZ * water.foamDetailBreakup.y);
+            water.foamOriginPhasesA.zw + foamXZ * water.foamDetailBreakup.y);
         vec2 detailOffsetWorld = (worldNoiseSample.ba - vec2(0.5)) * water.foamDetailBreakup.x;
         float historySignal = foamCoverage;
         float decaySignal = 1.0 - historySignal;
@@ -300,7 +304,7 @@ void main()
             mix(water.foamDetailRidges.x, water.foamDetailRidges.z, evolutionT),
             mix(water.foamDetailRidges.y, water.foamDetailRidges.w, evolutionT));
         vec2 detailBaseUv = water.foamOriginPhasesB.xy +
-            (localXZ + detailOffsetWorld) / max(water.foamDetailShape.x, 0.0001);
+            (foamXZ + detailOffsetWorld) / max(water.foamDetailShape.x, 0.0001);
         vec2 detailUv =
             detailBaseUv +
             (slope * 0.022);

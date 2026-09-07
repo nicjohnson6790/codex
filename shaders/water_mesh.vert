@@ -77,6 +77,7 @@ layout(location = 2) out float fragShoreFactor;
 layout(location = 3) out float fragLocalDepth;
 layout(location = 4) flat out uint fragHasTerrainSlice;
 layout(location = 5) out float fragViewDistance;
+layout(location = 6) out vec2 fragWaveDisplacementXZ;
 
 const uint kHeightmapResolution = 259u;
 const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
@@ -203,6 +204,7 @@ void main()
     }
 
     position += displacement;
+    fragWaveDisplacementXZ = displacement.xz;
 
     if (hasTerrainSlice)
     {

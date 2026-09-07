@@ -211,6 +211,7 @@ WorldGridQuadtreeWaterManager is primarily a per-frame visibility/emission manag
 - Default configuration supports four 512×512 cascades; cascades may update at different frame modulo rates (typically 1, 1, 2, and 4) to reduce compute cost.
 
 - Foam uses history read/write textures and a validity flag, making it explicitly temporal state rather than a frame-local result.
+- Both water vertex shaders pass the final rendered horizontal FFT displacement through one interpolated `vec2`. Foam sampling subtracts it from the render-relative fragment position at full strength before the existing periodic phase/scale transforms. Coverage/history lookup, its noise warp, breakup, and SDF detail all share this coordinate, so the whole sampled pattern follows the waves. Stored history generation/decay is unchanged. Existing displacement LOD and shallow damping apply once; non-foam slope, depth, and optical sampling keep their original coordinates.
 
 ### 6.2 Draw and dependencies
 
