@@ -1548,11 +1548,14 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
         static_cast<float>(m_activeCameraPosition.localPosition().y),
         lightingSystem);
     uniforms.atmosphereOptics = skyboxRenderer.buildAtmosphereOptics(lightingSystem);
+    const auto& medium = skyboxRenderer.waterMediumSettings();
+    uniforms.waterAbsorption = glm::vec4(medium.absorption, 0.0f);
+    uniforms.waterScattering = glm::vec4(medium.scattering, medium.exposure);
     uniforms.skyRotation = sharedSkyUniforms.skyRotation;
     uniforms.atmosphereParams = sharedSkyUniforms.atmosphereParams;
     uniforms.sunDirectionTimeOfDay = sharedSkyUniforms.sunDirectionTimeOfDay;
     uniforms.opticalParams = glm::vec4(
-        AppConfig::Water::kBaseReflectance,
+        0.0f, // Reserved; shader derives dielectric F0 from its fixed water IOR.
         AppConfig::Water::kBaseRoughness,
         AppConfig::Water::kSlopeRoughnessStrength,
         AppConfig::Water::kEnvironmentReflectionStrength);

@@ -190,7 +190,6 @@ inline constexpr float kMidWaterDepthStartMeters = 3.0f;
 inline constexpr float kMidWaterDepthEndMeters = 18.0f;
 inline constexpr float kDeepWaterDepthStartMeters = 16.0f;
 inline constexpr float kDeepWaterDepthEndMeters = 42.0f;
-inline constexpr float kBaseReflectance = 0.02037f;
 inline constexpr float kBaseRoughness = 0.08f;
 inline constexpr float kSlopeRoughnessStrength = 0.18f;
 inline constexpr float kEnvironmentReflectionStrength = 1.0f;

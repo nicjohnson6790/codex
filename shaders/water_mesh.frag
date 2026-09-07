@@ -2,6 +2,8 @@
 #extension GL_GOOGLE_include_directive : require
 #include "atmosphere.glsl"
 #include "water_displacement.glsl"
+#include "water_medium.glsl"
+#include "water_interface.glsl"
 
 layout(set=3, binding=0) uniform WaterUniforms
 {
@@ -46,6 +48,8 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 foamOriginPhasesA;
     vec4 foamOriginPhasesB;
     AtmosphereOptics atmosphereOptics;
+    vec4 waterAbsorption;
+    vec4 waterScattering;
 } water;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
@@ -186,12 +190,6 @@ float phaseSchlick(float viewLightDot, float anisotropy)
 
 void main()
 {
-    // Temporary opaque underside; the optical boundary upgrade is separate.
-    if (!gl_FrontFacing)
-    {
-        outColor = vec4(water.deepWaterColor.rgb, 1.0);
-        return;
-    }
     vec2 localXZ = fragWorldPosition.xz;
     uint cascadeCount = uint(max(water.waterParams.w, 0.0));
     float metersPerPixelAtView = metersPerPixel(fragViewDistance);
@@ -369,14 +367,43 @@ void main()
 
     vec3 detailNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
     vec3 normal = normalize(mix(detailNormal, vec3(0.0, 1.0, 0.0), farNormalT));
-    vec3 viewDir = normalize(-fragWorldPosition);
+    vec3 viewDir = -fragWorldPosition / max(length(fragWorldPosition), 1.0e-7);
+    if (!gl_FrontFacing)
+    {
+        // Physical normal points water -> air. The water-side interface normal
+        // points toward the viewer; the incident ray travels camera -> surface.
+        vec3 interfaceNormal = -normal;
+        // Filtered shading slopes can face away from a visible geometric face.
+        // Project to the view hemisphere continuously rather than flipping the
+        // physical wave normal and transmitting into the wrong medium.
+        float facing = dot(interfaceNormal, viewDir);
+        interfaceNormal = normalize(interfaceNormal + viewDir * max(1.0e-5 - facing, 0.0));
+        WaterInterface boundary = waterToAirInterface(-viewDir, interfaceNormal);
+        float surfaceHeight = water.cameraAndTime.z + fragWorldPosition.y;
+        // The existing medium is homogeneous/isotropic, so boundary.reflected
+        // has the same infinite-ray radiance in every direction. No camera leg.
+        vec3 reflectedWater = waterMediumRadiance(surfaceHeight, 0.0, 0.0, true,
+            water.sunDirectionTimeOfDay.xyz, water.atmosphereParams.x,
+            water.atmosphereOptics, water.waterAbsorption.rgb, water.waterScattering);
+        vec3 boundaryColor = reflectedWater;
+        if (boundary.reflectance < 1.0)
+        {
+            vec3 transmittedSky = sampleSkyRadiance(boundary.transmitted);
+            boundaryColor = mix(transmittedSky, reflectedWater, boundary.reflectance);
+        }
+        // Existing foam coverage occludes the clear boundary with medium light;
+        // it cannot add a glowing underside or restore transmission under TIR.
+        float undersideFoam = drawFoam ? saturate(foamSignal) : 0.0;
+        outColor = vec4(mix(boundaryColor, reflectedWater, undersideFoam), 1.0);
+        return;
+    }
     vec3 sunDirection = normalize(water.sunDirectionIntensity.xyz);
     vec3 halfVector = normalize(sunDirection + viewDir);
     float normalDotLight = saturate(dot(normal, sunDirection));
     float normalDotView = saturate(dot(normal, viewDir));
     float normalDotHalf = saturate(dot(normal, halfVector));
     float viewDotHalf = saturate(dot(viewDir, halfVector));
-    vec3 f0 = vec3(water.opticalParams.x);
+    vec3 f0 = vec3(kWaterF0);
     vec3 fresnelSpecular = fresnelSchlick(viewDotHalf, f0);
     vec3 fresnelReflection = fresnelSchlick(normalDotView, f0);
 

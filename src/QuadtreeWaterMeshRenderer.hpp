@@ -63,6 +63,8 @@ public:
         glm::vec4 foamOriginPhasesA{ 0.0f };
         glm::vec4 foamOriginPhasesB{ 0.0f };
         SkyboxRenderer::AtmosphereOptics atmosphereOptics{};
+        glm::vec4 waterAbsorption{};
+        glm::vec4 waterScattering{};
     };
 
     QuadtreeWaterMeshRenderer() = default;

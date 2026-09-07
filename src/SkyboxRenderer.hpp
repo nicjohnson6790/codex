@@ -118,6 +118,7 @@ public:
     [[nodiscard]] SDL_GPUSampler* cubemapSampler() const { return m_cubemapSampler; }
     [[nodiscard]] AtmosphereOptics buildAtmosphereOptics(const LightingSystem& lighting) const;
     [[nodiscard]] WaterMediumSettings& waterMediumSettings() { return m_waterMediumSettings; }
+    [[nodiscard]] const WaterMediumSettings& waterMediumSettings() const { return m_waterMediumSettings; }
     void resetAtmosphereSettings();
     void sanitizeAtmosphereSettings();
 

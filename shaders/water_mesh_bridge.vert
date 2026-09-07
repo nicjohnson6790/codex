@@ -46,6 +46,8 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 foamOriginPhasesA;
     vec4 foamOriginPhasesB;
     AtmosphereOptics atmosphereOptics;
+    vec4 waterAbsorption;
+    vec4 waterScattering;
 } water;
 
 layout(set=0, binding=0) uniform sampler2DArray displacementTexture;

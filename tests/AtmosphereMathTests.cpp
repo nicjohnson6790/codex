@@ -13,6 +13,7 @@ namespace ShaderMath
 using namespace glm;
 #include "../shaders/atmosphere.glsl"
 #include "../shaders/water_medium.glsl"
+#include "../shaders/water_interface.glsl"
 }
 
 namespace
@@ -41,6 +42,39 @@ int main()
 {
     using namespace ShaderMath;
     constexpr float top = 85000.0f;
+    // Compile the actual dielectric shader, checking Snell's law, critical angle,
+    // unit rays, rotational invariance, and Fresnel energy over the hemisphere.
+    const double critical = std::asin(1.0 / double(kWaterIor));
+    near(critical * 180.0 / 3.141592653589793, 48.6066, 0.00001);
+    float lastReflectance = 0.0f;
+    for (int step = 0; step <= 9000; ++step)
+    {
+        const double angle = step * (3.141592653589793 / 18000.0);
+        const glm::vec3 incident(float(std::sin(angle)), float(std::cos(angle)), 0.0f);
+        const auto boundary = waterToAirInterface(incident, glm::vec3(0,-1,0));
+        assert(std::isfinite(boundary.reflectance));
+        assert(boundary.reflectance >= lastReflectance - 2e-6f);
+        assert(boundary.reflectance <= 1.0f);
+        lastReflectance = boundary.reflectance;
+        near(glm::length(boundary.reflected), 1.0);
+        near(boundary.reflected.y, -incident.y);
+        if (angle >= critical)
+        {
+            near(boundary.reflectance, 1.0);
+            near(glm::length(boundary.transmitted), 0.0);
+        }
+        else
+        {
+            near(glm::length(boundary.transmitted), 1.0);
+            near(boundary.transmitted.x, kWaterIor * std::sin(angle));
+            assert(boundary.transmitted.y > 0.0f);
+        }
+        // Same incidence on a tilted wave (orthogonal change of basis).
+        const glm::vec3 n = glm::normalize(glm::vec3(0,-1,1));
+        const auto tilted = waterToAirInterface(glm::vec3(incident.x,0,0)-n*incident.y,n);
+        near(tilted.reflectance,boundary.reflectance,0.0001);
+    }
+    near(waterToAirInterface(glm::vec3(0,1,0),glm::vec3(0,-1,0)).reflectance,kWaterF0);
     near(atmosphereEntry(top+1000, -1, 3000, top), 1000);
     near(atmosphereExit(top+1000, -1, 3000, top), 3000);
     near(atmosphereEntry(top+1000, -1, 500, top), 500); // geometry before entry
@@ -93,6 +127,23 @@ int main()
         glm::vec4(1.7e-6f,4.2e-6f,1200.0f,0.88f),
         glm::vec4(0.650e-6f,1.881e-6f,0.085e-6f,25000.0f),
         glm::vec4(1.0f,0.97f,0.92f,4.8f)};
+    // Infinite reflected-ray radiance is the limit of the same finite camera
+    // medium, with zero starting depth. Zero coefficients and night stay finite.
+    const glm::vec3 absorption(0.15f,0.05f,0.02f);
+    const glm::vec4 scatter(0.006f,0.007f,0.013f,4.0f);
+    const glm::vec3 sun(0,1,0);
+    const auto infiniteWater = waterMediumRadiance(0,0,0,true,sun,top,optics,absorption,scatter);
+    const auto finiteWater = waterMediumRadiance(0,0,1e6f,false,sun,top,optics,absorption,scatter);
+    for (int channel=0; channel<3; ++channel)
+    {
+        near(infiniteWater[channel],finiteWater[channel]);
+        const double expected = optics.solar[channel] * airSunTransmission(0,sun,top,optics)[channel]
+            * (scatter.w / (4.0 * 3.141592653589793))
+            * scatter[channel] / (absorption[channel]+scatter[channel]);
+        near(infiniteWater[channel],expected);
+    }
+    near(glm::length(waterMediumRadiance(0,0,0,true,sun,top,optics,glm::vec3(0),glm::vec4(0))),0);
+    near(glm::length(waterMediumRadiance(0,0,0,true,-sun,top,optics,absorption,scatter)),0);
     for (float h : {-1000.0f,0.0f,top,top+0.1f,100000.0f})
     for (float dy : {-1.0f,-1e-8f,0.0f,1e-8f,1.0f})
     for (float sunY : {-1.0f,0.0f,1e-10f,1.0f})

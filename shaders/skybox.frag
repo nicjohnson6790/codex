@@ -111,14 +111,9 @@ void main()
         transmission = exp(-sigmaT * distance);
         if (pass == 2 && sun.y > 0.0)
         {
-            float sunPath = (surface-height) / max(sun.y,1.0e-7);
-            vec3 mediumSun = uniforms.optics.solar.rgb
-                * airSunTransmission(surface,sun,uniforms.atmosphereParams.x,uniforms.optics)
-                * exp(-sigmaT * sunPath);
-            scattering = mediumSun * (uniforms.waterScattering.w / (4.0 * 3.14159265359))
-                * vec3(waterScatteringIntegral(sigmaS.r,sigmaT.r,distance),
-                    waterScatteringIntegral(sigmaS.g,sigmaT.g,distance),
-                    waterScatteringIntegral(sigmaS.b,sigmaT.b,distance));
+            scattering = waterMediumRadiance(surface, surface-height, distance, false,
+                sun, uniforms.atmosphereParams.x, uniforms.optics,
+                uniforms.waterAbsorption.rgb, uniforms.waterScattering);
         }
     }
     else
