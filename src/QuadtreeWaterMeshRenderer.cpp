@@ -687,9 +687,7 @@ void QuadtreeWaterMeshRenderer::render(
         m_foamDetailNoiseTexture == nullptr ||
         m_waterSampler == nullptr ||
         skyboxRenderer.cubemapTexture() == nullptr ||
-        skyboxRenderer.atmosphereLutTexture() == nullptr ||
         skyboxRenderer.cubemapSampler() == nullptr ||
-        skyboxRenderer.atmosphereSampler() == nullptr ||
         terrainHeightmapBuffer == nullptr)
     {
         return;
@@ -722,16 +720,15 @@ void QuadtreeWaterMeshRenderer::render(
         };
         SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[6]{
             { m_displacementTexture, m_waterSampler },
             { m_slopeTexture, m_waterSampler },
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
-            { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
             { m_foamDetailSdfTexture, m_waterSampler },
             { m_foamDetailNoiseTexture, m_waterSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 6);
 
         const SDL_GPUBufferBinding vertexBinding{ mesh.vertexBuffer, 0 };
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
@@ -766,16 +763,15 @@ void QuadtreeWaterMeshRenderer::render(
         };
         SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[6]{
             { m_displacementTexture, m_waterSampler },
             { m_slopeTexture, m_waterSampler },
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
-            { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
             { m_foamDetailSdfTexture, m_waterSampler },
             { m_foamDetailNoiseTexture, m_waterSampler },
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 6);
 
         const SDL_GPUBufferBinding vertexBinding{ m_bridgeMesh.vertexBuffer, 0 };
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
@@ -844,7 +840,7 @@ void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& sha
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     pipelineInfo.rasterizer_state.enable_depth_clip = true;
     pipelineInfo.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -873,7 +869,7 @@ void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& sha
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             1,
             0,
-            7);
+            6);
         pipelineInfo.vertex_shader = vertexShader;
         pipelineInfo.fragment_shader = fragmentShader;
         SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
@@ -1551,6 +1547,7 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     const SkyboxRenderer::SharedSkyUniforms sharedSkyUniforms = skyboxRenderer.buildSharedSkyUniforms(
         static_cast<float>(m_activeCameraPosition.localPosition().y),
         lightingSystem);
+    uniforms.atmosphereOptics = skyboxRenderer.buildAtmosphereOptics(lightingSystem);
     uniforms.skyRotation = sharedSkyUniforms.skyRotation;
     uniforms.atmosphereParams = sharedSkyUniforms.atmosphereParams;
     uniforms.sunDirectionTimeOfDay = sharedSkyUniforms.sunDirectionTimeOfDay;
@@ -1930,4 +1927,43 @@ void QuadtreeWaterMeshRenderer::destroyInstanceBuffer()
     destroyInstanceResources(m_bridgeInstances);
     destroyInstanceResources(m_instances);
     m_coarseBridgeInstances.instanceCount = 0;
+}
+
+void QuadtreeWaterMeshRenderer::fillMediumUniforms(
+    SkyboxRenderer::FragmentUniforms& uniforms, float viewportHeight) const
+{
+    uniforms.waterParams = glm::vec4(m_settings.waterLevel,
+        static_cast<float>(m_settings.cascadeCount), m_settings.enabled ? 1.0f : 0.0f, 0.0f);
+    uniforms.waterFilter = glm::vec4(viewportHeight,
+        std::tan(AppConfig::Camera::kVerticalFovRadians * 0.5f),
+        AppConfig::Water::kCascadeDetailTexelFadeStart, AppConfig::Water::kCascadeDetailTexelFadeEnd);
+    uniforms.waterCameraLeaf = glm::vec4(0.0f, 0.0f, 1.0f, -1.0f);
+    uniforms.waterDepthParams = glm::vec4(AppConfig::Water::kShallowDepthFadeStartMeters,
+        AppConfig::Water::kShallowDepthFadeEndMeters, 15.0f, 0.0f);
+    // Forward existing emitted terrain metadata only; water height stays entirely GPU-side.
+    for (std::uint32_t i = 0; i < m_instances.instanceCount; ++i)
+    {
+        const auto& instance = m_instances.instances[i];
+        const float size = instance.leafParams.x;
+        if (instance.position[0] <= 0.0f && instance.position[0] + size > 0.0f &&
+            instance.position[2] <= 0.0f && instance.position[2] + size > 0.0f)
+        {
+            uniforms.waterDepthParams.z = static_cast<float>((instance.packedMetadata >> 16u) & 0xFFFFu);
+            uniforms.waterCameraLeaf = glm::vec4(instance.position[0], instance.position[2],
+                size, instance.leafParams.w > 0.5f ? instance.leafParams.z : -1.0f);
+            break;
+        }
+    }
+    for (std::uint32_t i = 0; i < std::min(m_settings.cascadeCount, AppConfig::Water::kMaxCascadeCount); ++i)
+    {
+        const auto& cascade = m_settings.cascades[i];
+        const float size = std::max(cascade.worldSizeMeters, 1.0f);
+        uniforms.waterSizes[i] = size;
+        uniforms.waterDamping[i] = cascade.shallowDampingStrength;
+        uniforms.waterShallowDepth[i] = cascade.shallowDampingDepthMeters;
+        const auto phase = WorldPhase::periodicWorldPhase(m_activeCameraPosition, static_cast<double>(1.0f / size));
+        auto& packed = i < 2u ? uniforms.waterPhasesA : uniforms.waterPhasesB;
+        packed[(i % 2u)*2u] = static_cast<float>(phase.x);
+        packed[(i % 2u)*2u+1u] = static_cast<float>(phase.y);
+    }
 }

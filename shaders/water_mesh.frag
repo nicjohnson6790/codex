@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "atmosphere.glsl"
+#include "water_displacement.glsl"
 
 layout(set=3, binding=0) uniform WaterUniforms
 {
@@ -42,15 +45,15 @@ layout(set=3, binding=0) uniform WaterUniforms
     vec4 cascadeOriginPhasesB;
     vec4 foamOriginPhasesA;
     vec4 foamOriginPhasesB;
+    AtmosphereOptics atmosphereOptics;
 } water;
 
 layout(set=2, binding=0) uniform sampler2DArray displacementTexture;
 layout(set=2, binding=1) uniform sampler2DArray slopeTexture;
 layout(set=2, binding=2) uniform sampler2DArray foamTexture;
 layout(set=2, binding=3) uniform samplerCube skyboxTexture;
-layout(set=2, binding=4) uniform sampler2DArray atmosphereLutTexture;
-layout(set=2, binding=5) uniform sampler2D foamDetailSdfTexture;
-layout(set=2, binding=6) uniform sampler2D foamDetailNoiseTexture;
+layout(set=2, binding=4) uniform sampler2D foamDetailSdfTexture;
+layout(set=2, binding=5) uniform sampler2D foamDetailNoiseTexture;
 
 layout(location = 0) in vec3 fragWorldPosition;
 layout(location = 1) flat in uint fragBandMask;
@@ -62,8 +65,6 @@ layout(location = 5) in float fragViewDistance;
 layout(location = 0) out vec4 outColor;
 
 const float kPi = 3.14159265358979323846;
-const float kInvLog256 = 0.18033688011112042;
-const float kAtmosphereLutMaxLayer = 31.0;
 
 float cascadeWorldSize(uint cascadeIndex)
 {
@@ -140,52 +141,15 @@ float sampleFoamSdf(vec2 uv, vec2 ridgeRange)
     return saturate(max(ridge, fill * 0.26));
 }
 
-float encodeLogDistance(float distanceThroughAtmosphere)
-{
-    float normalizedDistance = saturate(distanceThroughAtmosphere / max(water.atmosphereParams.y, 0.00001));
-    return log(normalizedDistance * 255.0 + 1.0) * kInvLog256;
-}
-
-vec4 sampleAtmosphere(vec3 worldDirection, float distanceThroughAtmosphere)
-{
-    float timeOfDay = fract(water.sunDirectionTimeOfDay.w);
-    vec3 cameraToSunLight = normalize(water.sunDirectionTimeOfDay.xyz);
-    float viewSunDot = dot(worldDirection, cameraToSunLight);
-    float distanceT = encodeLogDistance(distanceThroughAtmosphere);
-    float layerCoord = distanceT * kAtmosphereLutMaxLayer;
-    float layer0 = floor(layerCoord);
-    float layer1 = min(layer0 + 1.0, kAtmosphereLutMaxLayer);
-    float layerBlend = layerCoord - layer0;
-    vec2 lutUv = vec2(timeOfDay, (viewSunDot * 0.5) + 0.5);
-    vec4 sample0 = texture(atmosphereLutTexture, vec3(lutUv, layer0));
-    vec4 sample1 = texture(atmosphereLutTexture, vec3(lutUv, layer1));
-    return mix(sample0, sample1, layerBlend);
-}
-
-float backgroundAtmosphereDistance(vec3 worldDirection)
-{
-    const vec3 worldUp = vec3(0.0, 1.0, 0.0);
-    float cameraAltitude = water.atmosphereParams.w;
-    float topPlaneHeight = water.atmosphereParams.x - cameraAltitude;
-    float maxDistance = max(water.atmosphereParams.y, 0.00001);
-    float upDenominator = dot(worldDirection, worldUp);
-    if (topPlaneHeight > 0.0 && upDenominator > 0.00001)
-    {
-        return min(topPlaneHeight / upDenominator, maxDistance);
-    }
-
-    // Match the skybox path by treating the atmosphere as a deep medium
-    // instead of intersecting a hard ground plane at y = 0.
-    return maxDistance;
-}
-
 vec3 sampleSkyRadiance(vec3 worldDirection)
 {
     vec3 sampleDirection = transpose(mat3(water.skyRotation)) * worldDirection;
     vec3 skyboxColor = texture(skyboxTexture, sampleDirection).rgb;
-    float distanceThroughAtmosphere = backgroundAtmosphereDistance(worldDirection);
-    vec4 atmosphere = sampleAtmosphere(worldDirection, distanceThroughAtmosphere);
-    return mix(skyboxColor, atmosphere.rgb, atmosphere.a);
+    vec3 transmission, scattering;
+    evaluateAtmosphere(water.cameraAndTime.z + fragWorldPosition.y, worldDirection,
+        water.atmosphereParams.y, water.atmosphereParams.x, water.sunDirectionTimeOfDay.xyz,
+        water.atmosphereOptics, true, transmission, scattering);
+    return displaySkyRadiance(skyboxColor, transmission, scattering, water.atmosphereOptics);
 }
 
 float beckmannDistribution(float normalDotHalf, float roughness)
@@ -222,6 +186,12 @@ float phaseSchlick(float viewLightDot, float anisotropy)
 
 void main()
 {
+    // Temporary opaque underside; the optical boundary upgrade is separate.
+    if (!gl_FrontFacing)
+    {
+        outColor = vec4(water.deepWaterColor.rgb, 1.0);
+        return;
+    }
     vec2 localXZ = fragWorldPosition.xz;
     uint cascadeCount = uint(max(water.waterParams.w, 0.0));
     float metersPerPixelAtView = metersPerPixel(fragViewDistance);

@@ -814,9 +814,7 @@ void NearbyFoliageRenderer::render(
         m_aoTextureArray == nullptr ||
         m_subsurfaceTextureArray == nullptr ||
         skyboxRenderer.cubemapTexture() == nullptr ||
-        skyboxRenderer.atmosphereLutTexture() == nullptr ||
         skyboxRenderer.cubemapSampler() == nullptr ||
-        skyboxRenderer.atmosphereSampler() == nullptr ||
         m_drawMetadataBuffer == nullptr ||
         m_materialBuffer == nullptr)
     {
@@ -854,7 +852,7 @@ void NearbyFoliageRenderer::render(
 
     SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
 
-    SDL_GPUTextureSamplerBinding samplerBindings[8]{
+    SDL_GPUTextureSamplerBinding samplerBindings[7]{
         { m_baseColorTextureArray, m_materialSampler },
         { m_normalTextureArray, m_materialSampler },
         { m_roughnessTextureArray, m_materialSampler },
@@ -862,9 +860,8 @@ void NearbyFoliageRenderer::render(
         { m_aoTextureArray, m_materialSampler },
         { m_subsurfaceTextureArray, m_materialSampler },
         { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
-        { skyboxRenderer.atmosphereLutTexture(), skyboxRenderer.atmosphereSampler() },
     };
-    SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 8);
+    SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 7);
 
     SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 1);
 
@@ -875,6 +872,7 @@ void NearbyFoliageRenderer::render(
     fragmentUniforms.shadingParams0 = glm::vec4(0.04f, 1.0f, 0.45f, 0.0f);
     const SkyboxRenderer::SharedSkyUniforms sharedSkyUniforms =
         skyboxRenderer.buildSharedSkyUniforms(m_activeCameraPosition.localPosition().y, lightingSystem);
+    fragmentUniforms.atmosphereOptics = skyboxRenderer.buildAtmosphereOptics(lightingSystem);
     fragmentUniforms.skyRotation = sharedSkyUniforms.skyRotation;
     fragmentUniforms.atmosphereParams = sharedSkyUniforms.atmosphereParams;
     fragmentUniforms.sunDirectionTimeOfDay = sharedSkyUniforms.sunDirectionTimeOfDay;
@@ -940,7 +938,7 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
         SDL_GPU_SHADERSTAGE_FRAGMENT,
         1,
         1,
-        8);
+        7);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;

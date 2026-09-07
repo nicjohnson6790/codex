@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "SkyboxRenderer.hpp"
 #include "FoliageTypes.hpp"
 #include "AssetResidency.hpp"
 #include "RenderTypes.hpp"
@@ -23,7 +24,6 @@
 #include <vector>
 
 class LightingSystem;
-class SkyboxRenderer;
 
 class NearbyFoliageRenderer : private EngineRendererBase
 {
@@ -49,6 +49,7 @@ public:
         glm::mat4 skyRotation{ 1.0f };
         glm::vec4 atmosphereParams{ 0.0f };
         glm::vec4 sunDirectionTimeOfDay{ 0.0f };
+        SkyboxRenderer::AtmosphereOptics atmosphereOptics{};
     };
 
     struct alignas(16) DrawInstanceGpu

@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "atmosphere.glsl"
+#include "water_displacement.glsl"
 
 layout(set=1, binding=0) uniform WaterUniforms
 {
@@ -42,6 +45,7 @@ layout(set=1, binding=0) uniform WaterUniforms
     vec4 cascadeOriginPhasesB;
     vec4 foamOriginPhasesA;
     vec4 foamOriginPhasesB;
+    AtmosphereOptics atmosphereOptics;
 } water;
 
 layout(set=0, binding=0) uniform sampler2DArray displacementTexture;
@@ -112,13 +116,6 @@ float cascadeShallowDepth(uint cascadeIndex)
     }
 
     return water.cascadeShallowDepthB[cascadeIndex - 4u];
-}
-
-float cascadeShallowFade(uint cascadeIndex, float localDepth)
-{
-    float fadeStart = max(cascadeShallowDepth(cascadeIndex), water.depthEffectParams.y + 0.001);
-    float fadeEnd = max(water.depthEffectParams.y, 0.0);
-    return smoothstep(fadeEnd, fadeStart, localDepth);
 }
 
 float metersPerPixel(float viewDistance)
@@ -197,11 +194,10 @@ void main()
             continue;
         }
 
-        vec2 uv = cascadeOriginPhase(cascadeIndex) + position.xz / worldSize;
         float dampingStrength = max(cascadeShallowDamping(cascadeIndex), 0.0);
-        float shallowFade = hasTerrainSlice ? cascadeShallowFade(cascadeIndex, localDepth) : 1.0;
-        float cascadeFade = mix(1.0, shallowFade, clamp(dampingStrength, 0.0, 8.0));
-        displacement += texture(displacementTexture, vec3(uv, float(cascadeIndex))).xyz * (cascadeFade * detailWeight);
+        float cascadeFade = hasTerrainSlice ? waterShallowFade(localDepth,
+            cascadeShallowDepth(cascadeIndex), water.depthEffectParams.y, dampingStrength) : 1.0;
+        displacement += sampleWaterDisplacement(displacementTexture, position.xz, cascadeOriginPhase(cascadeIndex), worldSize, cascadeIndex) * (cascadeFade * detailWeight);
     }
 
     position += displacement;

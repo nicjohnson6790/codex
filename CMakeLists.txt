@@ -203,7 +203,7 @@ compile_shader(
     ${FOLIAGE_CANOPY_GENERATE_COMP_SPV}
     ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.vert ${SKYBOX_VERT_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/skybox.frag ${SKYBOX_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/water_medium.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
 compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.vert
     ${FOLIAGE_IMPOSTER_VERT_SPV}
@@ -212,14 +212,14 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter_depth_prepass.frag $
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.frag ${FOLIAGE_IMPOSTER_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.vert ${NEARBY_FOLIAGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage_depth_prepass.frag ${NEARBY_FOLIAGE_DEPTH_PREPASS_FRAG_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.frag ${NEARBY_FOLIAGE_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.frag ${NEARBY_FOLIAGE_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
 compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/nearby_foliage_decode.comp
     ${NEARBY_FOLIAGE_DECODE_COMP_SPV}
     ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh_bridge.vert ${WATER_MESH_BRIDGE_VERT_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh_bridge.vert ${WATER_MESH_BRIDGE_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_initialize_spectrum.comp ${WATER_INITIALIZE_SPECTRUM_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_spectrum_update.comp ${WATER_SPECTRUM_UPDATE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_fft_stage.comp ${WATER_FFT_STAGE_COMP_SPV})
@@ -395,6 +395,11 @@ if (CODEX_BUILD_TESTS)
     target_include_directories(heightmap_dataset_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tools/converter ${glm_SOURCE_DIR})
     target_link_libraries(heightmap_dataset_tests PRIVATE lz4_local SDL3::Headers)
     add_test(NAME heightmap_dataset_tests COMMAND $<TARGET_FILE:heightmap_dataset_tests>)
+
+    add_executable(atmosphere_math_tests tests/AtmosphereMathTests.cpp)
+    set_target_properties(atmosphere_math_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
+    target_include_directories(atmosphere_math_tests PRIVATE ${glm_SOURCE_DIR})
+    add_test(NAME atmosphere_math_tests COMMAND $<TARGET_FILE:atmosphere_math_tests>)
 
     add_executable(periodic_world_phase_tests tests/PeriodicWorldPhaseTests.cpp)
     add_executable(terrain_corner_neighbor_tests tests/TerrainCornerNeighborTests.cpp)

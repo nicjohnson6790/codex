@@ -101,7 +101,7 @@ Generation writes, readback copies, render passes, and UI are recorded in a dete
 | Canopy cells | Canopy manager / FoliageCanopyRenderer bitset pool | 4096 cells; generation budget 256/frame | Queued per cell; generated into fixed bitset slots; fade age controls visual ramp. | Oldest unlocked resident slot reused. Generation lock protects in-flight slot. Cache invalidates on relevant terrain/water changes. |
 | Nearby decoded pages | WorldGridNearbyFoliageManager / NearbyFoliageRenderer | 16-page CPU cache; decode budget 16/frame; 16 readback slots | The manager owns residency/jobs; the renderer decodes the canonical page pool and stores CPU-visible results for draw/gameplay use. | Generic cache aging. Source page contentVersion/layoutVersion mismatch makes entry stale. Fence + job/key/version checks reject obsolete readbacks. |
 | Water simulation | QuadtreeWaterMeshRenderer | 512² maps; 4 cascades; update modulo typically 1/1/2/4 | Persistent FFT working buffers and displacement/slope maps updated over time. | Not LRU. Rebuilt/reset when simulation settings/resources require it; foam history is temporal double-buffered state. |
-| Sky / atmosphere | SkyboxRenderer | 1 cubemap + 32³ atmosphere LUT | Persistent runtime texture assets; sky composite every frame. | Cubemap lives with renderer. LUT persists until explicit regeneration or renderer shutdown. |
+| Sky / atmosphere | SkyboxRenderer | 1 cubemap, three fullscreen pipelines | Physical air/water composite every frame. | Cubemap and pipelines live with renderer; water displacement is borrowed read-only. |
 | World text | WorldTextRenderer | Dynamic high-water buffers | CPU text queues rebuilt each frame; MSDF font atlas/metrics persistent; GPU buffer pairs grow as needed. | Frame content clears every frame; backing allocation remains until growth/shutdown. |
 | Debug geometry | TriangleRenderer / LineRenderer | Dynamic/high-water frame buffers | Immediate/debug primitives rebuilt and uploaded each frame. | CPU queues clear every frame; pipelines and allocated buffers persist until shutdown. |
 | Viewport color/depth | SDLRenderer | One active viewport target set | Main render + sky composite; color shown by ImGui. | Recreated on viewport resize after current frame submission. |
@@ -226,13 +226,16 @@ WorldGridQuadtreeWaterManager is primarily a per-frame visibility/emission manag
 
 SkyboxRenderer is intentionally outside the main depth-writing viewport pass. After all geometry/text is rendered, SDLRenderer begins a second pass that loads the existing viewport color target and invokes the sky renderer with the depth texture and inverse view-projection. This allows sky, distance haze, and atmospheric contribution to be composited around/behind existing geometry without replacing the main depth buffer.
 
-- Persistent renderer assets: sky graphics pipeline, fullscreen/static vertex buffers, cubemap texture, atmosphere LUT (32³), and cubemap/atmosphere/depth samplers.
+- Persistent renderer assets: three graphics pipelines, fullscreen vertex buffers, cubemap texture, and cubemap/depth samplers. There is no atmosphere final-color LUT.
+- The draws preserve geometry ordering and reversed depth: background replaces only depth-zero pixels, transmittance uses source ZERO / destination SRC_COLOR, and scattering uses ONE / ONE. Air backgrounds combine space and scattering before tone mapping and are skipped by the later medium draws. Destination alpha is preserved; no scene-color copy is needed.
+- `displaySkyRadiance` is shared with water and nearby-foliage environment samples. It decodes the UNORM space texture, assigns it faint radiance relative to atmospheric sunlight, and applies local sky exposure plus exponential tone mapping and display encoding. Exposure recovers in directions with little scattered light, retaining night and outward-space views without a global time-of-day fade. This is a sky-only display approximation; finite scene-ray optical depth/scattering is unchanged, and water medium exposure is independent. Noon, twilight, night, and outward daytime space views are visually verified; shared-code tests check blue air against a black background and negligible star contrast in daylight.
+- Air uses the explicitly clipped camera-to-scene interval at/below the configured top plane. Exponential Rayleigh/Mie column densities are analytic, including a sea-level density clamp below zero and stable horizontal limits. Ozone is a bounded uniform absorption approximation with the configured equivalent vertical column.
+- Single scattering uses eight fixed Gauss-Legendre samples in analytically inverted column density with exponential importance sampling. View and solar optical depths are analytic. Water and nearby-foliage environment lighting call the same physical air calculation.
+- The water renderer owns and advances all FFT resources. It forwards the existing displacement texture/sampler, render-origin phases, cascade settings, and camera-containing emitted leaf's terrain metadata. GPU camera-height sampling shares the mesh's level-zero wave lookup and shallow damping, with existing distance filtering and cascade mask. There is no water-height readback or absolute floating-point XZ reconstruction.
+- Camera-below-animated-surface selects homogeneous water exclusively. RGB absorption plus scattering give Beer-Lambert transmission; an isotropic closed-form scattering integral uses sunlight filtered by the camera's water column and solar elevation. CPU coefficient controls update immediately.
+- The existing water mesh renders an opaque constant-color backside. Per-pixel surface intersection, mixed air/water paths, differentiated underside optics, and underwater surface relighting remain deferred.
 
-- The cubemap is a runtime asset loaded at initialization and lives until shutdown.
-
-- The atmosphere LUT is a persistent derived asset. It remains valid across frames and is regenerated explicitly when atmosphere parameters require it.
-
-- There is no LRU or per-world residency for sky resources; the only per-frame inputs are camera/view data, depth, and current atmospheric settings.
+Verification uses `atmosphere_math_tests`, which compiles the same GLSL math as C++ and checks analytic columns against numerical integration, inverse columns, top-plane and horizon boundaries, RGB water falloff, and eight-sample scattering against a 65,536-step reference. The tested radiance error is below 3.2% with a 0.01 radiance normalization floor. Normal-output inspection covered sea-level air, outward/downward views at 100 km, and shallow/deep water. At a 1265×865 viewport with VSync, the existing FPS overlay showed 30 FPS underwater and 60 FPS for the outward space view; these are whole-scene observations, not isolated GPU timings.
 
 > **Code:** SkyboxRenderer.hpp; SDLRenderer.cpp sky composite pass
 
@@ -294,7 +297,7 @@ Read-only queries use `hint = manager.isResident(id, hint)` and return a ready s
 | Leaf/key association check | Heightmap CPU/extents readback; decoded foliage | Reject completed results if the slot now belongs to a different semantic world asset. |
 | contentVersion / layoutVersion | Canonical → nearby foliage dependency | Invalidate detailed decoded data when source contents or interpretation change. |
 | Settings-driven clear | Foliage, terrain-derived placement | Invalidate caches wholesale when the placement/masking function changes materially. |
-| Dirty / valid flags | Water initial spectrum and foam history; atmosphere LUT | Retain expensive temporal/derived assets until an explicit dependency change requires regeneration. |
+| Dirty / valid flags | Water initial spectrum and foam history | Retain expensive temporal/derived assets until an explicit dependency change requires regeneration. |
 
 ## 12. Practical maintenance invariants
 

@@ -1,4 +1,6 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "atmosphere.glsl"
 
 layout(early_fragment_tests) in;
 
@@ -10,6 +12,7 @@ layout(set=3, binding=0) uniform NearbyFoliageMaterialUniforms
     mat4 skyRotation;
     vec4 atmosphereParams;
     vec4 sunDirectionTimeOfDay;
+    AtmosphereOptics atmosphereOptics;
 } foliageMaterial;
 
 layout(set=2, binding=0) uniform sampler2DArray baseColorTextureArray;
@@ -19,7 +22,6 @@ layout(set=2, binding=3) uniform sampler2DArray specularTextureArray;
 layout(set=2, binding=4) uniform sampler2DArray aoTextureArray;
 layout(set=2, binding=5) uniform sampler2DArray subsurfaceTextureArray;
 layout(set=2, binding=6) uniform samplerCube skyboxTexture;
-layout(set=2, binding=7) uniform sampler2DArray atmosphereLutTexture;
 
 struct NearbyMaterialGpu
 {
@@ -28,7 +30,7 @@ struct NearbyMaterialGpu
     vec4 params;
 };
 
-layout(set=2, binding=8, std430) readonly buffer NearbyMaterialBuffer
+layout(set=2, binding=7, std430) readonly buffer NearbyMaterialBuffer
 {
     NearbyMaterialGpu materials[];
 } materialBuffer;
@@ -44,7 +46,6 @@ layout(location = 6) flat in uint fragLodIndex;
 layout(location = 0) out vec4 outColor;
 
 const float kPi = 3.14159265359;
-const float kInvLog256 = 0.18033688011112042;
 const float kFoliageAmbientBoost = 3.35;
 const float kFoliageSkyFillStrength = 0.52;
 const float kFoliageLightingScale = 1.18;
@@ -71,51 +72,16 @@ float interleavedGradientNoise(vec2 pixelCoord)
     return fract(52.9829189 * fract(dot(pixelCoord, vec2(0.06711056, 0.00583715))));
 }
 
-float encodeLogDistance(float distanceThroughAtmosphere)
-{
-    float normalizedDistance = saturate(distanceThroughAtmosphere / max(foliageMaterial.atmosphereParams.y, 0.00001));
-    return log(normalizedDistance * 255.0 + 1.0) * kInvLog256;
-}
-
-vec4 sampleAtmosphere(vec3 worldDirection, float distanceThroughAtmosphere)
-{
-    float timeOfDay = fract(foliageMaterial.sunDirectionTimeOfDay.w);
-    vec3 cameraToSunLight = normalize(foliageMaterial.sunDirectionTimeOfDay.xyz);
-    float viewSunDot = dot(worldDirection, cameraToSunLight);
-    float distanceT = encodeLogDistance(distanceThroughAtmosphere);
-    float maxLayer = float(textureSize(atmosphereLutTexture, 0).z - 1);
-    float layerCoord = distanceT * maxLayer;
-    float layer0 = floor(layerCoord);
-    float layer1 = min(layer0 + 1.0, maxLayer);
-    float layerBlend = layerCoord - layer0;
-    vec2 lutUv = vec2(timeOfDay, (viewSunDot * 0.5) + 0.5);
-    vec4 sample0 = texture(atmosphereLutTexture, vec3(lutUv, layer0));
-    vec4 sample1 = texture(atmosphereLutTexture, vec3(lutUv, layer1));
-    return mix(sample0, sample1, layerBlend);
-}
-
-float backgroundAtmosphereDistance(vec3 worldDirection)
-{
-    const vec3 worldUp = vec3(0.0, 1.0, 0.0);
-    float cameraAltitude = foliageMaterial.atmosphereParams.w;
-    float topPlaneHeight = foliageMaterial.atmosphereParams.x - cameraAltitude;
-    float maxDistance = max(foliageMaterial.atmosphereParams.y, 0.00001);
-    float upDenominator = dot(worldDirection, worldUp);
-    if (topPlaneHeight > 0.0 && upDenominator > 0.00001)
-    {
-        return min(topPlaneHeight / upDenominator, maxDistance);
-    }
-
-    return maxDistance;
-}
-
 vec3 sampleSkyRadiance(vec3 worldDirection)
 {
     vec3 sampleDirection = transpose(mat3(foliageMaterial.skyRotation)) * worldDirection;
-    vec3 skyboxColor = texture(skyboxTexture, sampleDirection).rgb;
-    float distanceThroughAtmosphere = backgroundAtmosphereDistance(worldDirection);
-    vec4 atmosphere = sampleAtmosphere(worldDirection, distanceThroughAtmosphere);
-    return mix(skyboxColor, atmosphere.rgb, atmosphere.a);
+    vec3 sky = texture(skyboxTexture, sampleDirection).rgb;
+    vec3 transmission, scattering;
+    evaluateAtmosphere(foliageMaterial.atmosphereParams.w + fragViewPosition.y,
+        worldDirection, foliageMaterial.atmosphereParams.y, foliageMaterial.atmosphereParams.x,
+        foliageMaterial.sunDirectionTimeOfDay.xyz, foliageMaterial.atmosphereOptics,
+        true, transmission, scattering);
+    return displaySkyRadiance(sky, transmission, scattering, foliageMaterial.atmosphereOptics);
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 f0)

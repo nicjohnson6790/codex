@@ -1,6 +1,7 @@
 #include "SkyboxRenderer.hpp"
 
 #include "AppConfig.hpp"
+#include "QuadtreeWaterMeshRenderer.hpp"
 #include "assets/RuntimeAssetReader.hpp"
 
 #include <SDL3/SDL_filesystem.h>
@@ -28,59 +29,6 @@ constexpr std::array<SkyboxRenderer::Vertex, 6> kFullscreenQuadVertices{{
     {{ -1.0f,  1.0f }},
 }};
 
-float saturate(float value)
-{
-    return glm::clamp(value, 0.0f, 1.0f);
-}
-
-glm::vec3 saturate(const glm::vec3& value)
-{
-    return glm::clamp(value, glm::vec3(0.0f), glm::vec3(1.0f));
-}
-
-float decodeLogDistance(float distanceT, float maxDistance)
-{
-    constexpr float kDistanceLogBase = 256.0f;
-    const float scaled = (std::pow(kDistanceLogBase, glm::clamp(distanceT, 0.0f, 1.0f)) - 1.0f) / (kDistanceLogBase - 1.0f);
-    return scaled * maxDistance;
-}
-
-float luminance(const glm::vec3& color)
-{
-    return glm::dot(color, glm::vec3(0.2126f, 0.7152f, 0.0722f));
-}
-
-glm::vec3 expVec3(const glm::vec3& value)
-{
-    return glm::vec3(
-        std::exp(value.x),
-        std::exp(value.y),
-        std::exp(value.z));
-}
-
-float rayleighPhase(float viewSunDot)
-{
-    return (3.0f / (16.0f * glm::pi<float>())) * (1.0f + (viewSunDot * viewSunDot));
-}
-
-float henyeyGreensteinPhase(float viewSunDot, float g)
-{
-    const float g2 = g * g;
-    const float denominator = std::pow(std::max(1.0f + g2 - (2.0f * g * viewSunDot), 1.0e-3f), 1.5f);
-    return (1.0f / (4.0f * glm::pi<float>())) * ((1.0f - g2) / denominator);
-}
-
-float approximateAirMass(float sunHeight)
-{
-    const float sunHeightClamped = glm::clamp(sunHeight, -0.12f, 1.0f);
-    const float elevationDegrees = glm::degrees(std::asin(sunHeightClamped));
-    const float safeElevationDegrees = std::max(elevationDegrees, -5.9f);
-    const float denominator =
-        std::sin(glm::radians(safeElevationDegrees)) +
-        (0.50572f * std::pow(safeElevationDegrees + 6.07995f, -1.6364f));
-    return 1.0f / std::max(denominator, 0.08f);
-}
-
 std::filesystem::path executableRelativePath(const std::filesystem::path& relativePath)
 {
     const char* basePath = SDL_GetBasePath();
@@ -102,7 +50,6 @@ void SkyboxRenderer::initialize(
     initializeRendererBase(device, colorFormat, depthFormat);
     createStaticVertexResources();
     createCubemapTexture();
-    createAtmosphereLutTexture();
     createPipeline(shaderDirectory);
 }
 
@@ -113,20 +60,10 @@ void SkyboxRenderer::shutdown()
         SDL_ReleaseGPUSampler(m_device, m_depthSampler);
         m_depthSampler = nullptr;
     }
-    if (m_atmosphereSampler != nullptr)
-    {
-        SDL_ReleaseGPUSampler(m_device, m_atmosphereSampler);
-        m_atmosphereSampler = nullptr;
-    }
     if (m_cubemapSampler != nullptr)
     {
         SDL_ReleaseGPUSampler(m_device, m_cubemapSampler);
         m_cubemapSampler = nullptr;
-    }
-    if (m_atmosphereLutTexture != nullptr)
-    {
-        SDL_ReleaseGPUTexture(m_device, m_atmosphereLutTexture);
-        m_atmosphereLutTexture = nullptr;
     }
     if (m_cubemapTexture != nullptr)
     {
@@ -143,10 +80,10 @@ void SkyboxRenderer::shutdown()
         SDL_ReleaseGPUBuffer(m_device, m_vertexBuffer);
         m_vertexBuffer = nullptr;
     }
-    if (m_pipeline != nullptr)
+    for (auto& pipeline : m_pipelines)
     {
-        SDL_ReleaseGPUGraphicsPipeline(m_device, m_pipeline);
-        m_pipeline = nullptr;
+        if (pipeline) SDL_ReleaseGPUGraphicsPipeline(m_device, pipeline);
+        pipeline = nullptr;
     }
 }
 
@@ -156,41 +93,39 @@ void SkyboxRenderer::render(
     const glm::mat4& inverseViewProjection,
     SDL_GPUTexture* depthTexture,
     float cameraAltitude,
-    const LightingSystem& lightingSystem) const
+    const LightingSystem& lightingSystem,
+    const QuadtreeWaterMeshRenderer& waterRenderer,
+    SDL_GPUBuffer* terrainHeightmapBuffer,
+    float viewportHeight) const
 {
-    if (m_pipeline == nullptr ||
-        m_vertexBuffer == nullptr ||
-        m_cubemapTexture == nullptr ||
-        m_atmosphereLutTexture == nullptr ||
-        depthTexture == nullptr ||
-        m_cubemapSampler == nullptr ||
-        m_atmosphereSampler == nullptr ||
-        m_depthSampler == nullptr)
-    {
-        return;
-    }
-
-    SDL_BindGPUGraphicsPipeline(renderPass, m_pipeline);
-
-    const SDL_GPUBufferBinding vertexBinding{ m_vertexBuffer, 0 };
+    if (!m_pipelines[0] || !depthTexture || !waterRenderer.displacementTexture()
+        || !terrainHeightmapBuffer) return;
+    const SDL_GPUBufferBinding vertexBinding{m_vertexBuffer, 0};
     SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
-
-    const SDL_GPUTextureSamplerBinding samplerBindings[3]{
-        { m_cubemapTexture, m_cubemapSampler },
-        { m_atmosphereLutTexture, m_atmosphereSampler },
-        { depthTexture, m_depthSampler },
+    const SDL_GPUTextureSamplerBinding samplers[]{
+        {m_cubemapTexture, m_cubemapSampler},
+        {depthTexture, m_depthSampler},
+        {waterRenderer.displacementTexture(), waterRenderer.waterSampler()},
     };
-    SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 3);
-
     FragmentUniforms uniforms{};
     uniforms.inverseViewProjection = inverseViewProjection;
-    const SharedSkyUniforms sharedUniforms = buildSharedSkyUniforms(cameraAltitude, lightingSystem);
-    uniforms.skyRotation = sharedUniforms.skyRotation;
-    uniforms.atmosphereParams = sharedUniforms.atmosphereParams;
-    uniforms.sunDirectionTimeOfDay = sharedUniforms.sunDirectionTimeOfDay;
-    SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
-
-    SDL_DrawGPUPrimitives(renderPass, static_cast<Uint32>(kFullscreenQuadVertices.size()), 1, 0, 0);
+    const auto shared = buildSharedSkyUniforms(cameraAltitude, lightingSystem);
+    uniforms.skyRotation = shared.skyRotation;
+    uniforms.atmosphereParams = shared.atmosphereParams;
+    uniforms.sunDirectionTimeOfDay = shared.sunDirectionTimeOfDay;
+    uniforms.optics = buildAtmosphereOptics(lightingSystem);
+    waterRenderer.fillMediumUniforms(uniforms, viewportHeight);
+    uniforms.waterAbsorption = glm::vec4(m_waterMediumSettings.absorption, 0.0f);
+    uniforms.waterScattering = glm::vec4(m_waterMediumSettings.scattering, m_waterMediumSettings.exposure);
+    for (std::size_t pass = 0; pass < m_pipelines.size(); ++pass)
+    {
+        SDL_BindGPUGraphicsPipeline(renderPass, m_pipelines[pass]);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, samplers, 3);
+        SDL_BindGPUFragmentStorageBuffers(renderPass, 0, &terrainHeightmapBuffer, 1);
+        uniforms.waterParams.w = static_cast<float>(pass);
+        SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+        SDL_DrawGPUPrimitives(renderPass, static_cast<Uint32>(kFullscreenQuadVertices.size()), 1, 0, 0);
+    }
 }
 
 SkyboxRenderer::SharedSkyUniforms SkyboxRenderer::buildSharedSkyUniforms(
@@ -216,12 +151,6 @@ SkyboxRenderer::SharedSkyUniforms SkyboxRenderer::buildSharedSkyUniforms(
     return uniforms;
 }
 
-void SkyboxRenderer::regenerateAtmosphereLut()
-{
-    sanitizeAtmosphereSettings();
-    createAtmosphereLutTexture();
-}
-
 void SkyboxRenderer::resetAtmosphereSettings()
 {
     m_atmosphereSettings = {};
@@ -232,34 +161,36 @@ void SkyboxRenderer::sanitizeAtmosphereSettings()
     m_atmosphereSettings.atmosphereHeight = std::max(m_atmosphereSettings.atmosphereHeight, 1000.0f);
     m_atmosphereSettings.atmosphereDistanceRange = std::max(m_atmosphereSettings.atmosphereDistanceRange, 1000.0f);
     m_atmosphereSettings.mieG = std::clamp(m_atmosphereSettings.mieG, 0.0f, 0.99f);
+    m_atmosphereSettings.skyExposure = std::max(m_atmosphereSettings.skyExposure, 0.0f);
+    m_waterMediumSettings.exposure = std::max(m_waterMediumSettings.exposure, 0.0f);
     m_atmosphereSettings.exposure = std::max(m_atmosphereSettings.exposure, 0.01f);
-    m_atmosphereSettings.alphaScale = std::max(m_atmosphereSettings.alphaScale, 0.01f);
     m_atmosphereSettings.rayleighScaleHeight = std::max(m_atmosphereSettings.rayleighScaleHeight, 1.0f);
     m_atmosphereSettings.mieScaleHeight = std::max(m_atmosphereSettings.mieScaleHeight, 1.0f);
-    m_atmosphereSettings.ozoneColumnHeight = std::max(m_atmosphereSettings.ozoneColumnHeight, 1.0f);
-    m_atmosphereSettings.ambientSkyScale = std::max(m_atmosphereSettings.ambientSkyScale, 0.0f);
-    m_atmosphereSettings.ambientBlueBias = std::clamp(m_atmosphereSettings.ambientBlueBias, 0.0f, 1.0f);
-    m_atmosphereSettings.ambientSolarInfluence = std::clamp(m_atmosphereSettings.ambientSolarInfluence, 0.0f, 1.0f);
-    m_atmosphereSettings.ambientTwilightInfluence = std::clamp(m_atmosphereSettings.ambientTwilightInfluence, 0.0f, 1.0f);
-    m_atmosphereSettings.rayleighTintScale = std::max(m_atmosphereSettings.rayleighTintScale, 0.0f);
-    m_atmosphereSettings.hazeStrength = std::max(m_atmosphereSettings.hazeStrength, 0.0f);
-    m_atmosphereSettings.pathFogDistance = std::max(m_atmosphereSettings.pathFogDistance, 1.0f);
-    m_atmosphereSettings.longRangeHazeDistance = std::max(m_atmosphereSettings.longRangeHazeDistance, 1.0f);
-    m_atmosphereSettings.aureolePower = std::max(m_atmosphereSettings.aureolePower, 1.0f);
-    m_atmosphereSettings.aureoleStrength = std::max(m_atmosphereSettings.aureoleStrength, 0.0f);
-    m_atmosphereSettings.sunDiskPower = std::max(m_atmosphereSettings.sunDiskPower, 1.0f);
-    m_atmosphereSettings.sunDiskStrength = std::max(m_atmosphereSettings.sunDiskStrength, 0.0f);
-    m_atmosphereSettings.sunGlowPower = std::max(m_atmosphereSettings.sunGlowPower, 1.0f);
-    m_atmosphereSettings.sunsetStrength = std::max(m_atmosphereSettings.sunsetStrength, 0.0f);
-    m_atmosphereSettings.sunsetSunwardBoost = std::max(m_atmosphereSettings.sunsetSunwardBoost, 0.0f);
-    m_atmosphereSettings.sunsetDistanceMin = std::max(m_atmosphereSettings.sunsetDistanceMin, 0.0f);
-    m_atmosphereSettings.sunsetDistanceMax = std::max(m_atmosphereSettings.sunsetDistanceMax, 0.0f);
+    m_atmosphereSettings.ozoneColumnHeight = std::max(m_atmosphereSettings.ozoneColumnHeight, 0.0f);
+    m_atmosphereSettings.mieScatter = std::max(m_atmosphereSettings.mieScatter, 0.0f);
+    m_atmosphereSettings.mieExtinction = std::max(m_atmosphereSettings.mieExtinction, m_atmosphereSettings.mieScatter);
+    m_waterMediumSettings.absorption = glm::max(m_waterMediumSettings.absorption, glm::vec3(0.0f));
+    m_waterMediumSettings.scattering = glm::max(m_waterMediumSettings.scattering, glm::vec3(0.0f));
+}
+
+
+SkyboxRenderer::AtmosphereOptics SkyboxRenderer::buildAtmosphereOptics(const LightingSystem& lighting) const
+{
+    const auto& a = m_atmosphereSettings;
+    AtmosphereOptics result{};
+    result.rayleigh = glm::vec4(glm::max(glm::vec3(a.rayleighScatterR, a.rayleighScatterG, a.rayleighScatterB), glm::vec3(0.0f)), a.rayleighScaleHeight);
+    result.mie = glm::vec4(a.mieScatter, a.mieExtinction, a.mieScaleHeight, a.mieG);
+    result.ozone = glm::vec4(glm::max(glm::vec3(a.ozoneAbsorptionR, a.ozoneAbsorptionG, a.ozoneAbsorptionB), glm::vec3(0.0f)), a.ozoneColumnHeight);
+    result.skyDisplay = glm::vec4(AppConfig::Atmosphere::kSkySolarRadiance,
+        AppConfig::Atmosphere::kSpaceRadiance, a.skyExposure, AppConfig::Atmosphere::kSkyDarkAdaptationFloor);
+    result.solar = glm::vec4(glm::max(lighting.sun().color * lighting.sun().intensity, glm::vec3(0.0f)), a.exposure);
+    return result;
 }
 
 void SkyboxRenderer::createPipeline(const std::filesystem::path& shaderDirectory)
 {
     SDL_GPUShader* vertexShader = createShader(shaderDirectory / "skybox.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0);
-    SDL_GPUShader* fragmentShader = createShader(shaderDirectory / "skybox.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 3);
+    SDL_GPUShader* fragmentShader = createShader(shaderDirectory / "skybox.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1, 3);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -274,11 +205,11 @@ void SkyboxRenderer::createPipeline(const std::filesystem::path& shaderDirectory
 
     SDL_GPUColorTargetBlendState blendState{};
     blendState.enable_blend = true;
-    blendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-    blendState.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    blendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    blendState.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
     blendState.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    blendState.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    blendState.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    blendState.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    blendState.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     blendState.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
     blendState.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
 
@@ -304,13 +235,21 @@ void SkyboxRenderer::createPipeline(const std::filesystem::path& shaderDirectory
     pipelineInfo.vertex_input_state.num_vertex_attributes = 1;
     pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
-    m_pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
+    for (std::size_t pass = 0; pass < m_pipelines.size(); ++pass)
+    {
+        // Background replaces only depth-zero pixels (shader discard).
+        // RGB multiplication and addition preserve destination alpha.
+        colorTargetDescription.blend_state.src_color_blendfactor =
+            pass == 1 ? SDL_GPU_BLENDFACTOR_ZERO : SDL_GPU_BLENDFACTOR_ONE;
+        colorTargetDescription.blend_state.dst_color_blendfactor =
+            pass == 0 ? SDL_GPU_BLENDFACTOR_ZERO :
+            pass == 1 ? SDL_GPU_BLENDFACTOR_SRC_COLOR : SDL_GPU_BLENDFACTOR_ONE;
+        m_pipelines[pass] = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);
+    }
     SDL_ReleaseGPUShader(m_device, fragmentShader);
     SDL_ReleaseGPUShader(m_device, vertexShader);
-    if (m_pipeline == nullptr)
-    {
-        throwSdlError("Failed to create skybox graphics pipeline.");
-    }
+    for (auto* pipeline : m_pipelines)
+        if (!pipeline) throwSdlError("Failed to create sky/medium graphics pipeline.");
 
     SDL_GPUSamplerCreateInfo cubemapSamplerInfo{};
     cubemapSamplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
@@ -325,21 +264,6 @@ void SkyboxRenderer::createPipeline(const std::filesystem::path& shaderDirectory
     if (m_cubemapSampler == nullptr)
     {
         throwSdlError("Failed to create skybox cubemap sampler.");
-    }
-
-    SDL_GPUSamplerCreateInfo atmosphereSamplerInfo{};
-    atmosphereSamplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
-    atmosphereSamplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
-    atmosphereSamplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-    atmosphereSamplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    atmosphereSamplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-    atmosphereSamplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-    atmosphereSamplerInfo.min_lod = 0.0f;
-    atmosphereSamplerInfo.max_lod = 0.0f;
-    m_atmosphereSampler = SDL_CreateGPUSampler(m_device, &atmosphereSamplerInfo);
-    if (m_atmosphereSampler == nullptr)
-    {
-        throwSdlError("Failed to create atmosphere LUT sampler.");
     }
 
     SDL_GPUSamplerCreateInfo depthSamplerInfo{};
@@ -517,231 +441,4 @@ void SkyboxRenderer::createCubemapTexture()
     }
 
     SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
-}
-
-void SkyboxRenderer::createAtmosphereLutTexture()
-{
-    sanitizeAtmosphereSettings();
-    const auto lutBytes = buildAtmosphereLut();
-    SDL_GPUTexture* previousTexture = m_atmosphereLutTexture;
-    SDL_GPUTexture* newTexture = nullptr;
-
-    SDL_GPUTextureCreateInfo textureInfo{};
-    textureInfo.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
-    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    textureInfo.width = kAtmosphereLutResolution;
-    textureInfo.height = kAtmosphereLutResolution;
-    textureInfo.layer_count_or_depth = kAtmosphereLutResolution;
-    textureInfo.num_levels = 1;
-    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    newTexture = SDL_CreateGPUTexture(m_device, &textureInfo);
-    if (newTexture == nullptr)
-    {
-        throwSdlError("Failed to create atmosphere LUT texture.");
-    }
-
-    SDL_GPUTransferBufferCreateInfo transferInfo{};
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    transferInfo.size = static_cast<Uint32>(lutBytes.size());
-    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
-    if (transferBuffer == nullptr)
-    {
-        throwSdlError("Failed to create atmosphere LUT upload buffer.");
-    }
-
-    void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
-    std::memcpy(mapped, lutBytes.data(), lutBytes.size());
-    SDL_UnmapGPUTransferBuffer(m_device, transferBuffer);
-
-    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
-
-    const std::size_t layerSizeBytes =
-        static_cast<std::size_t>(kAtmosphereLutResolution) *
-        static_cast<std::size_t>(kAtmosphereLutResolution) * 4u;
-    for (std::uint32_t layerIndex = 0; layerIndex < kAtmosphereLutResolution; ++layerIndex)
-    {
-        SDL_GPUTextureTransferInfo source{};
-        source.transfer_buffer = transferBuffer;
-        source.offset = static_cast<Uint32>(layerIndex * layerSizeBytes);
-        source.pixels_per_row = kAtmosphereLutResolution;
-        source.rows_per_layer = kAtmosphereLutResolution;
-
-        SDL_GPUTextureRegion destination{};
-        destination.texture = newTexture;
-        destination.layer = layerIndex;
-        destination.w = kAtmosphereLutResolution;
-        destination.h = kAtmosphereLutResolution;
-        destination.d = 1;
-        SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
-    }
-
-    SDL_EndGPUCopyPass(copyPass);
-    if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
-    {
-        SDL_ReleaseGPUTexture(m_device, newTexture);
-        SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
-        throwSdlError("Failed to upload atmosphere LUT texture.");
-    }
-
-    SDL_ReleaseGPUTransferBuffer(m_device, transferBuffer);
-    m_atmosphereLutTexture = newTexture;
-    if (previousTexture != nullptr)
-    {
-        SDL_ReleaseGPUTexture(m_device, previousTexture);
-    }
-}
-
-std::array<std::uint8_t, SkyboxRenderer::kAtmosphereLutResolution * SkyboxRenderer::kAtmosphereLutResolution * SkyboxRenderer::kAtmosphereLutResolution * 4> SkyboxRenderer::buildAtmosphereLut() const
-{
-    const glm::vec3 rayleighScattering(
-        m_atmosphereSettings.rayleighScatterR,
-        m_atmosphereSettings.rayleighScatterG,
-        m_atmosphereSettings.rayleighScatterB);
-    const glm::vec3 mieScattering(
-        m_atmosphereSettings.mieScatter,
-        m_atmosphereSettings.mieScatter,
-        m_atmosphereSettings.mieScatter);
-    const glm::vec3 mieExtinction(
-        m_atmosphereSettings.mieExtinction,
-        m_atmosphereSettings.mieExtinction,
-        m_atmosphereSettings.mieExtinction);
-    const glm::vec3 ozoneAbsorption(
-        m_atmosphereSettings.ozoneAbsorptionR,
-        m_atmosphereSettings.ozoneAbsorptionG,
-        m_atmosphereSettings.ozoneAbsorptionB);
-    const glm::vec3 hazeColor(
-        m_atmosphereSettings.hazeColorR,
-        m_atmosphereSettings.hazeColorG,
-        m_atmosphereSettings.hazeColorB);
-    const glm::vec3 ambientBlueTint(
-        m_atmosphereSettings.ambientBlueTintR,
-        m_atmosphereSettings.ambientBlueTintG,
-        m_atmosphereSettings.ambientBlueTintB);
-    const glm::vec3 sunsetTint(
-        m_atmosphereSettings.sunsetTintR,
-        m_atmosphereSettings.sunsetTintG,
-        m_atmosphereSettings.sunsetTintB);
-
-    constexpr std::size_t kTexelCount =
-        static_cast<std::size_t>(kAtmosphereLutResolution) *
-        static_cast<std::size_t>(kAtmosphereLutResolution) *
-        static_cast<std::size_t>(kAtmosphereLutResolution);
-    std::array<std::uint8_t, kTexelCount * 4> lutBytes{};
-
-    for (std::uint32_t distanceIndex = 0; distanceIndex < kAtmosphereLutResolution; ++distanceIndex)
-    {
-        const float distanceT = static_cast<float>(distanceIndex) / static_cast<float>(kAtmosphereLutResolution - 1);
-        const float physicalDistance = decodeLogDistance(distanceT, m_atmosphereSettings.atmosphereDistanceRange);
-        const glm::vec3 viewOpticalDepth =
-            (rayleighScattering * physicalDistance) +
-            (mieExtinction * physicalDistance);
-        const glm::vec3 viewTransmittance = expVec3(-viewOpticalDepth);
-        const float pathFogAmount = 1.0f - std::exp(-physicalDistance / std::max(m_atmosphereSettings.pathFogDistance, 1.0f));
-        const float longRangeHazeAmount = 1.0f - std::exp(-physicalDistance / std::max(m_atmosphereSettings.longRangeHazeDistance, 1.0f));
-
-        for (std::uint32_t viewSunIndex = 0; viewSunIndex < kAtmosphereLutResolution; ++viewSunIndex)
-        {
-            const float viewSunT = static_cast<float>(viewSunIndex) / static_cast<float>(kAtmosphereLutResolution - 1);
-            const float viewSunDot = (viewSunT * 2.0f) - 1.0f;
-            const float rayleighPhaseValue = rayleighPhase(viewSunDot);
-            const float miePhaseValue = henyeyGreensteinPhase(viewSunDot, m_atmosphereSettings.mieG);
-
-            for (std::uint32_t timeIndex = 0; timeIndex < kAtmosphereLutResolution; ++timeIndex)
-            {
-                const float timeT = static_cast<float>(timeIndex) / static_cast<float>(kAtmosphereLutResolution);
-                const float sunHeight = -std::sin(timeT * (glm::pi<float>() * 2.0f));
-                const float sunVisibility = glm::smoothstep(-0.045f, 0.02f, sunHeight);
-                const float daylight = glm::smoothstep(-0.12f, 0.10f, sunHeight);
-                const float night = 1.0f - daylight;
-                const float twilight = 1.0f - glm::smoothstep(0.02f, 0.22f, std::abs(sunHeight));
-                const float airMass = approximateAirMass(sunHeight);
-
-                const glm::vec3 sunOpticalDepth =
-                    (rayleighScattering * (m_atmosphereSettings.rayleighScaleHeight * airMass)) +
-                    (mieExtinction * (m_atmosphereSettings.mieScaleHeight * airMass)) +
-                    (ozoneAbsorption * (m_atmosphereSettings.ozoneColumnHeight * airMass));
-                const glm::vec3 sunTransmittance = expVec3(-sunOpticalDepth);
-                const glm::vec3 incidentSunlight = sunTransmittance * sunVisibility;
-                const glm::vec3 normalizedRayleighTint = glm::normalize(rayleighScattering);
-                const glm::vec3 blueSkyTint = glm::mix(
-                    ambientBlueTint,
-                    normalizedRayleighTint * m_atmosphereSettings.rayleighTintScale,
-                    m_atmosphereSettings.ambientBlueBias);
-                const glm::vec3 ambientIlluminant = glm::mix(
-                    blueSkyTint,
-                    sunTransmittance,
-                    m_atmosphereSettings.ambientSolarInfluence +
-                    (m_atmosphereSettings.ambientTwilightInfluence * twilight)) * sunVisibility;
-                const float aureole = std::pow(
-                    saturate((viewSunDot + 1.0f) * 0.5f),
-                    std::max(m_atmosphereSettings.aureolePower, 1.0f));
-                const float sunDisk = std::pow(
-                    saturate((viewSunDot + 1.0f) * 0.5f),
-                    std::max(m_atmosphereSettings.sunDiskPower, 1.0f));
-                const float sunwardGlow = std::pow(
-                    saturate((viewSunDot + 1.0f) * 0.5f),
-                    std::max(m_atmosphereSettings.sunGlowPower, 1.0f));
-
-                const glm::vec3 scatteringCoefficient =
-                    (rayleighScattering * rayleighPhaseValue) +
-                    (mieScattering * miePhaseValue);
-                const glm::vec3 sigmaT = rayleighScattering + mieExtinction;
-                const glm::vec3 directInScatteredRadiance =
-                    incidentSunlight *
-                    scatteringCoefficient *
-                    ((glm::vec3(1.0f) - viewTransmittance) / glm::max(sigmaT, glm::vec3(1.0e-6f)));
-                const glm::vec3 ambientSkyRadiance =
-                    ambientIlluminant *
-                    rayleighScattering *
-                    ((glm::vec3(1.0f) - viewTransmittance) / glm::max(rayleighScattering + mieScattering, glm::vec3(1.0e-6f))) *
-                    m_atmosphereSettings.ambientSkyScale;
-                const glm::vec3 sunsetRadiance =
-                    sunsetTint *
-                    twilight *
-                    (m_atmosphereSettings.sunsetStrength + (m_atmosphereSettings.sunsetSunwardBoost * sunwardGlow)) *
-                    (1.0f - night) *
-                    (m_atmosphereSettings.sunsetDistanceMin +
-                        (m_atmosphereSettings.sunsetDistanceMax * longRangeHazeAmount));
-                const glm::vec3 hazeRadiance =
-                    ambientIlluminant *
-                    hazeColor *
-                    longRangeHazeAmount * m_atmosphereSettings.hazeStrength;
-                const glm::vec3 solarDiskRadiance =
-                    incidentSunlight *
-                    ((aureole * m_atmosphereSettings.aureoleStrength) +
-                        (sunDisk * m_atmosphereSettings.sunDiskStrength));
-                const glm::vec3 inScatteredRadiance =
-                    directInScatteredRadiance +
-                    ambientSkyRadiance +
-                    hazeRadiance +
-                    sunsetRadiance +
-                    solarDiskRadiance;
-
-                const glm::vec3 visibleColor = glm::vec3(1.0f) - expVec3(-inScatteredRadiance * m_atmosphereSettings.exposure);
-                const float transmittanceLuma = luminance(viewTransmittance);
-                const float alphaFromTransmittance = 1.0f - transmittanceLuma;
-                float alpha = glm::max(alphaFromTransmittance * m_atmosphereSettings.alphaScale, pathFogAmount * daylight * 0.96f);
-                alpha = glm::max(alpha, longRangeHazeAmount * daylight * 0.72f);
-                alpha *= glm::mix(0.08f, 1.0f, daylight);
-                alpha = glm::mix(alpha, alpha * 0.20f, night);
-                alpha = saturate(alpha);
-
-                const std::size_t texelIndex =
-                    ((((static_cast<std::size_t>(distanceIndex) * kAtmosphereLutResolution) +
-                       static_cast<std::size_t>(viewSunIndex)) * kAtmosphereLutResolution) +
-                       static_cast<std::size_t>(timeIndex)) * 4u;
-                const glm::vec3 encodedColor = saturate(visibleColor / std::max(alpha, 1.0e-4f));
-                const float encodedAlpha = saturate(alpha);
-
-                lutBytes[texelIndex + 0] = static_cast<std::uint8_t>(encodedColor.r * 255.0f);
-                lutBytes[texelIndex + 1] = static_cast<std::uint8_t>(encodedColor.g * 255.0f);
-                lutBytes[texelIndex + 2] = static_cast<std::uint8_t>(encodedColor.b * 255.0f);
-                lutBytes[texelIndex + 3] = static_cast<std::uint8_t>(encodedAlpha * 255.0f);
-            }
-        }
-    }
-
-    return lutBytes;
 }

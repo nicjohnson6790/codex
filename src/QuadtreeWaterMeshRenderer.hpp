@@ -62,6 +62,7 @@ public:
         glm::vec4 cascadeOriginPhasesB{ 0.0f };
         glm::vec4 foamOriginPhasesA{ 0.0f };
         glm::vec4 foamOriginPhasesB{ 0.0f };
+        SkyboxRenderer::AtmosphereOptics atmosphereOptics{};
     };
 
     QuadtreeWaterMeshRenderer() = default;
@@ -123,6 +124,8 @@ public:
         Extent2D viewportExtent,
         float timeSeconds,
         SDL_GPUBuffer* terrainHeightmapBuffer) const;
+
+    void fillMediumUniforms(SkyboxRenderer::FragmentUniforms& uniforms, float viewportHeight) const;
 
     [[nodiscard]] std::uint32_t instanceCount() const;
     [[nodiscard]] std::uint32_t totalInstanceCount() const;

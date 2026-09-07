@@ -442,7 +442,10 @@ void SDLRenderer::renderFrame(
                 glm::inverse(viewProjection),
                 m_viewportDepthTexture,
                 static_cast<float>(m_activeCameraPosition.localPosition().y),
-                lightingSystem);
+                lightingSystem,
+                waterMeshRenderer,
+                quadtreeMeshRenderer.heightmapBuffer(),
+                static_cast<float>(m_viewportExtent.height));
         }
         SDL_EndGPURenderPass(skyRenderPass);
     }

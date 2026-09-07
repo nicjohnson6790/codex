@@ -223,8 +223,9 @@ void AppPanels::drawControlsTab(Context &context)
 
         ImGui::InputFloat("Atmosphere height (m)", &atmosphere.atmosphereHeight, 1000.0f, 10000.0f, "%.0f");
         ImGui::InputFloat("Distance range (m)", &atmosphere.atmosphereDistanceRange, 10000.0f, 100000.0f, "%.0f");
-        ImGui::InputFloat("Exposure", &atmosphere.exposure, 0.1f, 0.5f, "%.2f");
-        ImGui::InputFloat("Alpha scale", &atmosphere.alphaScale, 0.05f, 0.2f, "%.2f");
+        ImGui::InputFloat("Air scattering exposure", &atmosphere.exposure, 0.1f, 0.5f, "%.2f");
+
+        ImGui::InputFloat("Sky display exposure", &atmosphere.skyExposure, 0.1f, 0.5f, "%.2f");
 
         if (ImGui::TreeNode("Scattering"))
         {
@@ -253,46 +254,18 @@ void AppPanels::drawControlsTab(Context &context)
             ImGui::TreePop();
         }
 
-        if (ImGui::TreeNode("Ambient And Haze"))
-        {
-            ImGui::InputFloat("Ambient sky scale", &atmosphere.ambientSkyScale, 0.05f, 0.2f, "%.2f");
-            ImGui::InputFloat("Ambient blue bias", &atmosphere.ambientBlueBias, 0.01f, 0.05f, "%.2f");
-            ImGui::InputFloat("Ambient solar infl.", &atmosphere.ambientSolarInfluence, 0.01f, 0.05f, "%.2f");
-            ImGui::InputFloat("Ambient twilight infl.", &atmosphere.ambientTwilightInfluence, 0.01f, 0.05f, "%.2f");
-            ImGui::ColorEdit3("Ambient blue tint", &atmosphere.ambientBlueTintR);
-            ImGui::InputFloat("Rayleigh tint scale", &atmosphere.rayleighTintScale, 0.05f, 0.2f, "%.2f");
-            ImGui::ColorEdit3("Haze color", &atmosphere.hazeColorR);
-            ImGui::InputFloat("Haze strength", &atmosphere.hazeStrength, 0.01f, 0.05f, "%.2f");
-            ImGui::InputFloat("Path fog distance", &atmosphere.pathFogDistance, 1000.0f, 10000.0f, "%.0f");
-            ImGui::InputFloat("Long haze distance", &atmosphere.longRangeHazeDistance, 1000.0f, 10000.0f, "%.0f");
-            ImGui::TreePop();
-        }
-
-        if (ImGui::TreeNode("Sun Shape And Sunset"))
-        {
-            ImGui::InputFloat("Aureole power", &atmosphere.aureolePower, 1.0f, 8.0f, "%.0f");
-            ImGui::InputFloat("Aureole strength", &atmosphere.aureoleStrength, 0.05f, 0.2f, "%.2f");
-            ImGui::InputFloat("Sun disk power", &atmosphere.sunDiskPower, 16.0f, 128.0f, "%.0f");
-            ImGui::InputFloat("Sun disk strength", &atmosphere.sunDiskStrength, 0.5f, 2.0f, "%.2f");
-            ImGui::InputFloat("Sun glow power", &atmosphere.sunGlowPower, 1.0f, 4.0f, "%.0f");
-            ImGui::ColorEdit3("Sunset tint", &atmosphere.sunsetTintR);
-            ImGui::InputFloat("Sunset strength", &atmosphere.sunsetStrength, 0.01f, 0.05f, "%.2f");
-            ImGui::InputFloat("Sunset sunward boost", &atmosphere.sunsetSunwardBoost, 0.05f, 0.2f, "%.2f");
-            ImGui::InputFloat("Sunset dist min", &atmosphere.sunsetDistanceMin, 0.01f, 0.05f, "%.2f");
-            ImGui::InputFloat("Sunset dist max", &atmosphere.sunsetDistanceMax, 0.05f, 0.2f, "%.2f");
-            ImGui::TreePop();
-        }
+        auto& waterMedium = context.skyboxRenderer.waterMediumSettings();
+        ImGui::SeparatorText("Underwater medium (inverse meters)");
+        ImGui::InputFloat("Water medium exposure", &waterMedium.exposure, 0.1f, 0.5f, "%.2f");
+        ImGui::InputFloat3("Water absorption RGB", &waterMedium.absorption.x, "%.4f");
+        ImGui::InputFloat3("Water scattering RGB", &waterMedium.scattering.x, "%.4f");
+        if (ImGui::Button("Reset Underwater Defaults")) waterMedium = {};
 
         context.skyboxRenderer.sanitizeAtmosphereSettings();
 
         if (ImGui::Button("Reset Atmosphere Defaults"))
         {
             context.skyboxRenderer.resetAtmosphereSettings();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Regenerate + Upload LUT"))
-        {
-            context.skyboxRenderer.regenerateAtmosphereLut();
         }
     }
 }
