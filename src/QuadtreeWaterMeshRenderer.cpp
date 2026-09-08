@@ -672,7 +672,8 @@ void QuadtreeWaterMeshRenderer::render(
     const SkyboxRenderer& skyboxRenderer,
     Extent2D viewportExtent,
     float timeSeconds,
-    SDL_GPUBuffer* terrainHeightmapBuffer) const
+    SDL_GPUBuffer* terrainHeightmapBuffer,
+    const CloudRenderer::SamplingResources& clouds) const
 {
     HELLO_PROFILE_SCOPE_GROUPS("QuadtreeWaterMeshRenderer::Render", ProfileScopeGroup::Renderer);
 
@@ -714,21 +715,23 @@ void QuadtreeWaterMeshRenderer::render(
         SDL_BindGPUGraphicsPipeline(renderPass, pipeline);
         SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
         SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+        SDL_PushGPUFragmentUniformData(commandBuffer, 1, &clouds.state, sizeof(clouds.state));
 
         const SDL_GPUTextureSamplerBinding vertexSamplerBindings[1]{
             { m_displacementTexture, m_waterSampler },
         };
         SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[6]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[8]{
             { m_displacementTexture, m_waterSampler },
             { m_slopeTexture, m_waterSampler },
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
             { m_foamDetailSdfTexture, m_waterSampler },
             { m_foamDetailNoiseTexture, m_waterSampler },
+            clouds.coverage, clouds.noise,
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 6);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 8);
 
         const SDL_GPUBufferBinding vertexBinding{ mesh.vertexBuffer, 0 };
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
@@ -757,21 +760,23 @@ void QuadtreeWaterMeshRenderer::render(
         SDL_BindGPUGraphicsPipeline(renderPass, m_bridgePipeline);
         SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
         SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+        SDL_PushGPUFragmentUniformData(commandBuffer, 1, &clouds.state, sizeof(clouds.state));
 
         const SDL_GPUTextureSamplerBinding vertexSamplerBindings[1]{
             { m_displacementTexture, m_waterSampler },
         };
         SDL_BindGPUVertexSamplers(renderPass, 0, vertexSamplerBindings, 1);
 
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[6]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[8]{
             { m_displacementTexture, m_waterSampler },
             { m_slopeTexture, m_waterSampler },
             { m_foamHistoryReadTexture, m_waterSampler },
             { skyboxRenderer.cubemapTexture(), skyboxRenderer.cubemapSampler() },
             { m_foamDetailSdfTexture, m_waterSampler },
             { m_foamDetailNoiseTexture, m_waterSampler },
+            clouds.coverage, clouds.noise,
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 6);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 8);
 
         const SDL_GPUBufferBinding vertexBinding{ m_bridgeMesh.vertexBuffer, 0 };
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
@@ -867,9 +872,9 @@ void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& sha
         SDL_GPUShader* fragmentShader = createShader(
             shaderDirectory / "water_mesh.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
-            1,
+            2,
             0,
-            6);
+            8);
         pipelineInfo.vertex_shader = vertexShader;
         pipelineInfo.fragment_shader = fragmentShader;
         SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(m_device, &pipelineInfo);

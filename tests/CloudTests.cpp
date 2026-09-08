@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include "CloudManager.hpp"
+#include "CloudSampling.hpp"
 #include "PeriodicWorldPhase.hpp"
 #include <glm/glm.hpp>
 #include <cassert>
@@ -22,6 +23,16 @@ inline float mix(double a,float b,float c) { return glm::mix(float(a),b,c); }
 
 int main()
 {
+    assert(waterCloudSampleCount(48,0.5f)==24);
+    assert(waterCloudSampleCount(6,0.5f)==3);
+    assert(waterCloudSampleCount(48,1.0f/3.0f)==16);
+    assert(waterCloudSampleCount(6,1.0f/3.0f)==2);
+    for(int primary=1;primary<=128;++primary)
+        for(float multiplier:{-1.0f,0.1f,1.0f/3.0f,0.5f,1.0f,2.0f})
+        {
+            int count=waterCloudSampleCount(primary,multiplier);
+            assert(count>=1 && count<=primary);
+        }
     using Id=CloudManager::TileId;
     for(auto cell:{Id{0,0},Id{-125,721},Id{(1LL<<60),-(1LL<<60)}})
         for(int i=0;i<17;++i)
@@ -55,6 +66,15 @@ int main()
         assert(std::abs(error)<1e-9);
     }
     using namespace Shader;
+    // A displaced surface and slab translated together preserve the ray interval.
+    for(float shift:{-524288.0f,0.0f,524288.0f})
+    {
+        float surface=25.0f-shift, base=1800.0f-shift;
+        assert(cloudSlabInterval(surface-base,1,6500,180000)==vec2(1775,8275));
+        assert(cloudSlabInterval(surface-base,1,6500,2000)==vec2(1775,2000));
+        auto miss=cloudSlabInterval(surface-base,-1,6500,180000);
+        assert(miss.y<=miss.x);
+    }
     assert(cloudSlabInterval(-100,1,200,1000)==vec2(100,300));
     assert(cloudSlabInterval(300,-1,200,1000)==vec2(100,300));
     assert(cloudSlabInterval(100,0,200,1000)==vec2(0,1000));

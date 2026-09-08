@@ -5,6 +5,7 @@
 #include "Position.hpp"
 #include "RenderTypes.hpp"
 #include "SkyboxRenderer.hpp"
+#include "CloudRenderer.hpp"
 #include "WaterSettings.hpp"
 #include "WorldGridQuadtreeTypes.hpp"
 
@@ -125,7 +126,8 @@ public:
         const SkyboxRenderer& skyboxRenderer,
         Extent2D viewportExtent,
         float timeSeconds,
-        SDL_GPUBuffer* terrainHeightmapBuffer) const;
+        SDL_GPUBuffer* terrainHeightmapBuffer,
+        const CloudRenderer::SamplingResources& clouds) const;
 
     void fillMediumUniforms(SkyboxRenderer::FragmentUniforms& uniforms, float viewportHeight) const;
 

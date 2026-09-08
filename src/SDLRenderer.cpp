@@ -238,7 +238,6 @@ void SDLRenderer::renderFrame(
         throwSdlError("Failed to acquire SDL GPU command buffer.");
     }
 
-    cloudRenderer.prepare(commandBuffer, m_activeCameraPosition, double(SDL_GetTicksNS()) * 1.0e-9);
     {
         HELLO_PROFILE_SCOPE("SDLRenderer::UploadGeometry");
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
@@ -246,6 +245,7 @@ void SDLRenderer::renderFrame(
         {
             throwSdlError("Failed to begin SDL GPU copy pass.");
         }
+        cloudRenderer.upload(copyPass, m_activeCameraPosition, double(SDL_GetTicksNS()) * 1.0e-9, skyboxRenderer, lightingSystem);
         triangleRenderer.upload(copyPass);
         quadtreeMeshRenderer.upload(copyPass);
         if constexpr (AppConfig::Foliage::kCanopyEnabled)
@@ -367,7 +367,7 @@ void SDLRenderer::renderFrame(
                 skyboxRenderer,
                 viewportExtent,
                 timeSeconds,
-                quadtreeMeshRenderer.heightmapBuffer());
+                quadtreeMeshRenderer.heightmapBuffer(), cloudRenderer.waterSamplingResources());
         }
         {
             HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderNearbyFoliage", ProfileScopeGroup::Renderer);
@@ -451,7 +451,7 @@ void SDLRenderer::renderFrame(
                 quadtreeMeshRenderer.heightmapBuffer(),
                 static_cast<float>(m_viewportExtent.height));
         }
-        cloudRenderer.render(skyRenderPass, commandBuffer, glm::inverse(viewProjection), m_viewportDepthTexture, skyboxRenderer, lightingSystem);
+        cloudRenderer.render(skyRenderPass, commandBuffer, glm::inverse(viewProjection), m_viewportDepthTexture);
         SDL_EndGPURenderPass(skyRenderPass);
     }
 

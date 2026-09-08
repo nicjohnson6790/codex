@@ -4,6 +4,9 @@
 #include "water_displacement.glsl"
 #include "water_medium.glsl"
 #include "water_interface.glsl"
+#include "cloud_integration.glsl"
+
+layout(set=3,binding=1) uniform WaterCloudUniforms { CloudSamplingState state; } clouds;
 
 layout(set=3, binding=0) uniform WaterUniforms
 {
@@ -58,6 +61,8 @@ layout(set=2, binding=2) uniform sampler2DArray foamTexture;
 layout(set=2, binding=3) uniform samplerCube skyboxTexture;
 layout(set=2, binding=4) uniform sampler2D foamDetailSdfTexture;
 layout(set=2, binding=5) uniform sampler2D foamDetailNoiseTexture;
+layout(set=2,binding=6) uniform sampler2D cloudCoverageTexture;
+layout(set=2,binding=7) uniform sampler3D cloudNoiseTexture;
 
 layout(location = 0) in vec3 fragWorldPosition;
 layout(location = 1) flat in uint fragBandMask;
@@ -151,10 +156,23 @@ vec3 sampleSkyRadiance(vec3 worldDirection)
     vec3 sampleDirection = transpose(mat3(water.skyRotation)) * worldDirection;
     vec3 skyboxColor = texture(skyboxTexture, sampleDirection).rgb;
     vec3 transmission, scattering;
-    evaluateAtmosphere(water.cameraAndTime.z + fragWorldPosition.y, worldDirection,
-        water.atmosphereParams.y, water.atmosphereParams.x, water.sunDirectionTimeOfDay.xyz,
+    float altitude = water.cameraAndTime.z + fragWorldPosition.y;
+    float skyDistance = water.atmosphereParams.y;
+    if (altitude > water.atmosphereParams.x && worldDirection.y < 0.0)
+        skyDistance += (altitude-water.atmosphereParams.x)/-worldDirection.y;
+    evaluateAtmosphere(altitude, worldDirection,
+        skyDistance, water.atmosphereParams.x, water.sunDirectionTimeOfDay.xyz,
         water.atmosphereOptics, true, transmission, scattering);
     return displaySkyRadiance(skyboxColor, transmission, scattering, water.atmosphereOptics);
+}
+
+vec3 sampleWaterEnvironment(vec3 direction)
+{
+    vec3 clearSky=sampleSkyRadiance(direction);
+    if(clouds.state.march.z<0.5) return clearSky;
+    vec4 cloud=integrateCloudRay(fragWorldPosition,direction,clouds.state.march.x,
+        clouds.state,cloudCoverageTexture,cloudNoiseTexture);
+    return cloud.rgb+clearSky*(1.0-cloud.a);
 }
 
 float beckmannDistribution(float normalDotHalf, float roughness)
@@ -392,7 +410,7 @@ void main()
         vec3 boundaryColor = reflectedWater;
         if (boundary.reflectance < 1.0)
         {
-            vec3 transmittedSky = sampleSkyRadiance(boundary.transmitted);
+            vec3 transmittedSky = sampleWaterEnvironment(boundary.transmitted);
             boundaryColor = mix(transmittedSky, reflectedWater, boundary.reflectance);
         }
         // Existing foam coverage occludes the clear boundary with medium light;
@@ -445,7 +463,7 @@ void main()
 
     vec3 reflectionNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), farReflectionFlattenT));
     vec3 reflectionDir = reflect(-viewDir, reflectionNormal);
-    vec3 reflectedSky = sampleSkyRadiance(reflectionDir) * water.opticalParams.w;
+    vec3 reflectedSky = sampleWaterEnvironment(reflectionDir) * water.opticalParams.w;
     vec3 environmentSpecular =
         reflectedSky *
         fresnelReflection *

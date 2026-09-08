@@ -1,6 +1,7 @@
 #pragma once
 #include "CloudManager.hpp"
 #include "SkyboxRenderer.hpp"
+#include <cstddef>
 
 class CloudRenderer : private EngineRendererBase
 {
@@ -18,6 +19,7 @@ public:
         float powderStrength=1, powderAngularPower=1;
         int octaveCount=8, viewSteps=48, sunSteps=6;
         float octaveA=0.5f, octaveB=0.5f, octaveC=0.5f;
+        float waterSamplingMultiplier=0.5f;
         float ambient=0.15f, maxDistance=180000, termination=0.01f;
     };
     struct DensityUniforms
@@ -28,22 +30,37 @@ public:
         glm::vec4 detailPhase;
         glm::vec4 shape; // base strength, detail strength, erosion, unused
     };
-    struct Uniforms
+    struct SamplingState
     {
-        glm::mat4 inverseViewProjection;
         DensityUniforms field;
         glm::vec4 sun, atmosphere;
         SkyboxRenderer::AtmosphereOptics optics;
         glm::vec4 scattering, powder, march, octaves;
     };
     static_assert(sizeof(DensityUniforms)==80);
+    struct Uniforms
+    {
+        glm::mat4 inverseViewProjection;
+        SamplingState cloud;
+    };
+    struct SamplingResources
+    {
+        SDL_GPUTextureSamplerBinding coverage, noise;
+        SamplingState state;
+    };
+    static_assert(sizeof(SamplingState)==256);
+    static_assert(offsetof(SamplingState,optics)==112);
+    static_assert(offsetof(SamplingState,scattering)==192);
+    static_assert(offsetof(SamplingState,march)==224);
     static_assert(sizeof(Uniforms)==320);
+    static_assert(offsetof(Uniforms,cloud)==64);
+    SamplingResources waterSamplingResources() const;
     Settings& settings() { return m_settings; }
     void drawSettings();
     void initialize(SDL_GPUDevice*,SDL_GPUTextureFormat,SDL_GPUTextureFormat,const std::filesystem::path&);
     void shutdown();
-    void prepare(SDL_GPUCommandBuffer*,const Position&,double timeSeconds);
-    void render(SDL_GPURenderPass*,SDL_GPUCommandBuffer*,const glm::mat4&,SDL_GPUTexture*,const SkyboxRenderer&,const LightingSystem&);
+    void upload(SDL_GPUCopyPass*,const Position&,double timeSeconds,const SkyboxRenderer&,const LightingSystem&);
+    void render(SDL_GPURenderPass*,SDL_GPUCommandBuffer*,const glm::mat4&,SDL_GPUTexture*);
     CloudManager& manager() { return m_manager; }
 private:
     Settings m_settings;
@@ -53,6 +70,8 @@ private:
     SDL_GPUSampler *m_linear=nullptr,*m_repeat=nullptr,*m_depth=nullptr;
     SDL_GPUGraphicsPipeline* m_pipeline=nullptr;
     DensityUniforms m_field{};
+    SamplingState m_prepared{};
+    glm::vec2 m_waterSteps{1.0f};
     std::uint64_t m_uploadedRevision=0;
     glm::dvec2 m_baseWind{},m_detailWind{};
     double m_previousTime=0;

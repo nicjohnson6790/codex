@@ -1,4 +1,5 @@
 #include "CloudRenderer.hpp"
+#include "CloudSampling.hpp"
 #include "PeriodicWorldPhase.hpp"
 #include <imgui.h>
 #include <algorithm>
@@ -81,7 +82,7 @@ void CloudRenderer::shutdown()
     m_uploadedRevision=0;
 }
 
-void CloudRenderer::prepare(SDL_GPUCommandBuffer* command,const Position& origin,double time)
+void CloudRenderer::upload(SDL_GPUCopyPass* copy,const Position& origin,double time,const SkyboxRenderer& sky,const LightingSystem& lighting)
 {
     m_activeCameraPosition=origin;
     auto& s=m_settings;
@@ -119,31 +120,40 @@ void CloudRenderer::prepare(SDL_GPUCommandBuffer* command,const Position& origin
         double(dz)*Position::kCellSize-2.0*Position::kCellSize-origin.localPosition().z,CloudManager::kPitch,81};
     m_field.basePhase=phase(s.baseNoiseScale,m_baseWind); m_field.detailPhase=phase(s.detailNoiseScale,m_detailWind);
     m_field.shape={s.baseStrength,s.detailStrength,s.erosion,0};
+    s.waterSamplingMultiplier=std::clamp(s.waterSamplingMultiplier,0.1f,1.0f);
+    m_prepared.field=m_field;
+    m_waterSteps={waterCloudSampleCount(s.viewSteps,s.waterSamplingMultiplier),waterCloudSampleCount(s.sunSteps,s.waterSamplingMultiplier)};
+    m_prepared.sun=glm::vec4(lighting.sunDirection(),0);
+    m_prepared.atmosphere={m_activeCameraPosition.localPosition().y,sky.atmosphereSettings().atmosphereHeight,s.ambient,sky.atmosphereSettings().skyExposure};
+    m_prepared.optics=sky.buildAtmosphereOptics(lighting);
+    m_prepared.scattering={s.extinction,s.anisotropy,s.lobeWeight,float(s.octaveCount)};
+    m_prepared.powder={s.powderStrength,s.powderAngularPower,float(s.viewSteps),float(s.sunSteps)};
+    m_prepared.march={s.maxDistance,s.termination,0,0}; m_prepared.octaves={s.octaveA,s.octaveB,s.octaveC,0};
+    m_prepared.march.z=s.enabled && m_manager.revision()!=0 ? 1.0f : 0.0f;
     if(m_uploadedRevision==m_manager.revision()) return;
     auto* mapped=static_cast<float*>(SDL_MapGPUTransferBuffer(m_device,m_upload,true));
     if(!mapped) throwSdlError("Cloud macro mapping");
     m_manager.writeTexture({mapped,128*81},128);
     SDL_UnmapGPUTransferBuffer(m_device,m_upload);
-    auto* copy=SDL_BeginGPUCopyPass(command);
-    if(!copy) throwSdlError("Cloud macro copy pass");
     SDL_GPUTextureTransferInfo source{}; source.transfer_buffer=m_upload; source.pixels_per_row=128; source.rows_per_layer=81;
     SDL_GPUTextureRegion destination{}; destination.texture=m_macro; destination.w=81; destination.h=81; destination.d=1;
     SDL_UploadToGPUTexture(copy,&source,&destination,true);
-    SDL_EndGPUCopyPass(copy);
     m_uploadedRevision=m_manager.revision();
 }
 
-void CloudRenderer::render(SDL_GPURenderPass* pass,SDL_GPUCommandBuffer* command,const glm::mat4& inverse,SDL_GPUTexture* depth,const SkyboxRenderer& sky,const LightingSystem& lighting)
+CloudRenderer::SamplingResources CloudRenderer::waterSamplingResources() const
 {
-    if(!m_settings.enabled || !m_uploadedRevision) return;
-    const auto& s=m_settings;
-    Uniforms u{}; u.inverseViewProjection=inverse; u.field=m_field;
-    u.sun=glm::vec4(lighting.sunDirection(),0);
-    u.atmosphere={m_activeCameraPosition.localPosition().y,sky.atmosphereSettings().atmosphereHeight,s.ambient,sky.atmosphereSettings().skyExposure};
-    u.optics=sky.buildAtmosphereOptics(lighting);
-    u.scattering={s.extinction,s.anisotropy,s.lobeWeight,float(s.octaveCount)};
-    u.powder={s.powderStrength,s.powderAngularPower,float(s.viewSteps),float(s.sunSteps)};
-    u.march={s.maxDistance,s.termination,0,0}; u.octaves={s.octaveA,s.octaveB,s.octaveC,0};
+    SamplingResources result{{m_macro,m_linear},{m_noise,m_repeat},m_prepared};
+    result.state.powder.z=m_waterSteps.x;
+    result.state.powder.w=m_waterSteps.y;
+    if(!m_uploadedRevision) result.state.march.z=0;
+    return result;
+}
+
+void CloudRenderer::render(SDL_GPURenderPass* pass,SDL_GPUCommandBuffer* command,const glm::mat4& inverse,SDL_GPUTexture* depth)
+{
+    if(m_prepared.march.z<0.5f) return;
+    Uniforms u{inverse,m_prepared};
     SDL_BindGPUGraphicsPipeline(pass,m_pipeline);
     SDL_GPUTextureSamplerBinding samplers[]{{depth,m_depth},{m_macro,m_linear},{m_noise,m_repeat}};
     SDL_BindGPUFragmentSamplers(pass,0,samplers,3);
@@ -181,6 +191,7 @@ void CloudRenderer::drawSettings()
     ImGui::SliderFloat("Octave c",&s.octaveC,0,1);
     ImGui::SliderInt("View samples",&s.viewSteps,8,128);
     ImGui::SliderInt("Sun samples",&s.sunSteps,1,32);
+    ImGui::SliderFloat("Water sample multiplier",&s.waterSamplingMultiplier,0.1f,1.0f,"%.3f");
     ImGui::SliderFloat("Ambient",&s.ambient,0,1);
     ImGui::SliderFloat("Maximum distance (m)",&s.maxDistance,10000,500000);
     ImGui::SliderFloat("Transmittance termination",&s.termination,0.001f,0.1f,"%.3f");
