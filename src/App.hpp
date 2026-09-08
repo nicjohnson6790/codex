@@ -47,6 +47,7 @@ class App
         std::uint64_t quitAfterFrameCount = 0;
         bool verifyHeightmapPipeline = false;
         bool stressHeightmapPipeline = false;
+        bool verifyClouds = false;
         bool enableSteam = true;
     };
 
@@ -111,6 +112,7 @@ class App
     NearbyFoliageRenderer m_nearbyFoliageRenderer;
     QuadtreeWaterMeshRenderer m_waterMeshRenderer;
     SkyboxRenderer m_skyboxRenderer;
+    CloudRenderer m_cloudRenderer;
     GamepadInput m_gamepadInput;
     SteamService m_steamService;
     SteamSocketsTransport m_steamTransport;

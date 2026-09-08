@@ -49,6 +49,10 @@ int main(int argc, char **argv)
             {
                 options.enableSteam = false;
             }
+            else if (std::strcmp(argv[index], "--verify-clouds") == 0)
+            {
+                options.verifyClouds = true;
+            }
             else if (std::strcmp(argv[index], "--verify-heightmap-pipeline") == 0)
             {
                 options.verifyHeightmapPipeline = true;

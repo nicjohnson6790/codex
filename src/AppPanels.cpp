@@ -217,6 +217,7 @@ void AppPanels::drawControlsTab(Context &context)
         ImGui::SliderFloat("Intensity", &sun.intensity, 0.0f, 4.0f, "%.2f");
     }
 
+    context.cloudRenderer.drawSettings();
     if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen))
     {
         SkyboxRenderer::AtmosphereSettings &atmosphere = context.skyboxRenderer.atmosphereSettings();

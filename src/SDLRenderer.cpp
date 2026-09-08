@@ -1,6 +1,8 @@
 #include "SDLRenderer.hpp"
 
 #include "AppConfig.hpp"
+#include "CloudRenderer.hpp"
+#include <SDL3/SDL_timer.h>
 #include "FoliageCanopyRenderer.hpp"
 #include "FoliageImposterRenderer.hpp"
 #include "LightingSystem.hpp"
@@ -218,6 +220,7 @@ void SDLRenderer::renderFrame(
     LineRenderer& lineRenderer,
     WorldTextRenderer& worldTextRenderer,
     SkyboxRenderer& skyboxRenderer,
+    CloudRenderer& cloudRenderer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
     Extent2D viewportExtent,
@@ -235,6 +238,7 @@ void SDLRenderer::renderFrame(
         throwSdlError("Failed to acquire SDL GPU command buffer.");
     }
 
+    cloudRenderer.prepare(commandBuffer, m_activeCameraPosition, double(SDL_GetTicksNS()) * 1.0e-9);
     {
         HELLO_PROFILE_SCOPE("SDLRenderer::UploadGeometry");
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
@@ -447,6 +451,7 @@ void SDLRenderer::renderFrame(
                 quadtreeMeshRenderer.heightmapBuffer(),
                 static_cast<float>(m_viewportExtent.height));
         }
+        cloudRenderer.render(skyRenderPass, commandBuffer, glm::inverse(viewProjection), m_viewportDepthTexture, skyboxRenderer, lightingSystem);
         SDL_EndGPURenderPass(skyRenderPass);
     }
 

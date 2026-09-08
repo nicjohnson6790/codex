@@ -89,6 +89,8 @@ public:
     [[nodiscard]] std::uint16_t computeDispatchBudget() const { return m_heightmapManager.computeDispatchBudget(); }
     void setComputeDispatchBudget(std::uint16_t budget) { m_heightmapManager.setComputeDispatchBudget(budget); }
     [[nodiscard]] std::uint16_t residentCount() const { return m_heightmapManager.residentCount(); }
+    [[nodiscard]] std::int64_t activeGridX() const { return m_baseGridX; }
+    [[nodiscard]] std::int64_t activeGridY() const { return m_baseGridY; }
     [[nodiscard]] std::uint16_t queuedCount() const { return m_heightmapManager.queuedCount(); }
     [[nodiscard]] WorldGridQuadtreeHeightmapManager::Diagnostics heightmapDiagnostics() const { return m_heightmapManager.diagnostics(); }
 

@@ -200,6 +200,7 @@ void App::initializeRenderers(const std::filesystem::path &shaderDirectory)
     }
     logStartup("init skybox renderer");
     m_skyboxRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
+    m_cloudRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
 }
 
 void App::initializeImGui()
@@ -271,6 +272,7 @@ void App::shutdownRenderers()
         m_waterMeshRenderer.shutdown();
     }
     m_skyboxRenderer.shutdown();
+    m_cloudRenderer.shutdown();
     m_worldTextRenderer.shutdown();
     m_lineRenderer.shutdown();
     m_triangleRenderer.shutdown();
@@ -382,6 +384,7 @@ void App::buildUi()
         .gamepadName = m_gamepadInput.gamepadName(),
         .lightingSystem = m_lightingSystem,
         .skyboxRenderer = m_skyboxRenderer,
+        .cloudRenderer = m_cloudRenderer,
         .foliageCanopyRenderer = m_foliageCanopyRenderer,
         .foliageCanopyManager = m_foliageCanopyManager,
         .foliageRenderer = m_foliageRenderer,
@@ -547,6 +550,22 @@ PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
 void App::syncRenderStateForActiveCamera(Extent2D viewportExtent)
 {
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncRenderState");
+    if (m_options.verifyClouds)
+    {
+        m_playerFollowCameraEnabled = false;
+        const auto stage = (m_frameIndex / 60) % 12;
+        if (m_frameIndex % 60 == 0)
+            SDL_Log("Cloud validation stage %llu/12", (unsigned long long)(stage + 1));
+        const double heights[]{300.0, 1800.0, 2500.0, 4200.0, 7000.0, 2500.0};
+        auto& camera = m_cameraManager.activeCamera();
+        const std::int64_t grid = stage >= 6 ? (1LL << 55) : 23;
+        camera.position = Position(grid, -1, {524250.0 + double(m_frameIndex % 60) * 2.0, heights[stage % 6], 347000.0});
+        camera.forward = stage % 6 == 5 ? glm::dvec3(0,0,-1) : glm::normalize(glm::dvec3(0, stage % 6 >= 3 ? -0.6 : 0.6, -1));
+        auto& clouds = m_cloudRenderer.settings();
+        clouds.enabled = true;
+        clouds.seed = 173 + std::uint32_t(stage / 3);
+        clouds.coverage = 0.6f;
+    }
     if (m_options.stressHeightmapPipeline)
     {
         m_playerFollowCameraEnabled = false;
@@ -754,9 +773,10 @@ void App::renderCurrentFrame()
 {
     ImGui::Render();
     const glm::mat4 viewProjection = m_cameraManager.buildActiveViewProjectionMatrix(m_panels.viewportExtent());
+    m_cloudRenderer.manager().update({m_worldGridQuadtree.activeGridX(), m_worldGridQuadtree.activeGridY()}, m_cloudRenderer.settings().seed);
     m_renderer.renderFrame(m_triangleRenderer, m_quadtreeMeshRenderer, m_foliageCanopyRenderer, m_foliageRenderer, m_nearbyFoliageRenderer,
                            m_worldGridQuadtree.heightmapManager(), m_foliageManager, m_foliageCanopyManager, m_nearbyFoliageManager,
-                           m_waterMeshRenderer, m_lineRenderer, m_worldTextRenderer, m_skyboxRenderer, viewProjection, m_lightingSystem,
+                           m_waterMeshRenderer, m_lineRenderer, m_worldTextRenderer, m_skyboxRenderer, m_cloudRenderer, viewProjection, m_lightingSystem,
                            m_panels.viewportExtent(), ImGui::GetDrawData(), !m_panels.viewportPaused(), m_elapsedTimeSeconds, m_frameIndex);
 }
 
@@ -777,6 +797,13 @@ void App::finishFrame()
     }
     if (m_options.quitAfterFrameCount != 0 && m_frameIndex >= m_options.quitAfterFrameCount)
     {
+        if (m_options.verifyClouds)
+        {
+            if (m_frameIndex < 720 || m_cloudRenderer.manager().revision() < 20)
+                throw std::runtime_error("Cloud validation needs 720 frames and coverage transitions");
+            SDL_Log("Cloud validation passed: below/inside/above/horizontal rays, cell crossings, seed changes, universe coordinates; macro revisions=%llu",
+                (unsigned long long)m_cloudRenderer.manager().revision());
+        }
         if (m_options.verifyHeightmapPipeline)
         {
             const auto diagnostics = m_worldGridQuadtree.heightmapDiagnostics();

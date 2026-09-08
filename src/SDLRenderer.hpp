@@ -67,6 +67,7 @@ public:
         LineRenderer& lineRenderer,
         WorldTextRenderer& worldTextRenderer,
         SkyboxRenderer& skyboxRenderer,
+        class CloudRenderer& cloudRenderer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
         Extent2D viewportExtent,

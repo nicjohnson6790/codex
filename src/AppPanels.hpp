@@ -11,6 +11,7 @@
 #include "RenderTypes.hpp"
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
+#include "CloudRenderer.hpp"
 #include "SDLRenderer.hpp"
 #include "FoliageImposterRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
@@ -52,6 +53,7 @@ public:
         std::string_view gamepadName;
         LightingSystem& lightingSystem;
         SkyboxRenderer& skyboxRenderer;
+        CloudRenderer& cloudRenderer;
         FoliageCanopyRenderer& foliageCanopyRenderer;
         WorldGridFoliageCanopyManager& foliageCanopyManager;
         FoliageImposterRenderer& foliageRenderer;

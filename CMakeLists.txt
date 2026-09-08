@@ -225,8 +225,14 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_spectrum_update.comp ${WATER_SP
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_fft_stage.comp ${WATER_FFT_STAGE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_build_maps.comp ${WATER_BUILD_MAPS_COMP_SPV})
 
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.vert ${SHADER_OUTPUT_DIR}/cloud.vert.spv)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.frag ${SHADER_OUTPUT_DIR}/cloud.frag.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud_noise.comp ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_noise.glsl)
 add_custom_target(shaders ALL
     DEPENDS
+        ${SHADER_OUTPUT_DIR}/cloud.vert.spv
+        ${SHADER_OUTPUT_DIR}/cloud.frag.spv
+        ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv
         ${TRIANGLE_VERT_SPV}
         ${TRIANGLE_FRAG_SPV}
         ${LINE_VERT_SPV}
@@ -286,6 +292,7 @@ add_executable(terrain_sandbox
     src/QuadtreeWaterMeshRenderer.cpp
     src/SDLRenderer.cpp
     src/SkyboxRenderer.cpp
+    src/CloudRenderer.cpp
     src/TriangleRenderer.cpp
     src/WorldGridQuadtree.cpp
     src/WorldGridFoliageManager.cpp
@@ -379,6 +386,10 @@ target_link_libraries(terrain_sandbox
 
 if (CODEX_BUILD_TESTS)
     enable_testing()
+    add_executable(cloud_tests tests/CloudTests.cpp)
+    set_target_properties(cloud_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
+    target_include_directories(cloud_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
+    add_test(NAME cloud_tests COMMAND $<TARGET_FILE:cloud_tests>)
     add_executable(asset_residency_tests tests/AssetResidencyTests.cpp)
     set_target_properties(asset_residency_tests PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
