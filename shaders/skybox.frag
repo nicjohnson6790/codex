@@ -79,6 +79,7 @@ void main()
     ivec2 pixel = clamp(ivec2(gl_FragCoord.xy), ivec2(0), textureSize(depthTexture,0)-1);
     float depth = texelFetch(depthTexture, pixel, 0).r;
     vec3 direction = normalize(reconstructPosition(1.0));
+    float footprint=0.5*max(length(dFdx(direction)),length(dFdy(direction)));
     int pass = int(uniforms.waterParams.w);
     if (pass == 0 && depth > 0.0) discard;
     float height = uniforms.atmosphereParams.w;
@@ -96,12 +97,13 @@ void main()
             vec3 t, s;
             evaluateAtmosphere(height,direction,skyDistance,uniforms.atmosphereParams.x,
                 sun,uniforms.optics,true,t,s);
-            outColor = vec4(linearSkyRadiance(space,t,s,uniforms.optics),1.0);
+            outColor = vec4(directionalSkyRadiance(space,t,s,uniforms.optics,direction,sun,
+                height,uniforms.atmosphereParams.x,footprint),1.0);
         }
         return;
     }
     float distance = depth > 0.0 ? length(reconstructPosition(depth)) : uniforms.atmosphereParams.y;
-    // Air background was composed and tone mapped together in pass zero.
+    // Air background was composed in linear radiance in pass zero.
     if (depth <= 0.0 && height >= surface) discard;
     vec3 transmission, scattering = vec3(0.0);
     if (height < surface)

@@ -332,6 +332,8 @@ inline constexpr float kMieG = 0.88f;
 inline constexpr float kAtmosphereCloudSourceScale = 4.8f;
 // Shared atmosphere/cloud radiance calibration; decoded space is a separate source.
 inline constexpr float kEnvironmentRadianceScale = 12.0f;
-inline constexpr float kSpaceRadiance = 0.0001f;
+inline constexpr float kSpaceRadiance = 0.02f;
+// Independent disk calibration against artistic solar RGB, not solid-angle irradiance.
+inline constexpr float kSunDiskRadiance = 100.0f;
 } // namespace Atmosphere
 } // namespace AppConfig

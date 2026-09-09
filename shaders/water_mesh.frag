@@ -152,7 +152,7 @@ float sampleFoamSdf(vec2 uv, vec2 ridgeRange)
     return saturate(max(ridge, fill * 0.26));
 }
 
-vec3 sampleSkyRadiance(vec3 worldDirection)
+vec3 sampleSkyRadiance(vec3 worldDirection, bool directional, float footprint)
 {
     vec3 sampleDirection = transpose(mat3(water.skyRotation)) * worldDirection;
     vec3 skyboxColor = texture(skyboxTexture, sampleDirection).rgb;
@@ -164,12 +164,15 @@ vec3 sampleSkyRadiance(vec3 worldDirection)
     evaluateAtmosphere(altitude, worldDirection,
         skyDistance, water.atmosphereParams.x, water.sunDirectionTimeOfDay.xyz,
         water.atmosphereOptics, true, transmission, scattering);
-    return linearSkyRadiance(skyboxColor, transmission, scattering, water.atmosphereOptics);
+    return directional ? directionalSkyRadiance(skyboxColor,transmission,scattering,
+        water.atmosphereOptics,worldDirection,water.sunDirectionTimeOfDay.xyz,altitude,
+        water.atmosphereParams.x,footprint)
+        : linearSkyRadiance(skyboxColor, transmission, scattering, water.atmosphereOptics);
 }
 
-vec3 sampleWaterEnvironment(vec3 direction)
+vec3 sampleWaterEnvironment(vec3 direction,float footprint)
 {
-    vec3 clearSky=sampleSkyRadiance(direction);
+    vec3 clearSky=sampleSkyRadiance(direction,true,footprint);
     if(clouds.state.march.z<0.5) return clearSky;
     vec4 cloud=integrateCloudRay(fragWorldPosition,direction,clouds.state.march.x,
         clouds.state,cloudCoverageTexture,cloudNoiseTexture);
@@ -402,6 +405,8 @@ void main()
         float facing = dot(interfaceNormal, viewDir);
         interfaceNormal = normalize(interfaceNormal + viewDir * max(1.0e-5 - facing, 0.0));
         WaterInterface boundary = waterToAirInterface(-viewDir, interfaceNormal);
+        // Evaluate derivatives before the per-fragment TIR branch.
+        float transmittedFootprint=0.5*max(length(dFdx(boundary.transmitted)),length(dFdy(boundary.transmitted)));
         float surfaceHeight = water.cameraAndTime.z + fragWorldPosition.y;
         // The existing medium is homogeneous/isotropic, so boundary.reflected
         // has the same infinite-ray radiance in every direction. No camera leg.
@@ -411,7 +416,7 @@ void main()
         vec3 boundaryColor = reflectedWater;
         if (boundary.reflectance < 1.0)
         {
-            vec3 transmittedSky = sampleWaterEnvironment(boundary.transmitted);
+            vec3 transmittedSky = sampleWaterEnvironment(boundary.transmitted,transmittedFootprint);
             boundaryColor = mix(transmittedSky, reflectedWater, boundary.reflectance);
         }
         // Existing foam coverage occludes the clear boundary with medium light;
@@ -464,7 +469,8 @@ void main()
 
     vec3 reflectionNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), farReflectionFlattenT));
     vec3 reflectionDir = reflect(-viewDir, reflectionNormal);
-    vec3 reflectedSky = sampleWaterEnvironment(reflectionDir) * water.opticalParams.w;
+    float reflectionFootprint=0.5*max(length(dFdx(reflectionDir)),length(dFdy(reflectionDir)));
+    vec3 reflectedSky = sampleWaterEnvironment(reflectionDir,reflectionFootprint) * water.opticalParams.w;
     vec3 environmentSpecular =
         reflectedSky *
         fresnelReflection *
@@ -474,7 +480,7 @@ void main()
 
     vec3 absorptionCoefficients = vec3(0.22, 0.09, 0.045) * water.debugParams.w;
     vec3 transmission = exp(-absorptionCoefficients * opticalDepth);
-    vec3 ambientSky = sampleSkyRadiance(normalize(mix(normal, vec3(0.0, 1.0, 0.0), 0.6)));
+    vec3 ambientSky = sampleSkyRadiance(normalize(mix(normal, vec3(0.0, 1.0, 0.0), 0.6)),false,0.0);
     float forwardScatter = phaseSchlick(dot(-viewDir, sunDirection), water.debugParams.z);
     float sunOverhead = smoothstep(0.35, 0.92, sunDirection.y);
     float lookDownFactor = pow(normalDotView, 2.2);

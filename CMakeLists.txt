@@ -230,8 +230,14 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/display_transform.frag ${SHADER_OUTPU
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.vert ${SHADER_OUTPUT_DIR}/cloud.vert.spv)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.frag ${SHADER_OUTPUT_DIR}/cloud.frag.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud_noise.comp ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_noise.glsl)
+foreach(EXPOSURE_STAGE clear histogram reduce)
+    compile_shader(${CMAKE_SOURCE_DIR}/shaders/exposure_${EXPOSURE_STAGE}.comp ${SHADER_OUTPUT_DIR}/exposure_${EXPOSURE_STAGE}.comp.spv ${CMAKE_SOURCE_DIR}/shaders/exposure_math.glsl)
+endforeach()
 add_custom_target(shaders ALL
     DEPENDS
+        ${SHADER_OUTPUT_DIR}/exposure_clear.comp.spv
+        ${SHADER_OUTPUT_DIR}/exposure_histogram.comp.spv
+        ${SHADER_OUTPUT_DIR}/exposure_reduce.comp.spv
         ${SHADER_OUTPUT_DIR}/display_transform.frag.spv
         ${SHADER_OUTPUT_DIR}/cloud.vert.spv
         ${SHADER_OUTPUT_DIR}/cloud.frag.spv

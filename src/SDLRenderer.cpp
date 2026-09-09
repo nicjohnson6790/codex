@@ -446,6 +446,8 @@ void SDLRenderer::renderFrame(
         cloudRenderer.render(skyRenderPass, commandBuffer, glm::inverse(viewProjection), m_viewportDepthTexture);
         SDL_EndGPURenderPass(skyRenderPass);
 
+        m_displayTransform.meter(commandBuffer,m_sceneColorTexture,m_viewportExtent.width,m_viewportExtent.height);
+
         colorTargetInfo.texture = m_viewportColorTexture;
         colorTargetInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
         renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorTargetInfo, 1, nullptr);

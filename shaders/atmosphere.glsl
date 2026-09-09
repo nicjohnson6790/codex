@@ -11,7 +11,7 @@ struct AtmosphereOptics
     vec4 mie; // scattering, extinction, scale height, anisotropy
     vec4 ozone; // RGB absorption, equivalent column height
     vec4 solar; // linear incident RGB radiance, atmosphere/cloud source scale
-    vec4 radianceScales; // environment radiance scale, space radiance scale, reserved, reserved
+    vec4 radianceScales; // environment radiance scale, space source scale, disk source scale, reserved
 };
 
 vec3 airOpticalDepth(float h, float dy, float distance, float top, AtmosphereOptics a)
@@ -111,6 +111,22 @@ void evaluateAtmosphere(float height, vec3 direction, float distance, float top,
 vec3 linearSkyRadiance(vec3 decodedSpace, vec3 transmission, vec3 scattering, AtmosphereOptics a)
 {
     return decodedSpace * a.radianceScales.y * transmission + scattering;
+}
+
+// Directional background only; diffuse ambient lookups use linearSkyRadiance.
+// The artistic solar RGB is not irradiance. radianceScales.z calibrates the disk
+// independently of solar.w and radianceScales.x (atmosphere/cloud lighting).
+vec3 directionalSkyRadiance(vec3 space, vec3 t, vec3 s, AtmosphereOptics a,
+    vec3 ray, vec3 sun, float height, float top, float footprint)
+{
+    float angle=atan(length(cross(ray,sun)),dot(ray,sun));
+    float edge=max(footprint,1.0e-6f);
+    float disk=1.0f-smoothstep(0.004642576f-edge,0.004642576f+edge,angle);
+    // Planar surface blocks downward celestial rays in the atmosphere. Above
+    // the top, only rays entering the medium encounter that surface.
+    if(ray.y<0.0f) disk=0.0f;
+    vec3 source=min(max(vec3(a.solar)*a.radianceScales.z,vec3(0.0f)),vec3(60000.0f));
+    return (space*a.radianceScales.y+disk*source)*t+s;
 }
 
 #undef ATM_OUTPUT

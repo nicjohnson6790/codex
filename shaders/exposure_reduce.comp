@@ -1,0 +1,24 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "exposure_math.glsl"
+layout(local_size_x=1) in;
+layout(set=0,binding=0,std430) readonly buffer Histogram { uint bins[256]; } histogram;
+layout(set=1,binding=0,std430) buffer State { float value; float valid; } state;
+layout(set=2,binding=0) uniform Settings { vec4 range; vec4 timing; } u;
+void main()
+{
+    float total=0.0;
+    for(int i=0;i<256;++i) total+=float(histogram.bins[i]);
+    float sum=0.0, prefix=0.0;
+    for(int i=0;i<256;++i) {
+        float count=float(histogram.bins[i]);
+        sum+=exposureRetained(prefix,count,total)*exposureBinLog(i);
+        prefix+=count;
+    }
+    // range.w: -1 first automatic frame, positive manual-to-auto seed, zero retain.
+    float previous=u.range.w!=0.0 ? 1.0 : state.value;
+    float seed=u.range.w;
+    if(seed==0.0 && state.valid<0.5) seed=-1.0;
+    state.value=exposureState(previous,seed,total,sum/max(total*0.96,1e-20),u.range,u.timing.xyz);
+    state.valid=total>0.0 || seed>=0.0 ? 1.0 : 0.0;
+}

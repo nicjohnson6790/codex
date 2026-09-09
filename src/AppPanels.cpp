@@ -218,7 +218,7 @@ void AppPanels::drawControlsTab(Context &context)
     }
 
     ImGui::SeparatorText("Viewport display");
-    ImGui::InputFloat("Camera exposure", &context.renderer.displayTransform().exposure, 0.1f, 0.5f, "%.2f");
+    context.renderer.displayTransform().drawSettings();
     context.cloudRenderer.drawSettings();
     if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen))
     {

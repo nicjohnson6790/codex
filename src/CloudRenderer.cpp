@@ -154,6 +154,7 @@ void CloudRenderer::render(SDL_GPURenderPass* pass,SDL_GPUCommandBuffer* command
 {
     if(m_prepared.march.z<0.5f) return;
     Uniforms u{inverse,m_prepared};
+    u.cloud.march.w=float(std::clamp(m_settings.fullscreenBudget,128,1024));
     SDL_BindGPUGraphicsPipeline(pass,m_pipeline);
     SDL_GPUTextureSamplerBinding samplers[]{{depth,m_depth},{m_macro,m_linear},{m_noise,m_repeat}};
     SDL_BindGPUFragmentSamplers(pass,0,samplers,3);
@@ -190,10 +191,11 @@ void CloudRenderer::drawSettings()
     ImGui::SliderFloat("Octave b",&s.octaveB,0,1);
     ImGui::SliderFloat("Octave c",&s.octaveC,0,1);
     ImGui::SliderInt("View samples",&s.viewSteps,8,128);
+    ImGui::SliderInt("Fullscreen total sample budget",&s.fullscreenBudget,128,1024);
     ImGui::SliderInt("Sun samples",&s.sunSteps,1,32);
     ImGui::SliderFloat("Water sample multiplier",&s.waterSamplingMultiplier,0.1f,1.0f,"%.3f");
     ImGui::SliderFloat("Ambient",&s.ambient,0,1);
-    ImGui::SliderFloat("Maximum distance (m)",&s.maxDistance,10000,500000);
+    ImGui::SliderFloat("Water cloud maximum distance (m)",&s.maxDistance,10000,500000);
     ImGui::SliderFloat("Transmittance termination",&s.termination,0.001f,0.1f,"%.3f");
     if(ImGui::Button("Reset clouds")) s=Settings{};
     ImGui::PopID();

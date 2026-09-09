@@ -1,6 +1,6 @@
 # SDL3 GPU Terrain Sandbox
 
-![Terrain sandbox with procedural volumetric clouds](images/Screenshot%202026-09-07%20203334.png)
+![Terrain sandbox with procedural volumetric clouds](images/Screenshot%202026-09-08%20221535.png)
 
 Codex is an experimental large-world terrain sandbox and editor built in C++20 with SDL3 GPU and Dear ImGui. It combines streamed quadtree terrain, procedural foliage, FFT water, atmospheric rendering, world-space text, and optional Steam multiplayer in a dockable desktop UI.
 

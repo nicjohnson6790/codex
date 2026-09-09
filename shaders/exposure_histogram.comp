@@ -1,0 +1,19 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "exposure_math.glsl"
+layout(local_size_x=256) in;
+layout(set=0,binding=0) uniform sampler2D scene;
+layout(set=1,binding=0,std430) buffer Histogram { uint bins[256]; } histogram;
+layout(set=2,binding=0) uniform Settings { vec4 grid; } u;
+void main()
+{
+    uint i=gl_GlobalInvocationID.x;
+    uint width=uint(u.grid.x), height=uint(u.grid.y);
+    if(i>=width*height) return;
+    ivec2 pixel=ivec2((vec2(i%width,i/width)+0.5)*vec2(textureSize(scene,0))/u.grid.xy);
+    vec3 rgb=texelFetch(scene,pixel,0).rgb;
+    if(any(isnan(rgb))||any(isinf(rgb))) return;
+    float y=dot(max(rgb,vec3(0)),vec3(0.2126,0.7152,0.0722));
+    int bin=exposureBin(y);
+    if(bin>=0) atomicAdd(histogram.bins[bin],1u);
+}

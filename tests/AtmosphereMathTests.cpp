@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <glm/glm.hpp>
 
 namespace ShaderMath
@@ -13,6 +14,7 @@ namespace ShaderMath
 using namespace glm;
 #include "../shaders/atmosphere.glsl"
 #include "../shaders/display_transfer.glsl"
+#include "../shaders/exposure_math.glsl"
 #include "../shaders/authored_color.glsl"
 #include "../shaders/water_medium.glsl"
 #include "../shaders/water_interface.glsl"
@@ -43,6 +45,39 @@ double numericalColumn(double height, double dy, double length, double scale)
 int main()
 {
     using namespace ShaderMath;
+    // Percentile trimming splits boundary bins, including fractional counts.
+    near(exposureRetained(0,3,100),1);
+    // Even the brightest cubemap texel rounded to black in the old UNORM path.
+    assert(displayTransfer(0.0001f,1.0f)<0.5f/255.0f);
+    assert(displayTransfer(0.02f,1.0f)>1.0f/255.0f);
+    // Even the brightest cubemap texel rounded to black in the old UNORM path.
+    assert(displayTransfer(0.0001f,1.0f)<0.5f/255.0f);
+    assert(displayTransfer(0.02f,1.0f)>1.0f/255.0f);
+    const float nan=std::numeric_limits<float>::quiet_NaN(), inf=std::numeric_limits<float>::infinity();
+    assert(exposureBin(nan)==-1 && exposureBin(inf)==-1);
+    assert(exposureBin(0)==0 && exposureBin(-1)==0 && exposureBin(1e30f)==255);
+    vec4 exposureRange(0,-12,16,0); vec3 exposureTiming(0.1f,0.5f,2);
+    near(exposureState(nan,-1,0,0,exposureRange,exposureTiming),1);
+    near(exposureState(4,0,0,0,exposureRange,exposureTiming),4);
+    near(exposureState(inf,0,0,0,exposureRange,exposureTiming),1);
+    near(exposureState(nan,-1,100,-20,exposureRange,exposureTiming),65536);
+    near(exposureState(nan,4,100,0,exposureRange,vec3(0,0.5f,2)),4);
+    near(exposureRetained(97,3,100),1);
+    near(exposureRetained(0,1,1),0.96);
+    near(exposureRetained(20,30,100),30);
+    near(exposureTarget(-20,0,-12,16),16); // black endpoint remains finite
+    near(exposureTarget(20,0,-12,16),-12);
+    near(exposureTarget(log2(0.18f),0,-12,16),0);
+    near(exposureAdapt(2,-2,0,0.5f,2),2);
+    near(exposureAdapt(2,-2,-1,0.5f,2),2);
+    near(exposureAdapt(2,-2,100,0.5f,2),exposureAdapt(2,-2,0.1f,0.5f,2));
+    assert(exposureAdapt(0,-2,0.1f,0.5f,2)<-exposureAdapt(0,2,0.1f,0.5f,2));
+    near(exposureAdapt(exposureAdapt(0,2,0.05f,0.5f,2),2,0.05f,0.5f,2),exposureAdapt(0,2,0.1f,0.5f,2));
+    AtmosphereOptics diskOptics{};
+    diskOptics.solar=vec4(1); diskOptics.radianceScales=vec4(12,0.02f,100,0);
+    near(directionalSkyRadiance(vec3(0),vec3(1),vec3(0),diskOptics,vec3(0,1,0),vec3(0,1,0),0,100000,0.0001f).x,100);
+    near(directionalSkyRadiance(vec3(0),vec3(1),vec3(0),diskOptics,vec3(0,-1,0),vec3(0,-1,0),0,100000,0.0001f).x,0);
+    near(linearSkyRadiance(vec3(0),vec3(1),vec3(0),diskOptics).x,0); // no disk in ambient
     constexpr float top = 85000.0f;
     // Compile the actual dielectric shader, checking Snell's law, critical angle,
     // unit rays, rotational invariance, and Fresnel energy over the hemisphere.

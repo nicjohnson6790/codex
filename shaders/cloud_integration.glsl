@@ -10,7 +10,7 @@ struct CloudSamplingState
     AtmosphereOptics optics;
     vec4 scattering; // extinction, g, lobe weight, octave count
     vec4 powder; // strength, angular power, view steps, sun steps
-    vec4 march; // maximum distance, termination threshold, enabled/ready, unused
+    vec4 march; // water-only distance, termination, enabled/ready, fullscreen budget (zero for water)
     vec4 octaves;
 };
 
@@ -19,16 +19,24 @@ vec4 integrateCloudRay(vec3 origin,vec3 ray,float end,CloudSamplingState u,
     sampler2D coverageTexture,sampler3D noiseTexture)
 {
     float base=u.field.layer.x, top=base+u.field.layer.y;
-    vec2 interval=cloudSlabInterval(origin.y-base,ray.y,u.field.layer.y,end);
+    vec2 minimum=u.field.macro.xy;
+    vec2 maximum=minimum+vec2((u.field.macro.w-1.0)*u.field.macro.z);
+    vec2 interval=cloudDomainInterval(origin,ray,vec3(minimum.x,base,minimum.y),vec3(maximum.x,top,maximum.y),end);
     float begin=interval.x; end=interval.y;
     if(end<=begin) return vec4(0.0);
+    bool fullDomain=u.march.w>0.0;
     int count=clamp(int(u.powder.z),1,128), lightCount=clamp(int(u.powder.w),1,32);
-    float ds=(end-begin)/float(count), viewT=1.0;
+    if(fullDomain) count=clamp(max(count,int(ceil((end-begin)/2000.0))),count,int(u.march.w));
+    float viewT=1.0;
     vec3 radiance=vec3(0.0);
     float mu=dot(ray,u.sun.xyz);
     for(int i=0;i<count && viewT>u.march.y;++i)
     {
-        float distance=begin+(float(i)+0.5)*ds;
+        float a=float(i)/float(count), b=float(i+1)/float(count);
+        float start=fullDomain ? cloudStepBoundary(a,end-begin) : a*(end-begin);
+        float finish=fullDomain ? cloudStepBoundary(b,end-begin) : b*(end-begin);
+        float ds=finish-start;
+        float distance=begin+0.5*(start+finish);
         vec3 p=origin+ray*distance;
         float d=sampleCloudDensity(p,u.field,coverageTexture,noiseTexture);
         if(d<=0.0) continue;

@@ -181,7 +181,7 @@ SkyboxRenderer::AtmosphereOptics SkyboxRenderer::buildAtmosphereOptics(const Lig
     result.mie = glm::vec4(a.mieScatter, a.mieExtinction, a.mieScaleHeight, a.mieG);
     result.ozone = glm::vec4(glm::max(glm::vec3(a.ozoneAbsorptionR, a.ozoneAbsorptionG, a.ozoneAbsorptionB), glm::vec3(0.0f)), a.ozoneColumnHeight);
     result.radianceScales = glm::vec4(AppConfig::Atmosphere::kEnvironmentRadianceScale,
-        AppConfig::Atmosphere::kSpaceRadiance, 0.0f, 0.0f);
+        AppConfig::Atmosphere::kSpaceRadiance, AppConfig::Atmosphere::kSunDiskRadiance, 0.0f);
     result.solar = glm::vec4(glm::max(lighting.sun().color * lighting.sun().intensity, glm::vec3(0.0f)), a.atmosphereCloudSourceScale);
     return result;
 }

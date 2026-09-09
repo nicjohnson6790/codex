@@ -17,6 +17,6 @@ void main()
 {
     float depth=texelFetch(depthTexture,ivec2(gl_FragCoord.xy),0).r;
     vec3 ray=normalize(reconstruct(1.0));
-    float end=depth>0.0 ? min(length(reconstruct(depth)),u.cloud.march.x) : u.cloud.march.x;
+    float end=depth>0.0 ? length(reconstruct(depth)) : 1e30;
     outColor=integrateCloudRay(vec3(0.0),ray,end,u.cloud,coverageTexture,noiseTexture);
 }

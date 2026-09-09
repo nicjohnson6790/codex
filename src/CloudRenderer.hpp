@@ -18,6 +18,7 @@ public:
         float extinction=0.003f, anisotropy=0.65f, lobeWeight=0.8f;
         float powderStrength=1, powderAngularPower=1;
         int octaveCount=8, viewSteps=48, sunSteps=6;
+        int fullscreenBudget=512;
         float octaveA=0.5f, octaveB=0.5f, octaveC=0.5f;
         float waterSamplingMultiplier=0.5f;
         float ambient=0.15f, maxDistance=180000, termination=0.01f;

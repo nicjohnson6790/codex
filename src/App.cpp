@@ -361,6 +361,7 @@ void App::updateSimulationTime()
     {
         m_lightingSystem.advanceTime(m_deltaTimeSeconds);
     }
+    m_renderer.displayTransform().deltaSeconds=m_deltaTimeSeconds;
     m_elapsedTimeSeconds += m_deltaTimeSeconds;
 }
 

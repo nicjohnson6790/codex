@@ -23,6 +23,22 @@ inline float mix(double a,float b,float c) { return glm::mix(float(a),b,c); }
 
 int main()
 {
+    using glm::vec3; using glm::vec2;
+    const vec3 low(-10,2,-10), high(10,4,10);
+    assert(Shader::cloudDomainInterval(vec3(0,3,0),vec3(1,0,0),low,high,100)==vec2(0,10));
+    assert(Shader::cloudDomainInterval(vec3(-20,3,0),vec3(1,0,0),low,high,100)==vec2(10,30));
+    auto away=Shader::cloudDomainInterval(vec3(-20,3,0),vec3(-1,0,0),low,high,100);
+    assert(away.y<=away.x);
+    auto outside=Shader::cloudDomainInterval(vec3(0,5,0),vec3(1,0,0),low,high,100);
+    assert(outside.y<=outside.x);
+    assert(Shader::cloudDomainInterval(vec3(0,0,0),vec3(0,1,0),low,high,100)==vec2(2,4));
+    assert(Shader::cloudDomainInterval(vec3(0,5,0),vec3(0,-1,0),low,high,100)==vec2(1,3));
+    assert(Shader::cloudDomainInterval(vec3(-20,3,0),vec3(1,0,0),low,high,15)==vec2(10,15));
+    vec3 shift(100000,2000,-300000);
+    assert(Shader::cloudDomainInterval(vec3(-20,3,0)+shift,vec3(1,0,0),low+shift,high+shift,100)==vec2(10,30));
+    assert(Shader::cloudStepBoundary(0,3000000)==0);
+    assert(Shader::cloudStepBoundary(1,3000000)==3000000);
+    assert(Shader::cloudStepBoundary(0.1f,3000000)<300000);
     assert(waterCloudSampleCount(48,0.5f)==24);
     assert(waterCloudSampleCount(6,0.5f)==3);
     assert(waterCloudSampleCount(48,1.0f/3.0f)==16);
