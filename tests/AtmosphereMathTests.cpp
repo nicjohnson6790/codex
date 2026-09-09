@@ -12,6 +12,8 @@ namespace ShaderMath
 {
 using namespace glm;
 #include "../shaders/atmosphere.glsl"
+#include "../shaders/display_transfer.glsl"
+#include "../shaders/authored_color.glsl"
 #include "../shaders/water_medium.glsl"
 #include "../shaders/water_interface.glsl"
 }
@@ -126,7 +128,8 @@ int main()
         glm::vec4(7.4e-6f,17.8e-6f,45.5e-6f,8000.0f),
         glm::vec4(1.7e-6f,4.2e-6f,1200.0f,0.88f),
         glm::vec4(0.650e-6f,1.881e-6f,0.085e-6f,25000.0f),
-        glm::vec4(1.0f,0.97f,0.92f,4.8f)};
+        glm::vec4(1.0f,0.97f,0.92f,4.8f),
+        glm::vec4(12.0f,0.0001f,0,0)};
     // Infinite reflected-ray radiance is the limit of the same finite camera
     // medium, with zero starting depth. Zero coefficients and night stay finite.
     const glm::vec3 absorption(0.15f,0.05f,0.02f);
@@ -162,30 +165,40 @@ int main()
         }
         if (sunY<=0) assert(scatter==glm::vec3(0));
     }
-    optics.skyDisplay = glm::vec4(12.0f,0.0001f,1.0f,0.0001f);
     glm::vec3 dayT, dayS;
-    evaluateAtmosphere(300.0f,glm::normalize(glm::vec3(0,0.8f,-0.6f)),4000000,top,
-        {0,1,0},optics,true,dayT,dayS);
-    const auto blueSky = displaySkyRadiance(glm::vec3(0),dayT,dayS,optics);
-    const auto withStars = displaySkyRadiance(glm::vec3(1),dayT,dayS,optics);
-    // The air supplies a bright blue sky even with a completely black background.
-    assert(blueSky.b > blueSky.g && blueSky.g > blueSky.r && blueSky.b > 0.5f);
-    assert(glm::length(withStars-blueSky) < 0.002f);
-    glm::vec3 nightT, nightS, spaceT, spaceS;
-    evaluateAtmosphere(300,{0,1,0},4000000,top,{0,-1,0},optics,true,nightT,nightS);
-    evaluateAtmosphere(100000,{0,1,0},4000000,top,{0,1,0},optics,true,spaceT,spaceS);
-    assert(glm::length(displaySkyRadiance(glm::vec3(0.5f),nightT,nightS,optics)) > 0.3f);
-    assert(glm::length(displaySkyRadiance(glm::vec3(0.5f),spaceT,spaceS,optics)) > 0.3f);
-    // No hard day/night switch: the radiance-to-display curve stays finite down to darkness.
-    glm::vec3 previous = displaySkyRadiance(glm::vec3(0.5f),dayT,glm::vec3(0),optics);
-    for(int i=1;i<=1000;++i)
+    const glm::vec3 direction = glm::normalize(glm::vec3(0,0.8f,-0.6f));
+    evaluateAtmosphere(300, direction, 4000000, top, {0,1,0}, optics, true, dayT, dayS);
+    auto uncalibrated = optics;
+    uncalibrated.radianceScales.x = 1;
+    glm::vec3 rawT, rawS;
+    evaluateAtmosphere(300, direction, 4000000, top, {0,1,0}, uncalibrated, true, rawT, rawS);
+    assert(rawT == dayT);
+    for (int c=0; c<3; ++c)
     {
-        auto color = displaySkyRadiance(glm::vec3(0.5f),dayT,dayS*std::pow(10.0f,-14.0f+float(i)*0.012f),optics);
-        assert(!glm::any(glm::isnan(color)) && !glm::any(glm::isinf(color)));
-        assert(glm::length(color-previous) < 0.25f);
-        previous = color;
+        near(dayS[c], rawS[c] * 12);
+        near(linearSkyRadiance(glm::vec3(0.5f), dayT, dayS, optics)[c],
+            0.5f * 0.0001f * dayT[c] + dayS[c]);
     }
-    std::cout << "Day sky RGB: " << blueSky.r << ", " << blueSky.g << ", " << blueSky.b << '\n';
+    // Night and vacuum retain only the separate space source, without adaptation.
+    near(linearSkyRadiance(glm::vec3(0.5f), glm::vec3(1), glm::vec3(0), optics).r, 0.00005, 1e-8);
+    near(encodeDisplaySrgb(0.0031308f), 0.040449936, 1e-7);
+    near(decodeAuthoredSrgb(0.04045f), 0.003130805, 1e-7);
+    near(decodeAuthoredSrgb(0.5f), 0.21404114, 1e-7);
+    for (float exposure : {0.0f, 0.01f, 1.0f, 100.0f, 3.4e38f})
+    {
+        near(displayTransfer(0, exposure), 0);
+        float previous = 0;
+        for (float radiance : {0.0f, 1e-8f, 0.001f, 0.1f, 1.0f, 10.0f, 65504.0f, 3.4e38f})
+        {
+            float value = displayTransfer(radiance, exposure);
+            assert(std::isfinite(value) && value >= 0 && value <= 1);
+            assert(value >= previous);
+            previous = value;
+        }
+    }
+    for (float r : {0.0f, 0.01f, 0.5f, 2.0f, 100.0f})
+        near(displayTransfer(r, 2), displayTransfer(r * 2, 1));
+    assert(displayTransfer(2, 1) > displayTransfer(1, 1));
     // Independent high-count midpoint radiance reference, only in the test.
     double maxError = 0.0;
     for (float sunY : {0.001f,0.05f,0.8f})
@@ -217,7 +230,7 @@ int main()
                 + glm::vec3(optics.mie.x*std::exp(-std::max(sampleHeight,0.0f)/1200)*phaseM);
             reference += glm::dvec3(viewT*airSunTransmission(sampleHeight,sun,top,optics)*source)*(double(length)/steps);
         }
-        reference *= glm::dvec3(optics.solar)*double(optics.solar.w);
+        reference *= glm::dvec3(optics.solar)*double(optics.solar.w)*double(optics.radianceScales.x);
         const double error = glm::length(glm::dvec3(scatter)-reference)/std::max(glm::length(reference),0.01);
         if(error>0.1) std::cout << "Quadrature error h=" << h << " dy=" << dy << " length=" << distance << ": " << error << '\n';
         maxError=std::max(maxError,error);

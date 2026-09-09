@@ -122,6 +122,7 @@ void SDLRenderer::shutdown()
 
     waitIdle();
     destroyViewportTargets();
+    m_displayTransform.shutdown();
 
     if (m_window != nullptr)
     {
@@ -309,7 +310,7 @@ void SDLRenderer::renderFrame(
         HELLO_PROFILE_SCOPE("SDLRenderer::RenderViewport");
 
         SDL_GPUColorTargetInfo colorTargetInfo{};
-        colorTargetInfo.texture = m_viewportColorTexture;
+        colorTargetInfo.texture = m_sceneColorTexture;
         colorTargetInfo.clear_color = SDL_FColor{ 0.0f, 0.0f, 0.0f, 1.0f };
         colorTargetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
         colorTargetInfo.store_op = SDL_GPU_STOREOP_STORE;
@@ -406,19 +407,10 @@ void SDLRenderer::renderFrame(
                     quadtreeMeshRenderer.heightmapBuffer());
             }
         }
-        {
-            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderDebugPrimitives", ProfileScopeGroup::Renderer);
-            triangleRenderer.render(renderPass, commandBuffer, viewProjection);
-            lineRenderer.render(renderPass, commandBuffer, viewProjection);
-        }
-        {
-            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderWorldText", ProfileScopeGroup::Renderer);
-            worldTextRenderer.render(renderPass, commandBuffer, viewProjection);
-        }
         SDL_EndGPURenderPass(renderPass);
 
         SDL_GPUColorTargetInfo skyColorTargetInfo{};
-        skyColorTargetInfo.texture = m_viewportColorTexture;
+        skyColorTargetInfo.texture = m_sceneColorTexture;
         skyColorTargetInfo.load_op = SDL_GPU_LOADOP_LOAD;
         skyColorTargetInfo.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -453,6 +445,33 @@ void SDLRenderer::renderFrame(
         }
         cloudRenderer.render(skyRenderPass, commandBuffer, glm::inverse(viewProjection), m_viewportDepthTexture);
         SDL_EndGPURenderPass(skyRenderPass);
+
+        colorTargetInfo.texture = m_viewportColorTexture;
+        colorTargetInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorTargetInfo, 1, nullptr);
+        if (!renderPass) throwSdlError("Failed to begin display transform pass.");
+        SDL_SetGPUViewport(renderPass, &viewport);
+        SDL_SetGPUScissor(renderPass, &scissor);
+        m_displayTransform.render(renderPass, commandBuffer, m_sceneColorTexture);
+        SDL_EndGPURenderPass(renderPass);
+
+        colorTargetInfo.load_op = SDL_GPU_LOADOP_LOAD;
+        depthTargetInfo.load_op = SDL_GPU_LOADOP_LOAD;
+        depthTargetInfo.stencil_load_op = SDL_GPU_LOADOP_LOAD;
+        renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorTargetInfo, 1, &depthTargetInfo);
+        if (!renderPass) throwSdlError("Failed to begin display overlay pass.");
+        SDL_SetGPUViewport(renderPass, &viewport);
+        SDL_SetGPUScissor(renderPass, &scissor);
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderDebugPrimitives", ProfileScopeGroup::Renderer);
+            triangleRenderer.render(renderPass, commandBuffer, viewProjection);
+            lineRenderer.render(renderPass, commandBuffer, viewProjection);
+        }
+        {
+            HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderWorldText", ProfileScopeGroup::Renderer);
+            worldTextRenderer.render(renderPass, commandBuffer, viewProjection);
+        }
+        SDL_EndGPURenderPass(renderPass);
     }
 
     SDL_GPUTexture* swapchainTexture = nullptr;
@@ -536,6 +555,10 @@ void SDLRenderer::createViewportTargets()
         throwSdlError("Failed to create SDL GPU viewport color texture.");
     }
 
+    colorInfo.format = sceneColorFormat();
+    m_sceneColorTexture = SDL_CreateGPUTexture(m_device, &colorInfo);
+    if (!m_sceneColorTexture) throwSdlError("Failed to create HDR scene texture.");
+
     SDL_GPUTextureCreateInfo depthInfo{};
     depthInfo.type = SDL_GPU_TEXTURETYPE_2D;
     depthInfo.format = m_viewportDepthFormat;
@@ -554,6 +577,8 @@ void SDLRenderer::createViewportTargets()
 
 void SDLRenderer::destroyViewportTargets()
 {
+    if (m_sceneColorTexture) SDL_ReleaseGPUTexture(m_device, m_sceneColorTexture);
+    m_sceneColorTexture = nullptr;
     if (m_viewportDepthTexture != nullptr)
     {
         SDL_ReleaseGPUTexture(m_device, m_viewportDepthTexture);

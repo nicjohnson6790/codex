@@ -1476,6 +1476,7 @@ void NearbyFoliageRenderer::createMaterialResources(
         roughnessExtent,
         static_cast<std::uint32_t>(usedRoughnessTextures.size()));
     m_specularTextureArray = createArray(
+        // Scalar reflectance strength data, even though stored in RGB.
         SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
         specularExtent,
         static_cast<std::uint32_t>(usedSpecularTextures.size()));
@@ -1484,7 +1485,8 @@ void NearbyFoliageRenderer::createMaterialResources(
         aoExtent,
         static_cast<std::uint32_t>(usedAoTextures.size()));
     m_subsurfaceTextureArray = createArray(
-        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        // Authored transmission tint; alpha remains linear under sRGB sampling.
+        SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
         subsurfaceExtent,
         static_cast<std::uint32_t>(usedSubsurfaceTextures.size()));
 

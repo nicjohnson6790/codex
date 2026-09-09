@@ -10,8 +10,8 @@ struct AtmosphereOptics
     vec4 rayleigh; // RGB scattering, scale height
     vec4 mie; // scattering, extinction, scale height, anisotropy
     vec4 ozone; // RGB absorption, equivalent column height
-    vec4 solar; // incident RGB radiance, exposure
-    vec4 skyDisplay; // solar calibration, space radiance, display exposure, dark adaptation floor
+    vec4 solar; // linear incident RGB radiance, atmosphere/cloud source scale
+    vec4 radianceScales; // environment radiance scale, space radiance scale, reserved, reserved
 };
 
 vec3 airOpticalDepth(float h, float dy, float distance, float top, AtmosphereOptics a)
@@ -104,22 +104,13 @@ void evaluateAtmosphere(float height, vec3 direction, float distance, float top,
             / max(exp(-max(sampleHeight,0.0f)/referenceHeight),1.0e-30f)) * viewT
             * airSunTransmission(sampleHeight, sun, top, a) * source;
     }
-    scattering *= vec3(a.solar) * a.solar.w;
+    scattering *= vec3(a.solar) * a.solar.w * a.radianceScales.x;
 }
 
-// Local sky exposure approximates eye/camera adaptation without a scene readback.
-// It responds to scattered radiance, so an outward vacuum ray retains the space
-// background even during daytime. Extinction and finite scene-ray fog are unchanged.
-vec3 displaySkyRadiance(vec3 spaceTexture, vec3 transmission, vec3 scattering, AtmosphereOptics a)
+// Cubemap sampling already decodes authored sRGB; scattering is calibrated once above.
+vec3 linearSkyRadiance(vec3 decodedSpace, vec3 transmission, vec3 scattering, AtmosphereOptics a)
 {
-    vec3 airRadiance = max(scattering,vec3(0.0f)) * a.skyDisplay.x;
-    vec3 spaceRadiance = pow(max(spaceTexture,vec3(0.0f)),vec3(2.2f)) * a.skyDisplay.y;
-    float airLuminance = dot(airRadiance,vec3(0.2126f,0.7152f,0.0722f));
-    float exposure = a.skyDisplay.z / (max(a.skyDisplay.w,1.0e-6f) + sqrt(airLuminance));
-    vec3 radiance = spaceRadiance * transmission + airRadiance;
-    // The existing viewport is a display-referred UNORM target. Decode the
-    // UNORM cubemap above and encode once after mapping the combined radiance.
-    return pow(vec3(1.0f)-exp(-radiance*exposure),vec3(1.0f/2.2f));
+    return decodedSpace * a.radianceScales.y * transmission + scattering;
 }
 
 #undef ATM_OUTPUT

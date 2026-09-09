@@ -213,10 +213,12 @@ void AppPanels::drawControlsTab(Context &context)
         ImGui::InputFloat("Day length (s)", &sun.dayLengthSeconds, 1.0f, 10.0f, "%.1f");
         sun.dayLengthSeconds = std::max(sun.dayLengthSeconds, 0.1f);
         ImGui::InputFloat("Time factor", &sun.timeFactor, 0.1f, 1.0f, "%.2f");
-        ImGui::ColorEdit3("Color", &sun.color.x);
+        ImGui::InputFloat3("Linear sun radiance RGB", &sun.color.x);
         ImGui::SliderFloat("Intensity", &sun.intensity, 0.0f, 4.0f, "%.2f");
     }
 
+    ImGui::SeparatorText("Viewport display");
+    ImGui::InputFloat("Camera exposure", &context.renderer.displayTransform().exposure, 0.1f, 0.5f, "%.2f");
     context.cloudRenderer.drawSettings();
     if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -224,9 +226,7 @@ void AppPanels::drawControlsTab(Context &context)
 
         ImGui::InputFloat("Atmosphere height (m)", &atmosphere.atmosphereHeight, 1000.0f, 10000.0f, "%.0f");
         ImGui::InputFloat("Distance range (m)", &atmosphere.atmosphereDistanceRange, 10000.0f, 100000.0f, "%.0f");
-        ImGui::InputFloat("Air scattering exposure", &atmosphere.exposure, 0.1f, 0.5f, "%.2f");
-
-        ImGui::InputFloat("Sky display exposure", &atmosphere.skyExposure, 0.1f, 0.5f, "%.2f");
+        ImGui::InputFloat("Atmosphere/cloud source scale", &atmosphere.atmosphereCloudSourceScale, 0.1f, 0.5f, "%.2f");
 
         if (ImGui::TreeNode("Scattering"))
         {
@@ -257,7 +257,7 @@ void AppPanels::drawControlsTab(Context &context)
 
         auto& waterMedium = context.skyboxRenderer.waterMediumSettings();
         ImGui::SeparatorText("Underwater medium (inverse meters)");
-        ImGui::InputFloat("Water medium exposure", &waterMedium.exposure, 0.1f, 0.5f, "%.2f");
+        ImGui::InputFloat("Water medium source scale", &waterMedium.sourceScale, 0.1f, 0.5f, "%.2f");
         ImGui::InputFloat3("Water absorption RGB", &waterMedium.absorption.x, "%.4f");
         ImGui::InputFloat3("Water scattering RGB", &waterMedium.scattering.x, "%.4f");
         if (ImGui::Button("Reset Underwater Defaults")) waterMedium = {};

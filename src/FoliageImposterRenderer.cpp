@@ -573,6 +573,8 @@ void FoliageImposterRenderer::loadRuntimeAssets()
         };
     }
 
+    // The offline capture samples sRGB base color into an ordinary UNORM target:
+    // these generated BC3 pixels already contain linear albedo. Do not decode again.
     m_imposterColorTextureArray = createImposterTextureArray(
         texBin,
         m_imposterColorTextureIndices,

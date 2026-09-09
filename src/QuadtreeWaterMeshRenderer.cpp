@@ -1555,7 +1555,7 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     uniforms.atmosphereOptics = skyboxRenderer.buildAtmosphereOptics(lightingSystem);
     const auto& medium = skyboxRenderer.waterMediumSettings();
     uniforms.waterAbsorption = glm::vec4(medium.absorption, 0.0f);
-    uniforms.waterScattering = glm::vec4(medium.scattering, medium.exposure);
+    uniforms.waterScattering = glm::vec4(medium.scattering, medium.sourceScale);
     uniforms.skyRotation = sharedSkyUniforms.skyRotation;
     uniforms.atmosphereParams = sharedSkyUniforms.atmosphereParams;
     uniforms.sunDirectionTimeOfDay = sharedSkyUniforms.sunDirectionTimeOfDay;

@@ -197,6 +197,7 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_canopy.vert ${FOLIAGE_CANOPY_
 compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_canopy.frag
     ${FOLIAGE_CANOPY_FRAG_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/authored_color.glsl
     ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_canopy_generate.comp
@@ -219,17 +220,19 @@ compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh_bridge.vert ${WATER_MESH_BRIDGE_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl ${CMAKE_SOURCE_DIR}/shaders/water_medium.glsl ${CMAKE_SOURCE_DIR}/shaders/water_interface.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/authored_color.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl ${CMAKE_SOURCE_DIR}/shaders/water_medium.glsl ${CMAKE_SOURCE_DIR}/shaders/water_interface.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_initialize_spectrum.comp ${WATER_INITIALIZE_SPECTRUM_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_spectrum_update.comp ${WATER_SPECTRUM_UPDATE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_fft_stage.comp ${WATER_FFT_STAGE_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_build_maps.comp ${WATER_BUILD_MAPS_COMP_SPV})
 
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/display_transform.frag ${SHADER_OUTPUT_DIR}/display_transform.frag.spv ${CMAKE_SOURCE_DIR}/shaders/display_transfer.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.vert ${SHADER_OUTPUT_DIR}/cloud.vert.spv)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.frag ${SHADER_OUTPUT_DIR}/cloud.frag.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud_noise.comp ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_noise.glsl)
 add_custom_target(shaders ALL
     DEPENDS
+        ${SHADER_OUTPUT_DIR}/display_transform.frag.spv
         ${SHADER_OUTPUT_DIR}/cloud.vert.spv
         ${SHADER_OUTPUT_DIR}/cloud.frag.spv
         ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv
@@ -292,6 +295,7 @@ add_executable(terrain_sandbox
     src/QuadtreeWaterMeshRenderer.cpp
     src/SDLRenderer.cpp
     src/SkyboxRenderer.cpp
+    src/DisplayTransformRenderer.cpp
     src/CloudRenderer.cpp
     src/TriangleRenderer.cpp
     src/WorldGridQuadtree.cpp

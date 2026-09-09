@@ -116,7 +116,7 @@ void SkyboxRenderer::render(
     uniforms.optics = buildAtmosphereOptics(lightingSystem);
     waterRenderer.fillMediumUniforms(uniforms, viewportHeight);
     uniforms.waterAbsorption = glm::vec4(m_waterMediumSettings.absorption, 0.0f);
-    uniforms.waterScattering = glm::vec4(m_waterMediumSettings.scattering, m_waterMediumSettings.exposure);
+    uniforms.waterScattering = glm::vec4(m_waterMediumSettings.scattering, m_waterMediumSettings.sourceScale);
     for (std::size_t pass = 0; pass < m_pipelines.size(); ++pass)
     {
         SDL_BindGPUGraphicsPipeline(renderPass, m_pipelines[pass]);
@@ -161,9 +161,8 @@ void SkyboxRenderer::sanitizeAtmosphereSettings()
     m_atmosphereSettings.atmosphereHeight = std::max(m_atmosphereSettings.atmosphereHeight, 1000.0f);
     m_atmosphereSettings.atmosphereDistanceRange = std::max(m_atmosphereSettings.atmosphereDistanceRange, 1000.0f);
     m_atmosphereSettings.mieG = std::clamp(m_atmosphereSettings.mieG, 0.0f, 0.99f);
-    m_atmosphereSettings.skyExposure = std::max(m_atmosphereSettings.skyExposure, 0.0f);
-    m_waterMediumSettings.exposure = std::max(m_waterMediumSettings.exposure, 0.0f);
-    m_atmosphereSettings.exposure = std::max(m_atmosphereSettings.exposure, 0.01f);
+    m_waterMediumSettings.sourceScale = std::max(m_waterMediumSettings.sourceScale, 0.0f);
+    m_atmosphereSettings.atmosphereCloudSourceScale = std::max(m_atmosphereSettings.atmosphereCloudSourceScale, 0.01f);
     m_atmosphereSettings.rayleighScaleHeight = std::max(m_atmosphereSettings.rayleighScaleHeight, 1.0f);
     m_atmosphereSettings.mieScaleHeight = std::max(m_atmosphereSettings.mieScaleHeight, 1.0f);
     m_atmosphereSettings.ozoneColumnHeight = std::max(m_atmosphereSettings.ozoneColumnHeight, 0.0f);
@@ -181,9 +180,9 @@ SkyboxRenderer::AtmosphereOptics SkyboxRenderer::buildAtmosphereOptics(const Lig
     result.rayleigh = glm::vec4(glm::max(glm::vec3(a.rayleighScatterR, a.rayleighScatterG, a.rayleighScatterB), glm::vec3(0.0f)), a.rayleighScaleHeight);
     result.mie = glm::vec4(a.mieScatter, a.mieExtinction, a.mieScaleHeight, a.mieG);
     result.ozone = glm::vec4(glm::max(glm::vec3(a.ozoneAbsorptionR, a.ozoneAbsorptionG, a.ozoneAbsorptionB), glm::vec3(0.0f)), a.ozoneColumnHeight);
-    result.skyDisplay = glm::vec4(AppConfig::Atmosphere::kSkySolarRadiance,
-        AppConfig::Atmosphere::kSpaceRadiance, a.skyExposure, AppConfig::Atmosphere::kSkyDarkAdaptationFloor);
-    result.solar = glm::vec4(glm::max(lighting.sun().color * lighting.sun().intensity, glm::vec3(0.0f)), a.exposure);
+    result.radianceScales = glm::vec4(AppConfig::Atmosphere::kEnvironmentRadianceScale,
+        AppConfig::Atmosphere::kSpaceRadiance, 0.0f, 0.0f);
+    result.solar = glm::vec4(glm::max(lighting.sun().color * lighting.sun().intensity, glm::vec3(0.0f)), a.atmosphereCloudSourceScale);
     return result;
 }
 
@@ -379,7 +378,7 @@ void SkyboxRenderer::createCubemapTexture()
 
     SDL_GPUTextureCreateInfo textureInfo{};
     textureInfo.type = SDL_GPU_TEXTURETYPE_CUBE;
-    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
     textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
     textureInfo.width = faceWidth;
     textureInfo.height = faceHeight;

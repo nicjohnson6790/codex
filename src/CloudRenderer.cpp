@@ -124,7 +124,7 @@ void CloudRenderer::upload(SDL_GPUCopyPass* copy,const Position& origin,double t
     m_prepared.field=m_field;
     m_waterSteps={waterCloudSampleCount(s.viewSteps,s.waterSamplingMultiplier),waterCloudSampleCount(s.sunSteps,s.waterSamplingMultiplier)};
     m_prepared.sun=glm::vec4(lighting.sunDirection(),0);
-    m_prepared.atmosphere={m_activeCameraPosition.localPosition().y,sky.atmosphereSettings().atmosphereHeight,s.ambient,sky.atmosphereSettings().skyExposure};
+    m_prepared.atmosphere={m_activeCameraPosition.localPosition().y,sky.atmosphereSettings().atmosphereHeight,s.ambient,0.0f};
     m_prepared.optics=sky.buildAtmosphereOptics(lighting);
     m_prepared.scattering={s.extinction,s.anisotropy,s.lobeWeight,float(s.octaveCount)};
     m_prepared.powder={s.powderStrength,s.powderAngularPower,float(s.viewSteps),float(s.sunSteps)};

@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#include "authored_color.glsl"
 #include "atmosphere.glsl"
 #include "water_displacement.glsl"
 #include "water_medium.glsl"
@@ -163,7 +164,7 @@ vec3 sampleSkyRadiance(vec3 worldDirection)
     evaluateAtmosphere(altitude, worldDirection,
         skyDistance, water.atmosphereParams.x, water.sunDirectionTimeOfDay.xyz,
         water.atmosphereOptics, true, transmission, scattering);
-    return displaySkyRadiance(skyboxColor, transmission, scattering, water.atmosphereOptics);
+    return linearSkyRadiance(skyboxColor, transmission, scattering, water.atmosphereOptics);
 }
 
 vec3 sampleWaterEnvironment(vec3 direction)
@@ -438,16 +439,16 @@ void main()
         water.waterDepthColorParams.z,
         water.waterDepthColorParams.w,
         opticalDepth);
-    vec3 shallowColor = water.shallowWaterColor.rgb;
-    vec3 midColor = water.midWaterColor.rgb;
-    vec3 deepColor = water.deepWaterColor.rgb;
-    vec3 shoreColor = vec3(0.28, 0.58, 0.52);
+    vec3 shallowColor = authoredColor(water.shallowWaterColor.rgb);
+    vec3 midColor = authoredColor(water.midWaterColor.rgb);
+    vec3 deepColor = authoredColor(water.deepWaterColor.rgb);
+    vec3 shoreColor = authoredColor(vec3(0.28, 0.58, 0.52));
     vec3 waterBodyColor = mix(shallowColor, midColor, midDepthFactor);
     waterBodyColor = mix(waterBodyColor, deepColor, deepDepthFactor);
     waterBodyColor = mix(waterBodyColor, shoreColor, shorelineBias * 0.65);
     if (water.debugParams.x > 0.5)
     {
-        vec3 lodTint = vec3(0.10, 0.20, 0.28);
+        vec3 lodTint = authoredColor(vec3(0.10, 0.20, 0.28));
         waterBodyColor += lodTint * 0.25;
     }
 
@@ -478,7 +479,7 @@ void main()
     float sunOverhead = smoothstep(0.35, 0.92, sunDirection.y);
     float lookDownFactor = pow(normalDotView, 2.2);
     float deepLookDownFactor = smoothstep(6.0, 28.0, opticalDepth);
-    vec3 overheadBlueBoostColor = vec3(0.16, 0.42, 0.58);
+    vec3 overheadBlueBoostColor = authoredColor(vec3(0.16, 0.42, 0.58));
     vec3 overheadBlueBoost =
         overheadBlueBoostColor *
         sunOverhead *
@@ -528,7 +529,7 @@ void main()
         vec3 foamLighting =
             (ambientSky * 0.55) +
             (water.sunColorAmbient.rgb * water.sunDirectionIntensity.w * foamDiffuse * 0.45);
-        vec3 foamColor = water.foamColor.rgb * foamLighting * water.foamColor.a * foamViewBoost;
+        vec3 foamColor = authoredColor(water.foamColor.rgb) * foamLighting * water.foamColor.a * foamViewBoost;
         foamOverlay = foamColor * (saturate(foamSignal * 0.72) + (foamSignal * 0.12));
     }
 

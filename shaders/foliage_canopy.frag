@@ -1,4 +1,6 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "authored_color.glsl"
 
 #include "foliage_common.glsl"
 
@@ -166,7 +168,7 @@ void main()
     float ambient = mix(0.08, 0.42, daylightVisibility(lightDirection.y));
     float diffuse = clamp(dot(bestNormal, lightDirection), 0.0, 1.0);
     float lighting = ambient + (diffuse * 0.58 * directVisibility);
-    vec3 color = bestColor * lighting * canopy.sunDirectionIntensity.w * kCanopyDarkeningScale * shellShadeMultiplier;
+    vec3 color = authoredColor(bestColor) * lighting * canopy.sunDirectionIntensity.w * kCanopyDarkeningScale * shellShadeMultiplier;
 
     uint edgeFadeStrengths = draw.patchSeedData.y;
     float edgeFade = 1.0;

@@ -15,7 +15,7 @@ public:
         float timeOfDayHours = AppConfig::Light::kTimeOfDayHours;
         float dayLengthSeconds = AppConfig::Light::kDayLengthSeconds;
         float timeFactor = AppConfig::Light::kTimeFactor;
-        glm::vec3 color{ AppConfig::Light::kSunColor };
+        glm::vec3 color{ AppConfig::Light::kSunColor }; // Linear incident radiance RGB, not an authored material color.
         float intensity = AppConfig::Light::kSunIntensity;
     };
 

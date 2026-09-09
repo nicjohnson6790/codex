@@ -96,7 +96,7 @@ void main()
             vec3 t, s;
             evaluateAtmosphere(height,direction,skyDistance,uniforms.atmosphereParams.x,
                 sun,uniforms.optics,true,t,s);
-            outColor = vec4(displaySkyRadiance(space,t,s,uniforms.optics),1.0);
+            outColor = vec4(linearSkyRadiance(space,t,s,uniforms.optics),1.0);
         }
         return;
     }

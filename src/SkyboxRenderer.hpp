@@ -34,8 +34,7 @@ public:
         float mieScaleHeight = AppConfig::Atmosphere::kMieScaleHeight;
         float ozoneColumnHeight = AppConfig::Atmosphere::kOzoneColumnHeight;
         float mieG = AppConfig::Atmosphere::kMieG;
-        float exposure = AppConfig::Atmosphere::kExposure;
-        float skyExposure = AppConfig::Atmosphere::kSkyExposure;
+        float atmosphereCloudSourceScale = AppConfig::Atmosphere::kAtmosphereCloudSourceScale;
     };
 
     struct AtmosphereOptics
@@ -44,12 +43,12 @@ public:
         glm::vec4 mie{};
         glm::vec4 ozone{};
         glm::vec4 solar{};
-        glm::vec4 skyDisplay{};
+        glm::vec4 radianceScales{};
     };
 
     struct WaterMediumSettings
     {
-        float exposure = AppConfig::Water::kMediumExposure;
+        float sourceScale = AppConfig::Water::kMediumSourceScale;
         glm::vec3 absorption{AppConfig::Water::kMediumAbsorption};
         glm::vec3 scattering{AppConfig::Water::kMediumScattering};
     };

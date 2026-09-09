@@ -177,30 +177,31 @@ void App::initializeRenderers(const std::filesystem::path &shaderDirectory)
     logStartup("init world text renderer");
     m_worldTextRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
     logStartup("init quadtree mesh renderer");
-    m_quadtreeMeshRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
+    m_quadtreeMeshRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
     if constexpr (AppConfig::Foliage::kCanopyEnabled)
     {
         logStartup("init foliage canopy renderer");
-        m_foliageCanopyRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(),
+        m_foliageCanopyRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(),
                                            shaderDirectory);
     }
     if constexpr (AppConfig::Foliage::kEnabled)
     {
         logStartup("init foliage renderer");
-        m_foliageRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
+        m_foliageRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
         logStartup("init nearby foliage renderer");
-        m_nearbyFoliageRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(),
+        m_nearbyFoliageRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(),
                                            shaderDirectory);
     }
     if constexpr (AppConfig::Water::kEnabled)
     {
         logStartup("init water mesh renderer");
-        m_waterMeshRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(),
+        m_waterMeshRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(),
                                        shaderDirectory);
     }
     logStartup("init skybox renderer");
-    m_skyboxRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
-    m_cloudRenderer.initialize(m_renderer.device(), m_renderer.swapchainFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
+    m_skyboxRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
+    m_renderer.displayTransform().initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.swapchainFormat(), shaderDirectory);
+    m_cloudRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
 }
 
 void App::initializeImGui()

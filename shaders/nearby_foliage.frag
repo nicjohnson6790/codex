@@ -81,7 +81,7 @@ vec3 sampleSkyRadiance(vec3 worldDirection)
         worldDirection, foliageMaterial.atmosphereParams.y, foliageMaterial.atmosphereParams.x,
         foliageMaterial.sunDirectionTimeOfDay.xyz, foliageMaterial.atmosphereOptics,
         true, transmission, scattering);
-    return displaySkyRadiance(sky, transmission, scattering, foliageMaterial.atmosphereOptics);
+    return linearSkyRadiance(sky, transmission, scattering, foliageMaterial.atmosphereOptics);
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 f0)

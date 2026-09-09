@@ -72,7 +72,7 @@ inline constexpr float kAmbientLight = 0.26f;
 namespace Water
 {
 // Homogeneous clear-water participating-medium coefficients, in inverse meters.
-inline constexpr float kMediumExposure = 4.8f;
+inline constexpr float kMediumSourceScale = 4.8f;
 inline constexpr glm::vec3 kMediumAbsorption{0.15f, 0.045f, 0.015f};
 inline constexpr glm::vec3 kMediumScattering{0.006f, 0.012f, 0.018f};
 inline constexpr bool kEnabled = true;
@@ -328,12 +328,10 @@ inline constexpr float kOzoneColumnHeight = 25000.0f;
 // halo.
 inline constexpr float kMieG = 0.88f;
 
-// Exposure multiplier on physically integrated in-scattered radiance.
-inline constexpr float kExposure = 4.8f;
-// Relative sky radiance calibration and display adaptation, independent of water.
-inline constexpr float kSkySolarRadiance = 12.0f;
+// Source scale on atmospheric scattering and cloud incident sunlight.
+inline constexpr float kAtmosphereCloudSourceScale = 4.8f;
+// Shared atmosphere/cloud radiance calibration; decoded space is a separate source.
+inline constexpr float kEnvironmentRadianceScale = 12.0f;
 inline constexpr float kSpaceRadiance = 0.0001f;
-inline constexpr float kSkyExposure = 1.0f;
-inline constexpr float kSkyDarkAdaptationFloor = 0.0001f;
 } // namespace Atmosphere
 } // namespace AppConfig

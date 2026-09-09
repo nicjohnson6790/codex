@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderTypes.hpp"
+#include "DisplayTransformRenderer.hpp"
 #include "Position.hpp"
 
 #include <SDL3/SDL.h>
@@ -79,6 +80,8 @@ public:
 
     [[nodiscard]] ImTextureID viewportTextureId() const;
     [[nodiscard]] SDL_GPUDevice* device() const { return m_device; }
+    static constexpr SDL_GPUTextureFormat sceneColorFormat() { return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT; }
+    DisplayTransformRenderer& displayTransform() { return m_displayTransform; }
     [[nodiscard]] SDL_GPUTextureFormat swapchainFormat() const { return m_swapchainFormat; }
     [[nodiscard]] SDL_GPUTextureFormat viewportDepthFormat() const { return m_viewportDepthFormat; }
     [[nodiscard]] const std::string& driverName() const { return m_driverName; }
@@ -102,6 +105,8 @@ private:
     SDL_GPUTextureFormat m_viewportDepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUPresentMode m_presentMode = kPresentModeVsync;
 
+    DisplayTransformRenderer m_displayTransform;
+    SDL_GPUTexture* m_sceneColorTexture = nullptr;
     SDL_GPUTexture* m_viewportColorTexture = nullptr;
     SDL_GPUTexture* m_viewportDepthTexture = nullptr;
 };

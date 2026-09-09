@@ -6,7 +6,7 @@ struct CloudSamplingState
 {
     CloudDensityField field;
     vec4 sun;
-    vec4 atmosphere; // render-origin altitude, atmosphere top, cloud ambient, sky exposure
+    vec4 atmosphere; // render-origin altitude, atmosphere top, cloud ambient, reserved
     AtmosphereOptics optics;
     vec4 scattering; // extinction, g, lobe weight, octave count
     vec4 powder; // strength, angular power, view steps, sun steps
@@ -14,7 +14,7 @@ struct CloudSamplingState
     vec4 octaves;
 };
 
-// Returns displayed premultiplied cloud source and opacity. Only the caller clips scene depth.
+// Returns linear premultiplied cloud radiance and opacity. Only the caller clips scene depth.
 vec4 integrateCloudRay(vec3 origin,vec3 ray,float end,CloudSamplingState u,
     sampler2D coverageTexture,sampler3D noiseTexture)
 {
@@ -45,6 +45,7 @@ vec4 integrateCloudRay(vec3 origin,vec3 ray,float end,CloudSamplingState u,
             clamp(int(u.scattering.w),1,12),u.octaves.xyz)*cloudPowder(tauSun,mu,u.powder.x,u.powder.y);
         vec3 sunlight=airSunTransmission(p.y+u.atmosphere.x,u.sun.xyz,u.atmosphere.y,u.optics)*u.optics.solar.rgb*u.optics.solar.w;
         vec3 lighting=sunlight*energy+u.atmosphere.z*sqrt(max(sunlight,vec3(0.0)))*vec3(0.65,0.78,1.0);
+        lighting *= u.optics.radianceScales.x; // After the complete lighting expression, including sqrt ambient.
         vec3 airT,airS;
         evaluateAtmosphere(u.atmosphere.x+origin.y,ray,distance,u.atmosphere.y,u.sun.xyz,u.optics,true,airT,airS);
         float stepT=exp(-d*u.scattering.x*ds);
@@ -52,8 +53,5 @@ vec4 integrateCloudRay(vec3 origin,vec3 ray,float end,CloudSamplingState u,
         viewT*=stepT;
     }
     float opacity=1.0-viewT;
-    // Integrate linear radiance first. Map the effective cloud source once into the
-    // same display-referred viewport as the sky, then premultiply for compositing.
-    vec3 displayed=opacity>1e-6 ? displaySkyRadiance(vec3(0.0),vec3(1.0),radiance/opacity,u.optics) : vec3(0.0);
-    return vec4(displayed*opacity,opacity);
+    return vec4(radiance,opacity);
 }
