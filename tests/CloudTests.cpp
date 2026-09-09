@@ -16,6 +16,8 @@ using namespace glm;
 inline float max(float a,double b) { return glm::max(a,float(b)); }
 inline float clamp(float a,double b,double c) { return glm::clamp(a,float(b),float(c)); }
 inline float mix(double a,float b,float c) { return glm::mix(float(a),b,c); }
+inline float smoothstep(double a,double b,float c) { return glm::smoothstep(float(a),float(b),c); }
+#include "../shaders/cloud_shape.glsl"
 #include "../shaders/cloud_optics.glsl"
 #include "../shaders/cloud_noise.glsl"
 #include "../shaders/cloud_slab.glsl"
@@ -23,6 +25,74 @@ inline float mix(double a,float b,float c) { return glm::mix(float(a),b,c); }
 
 int main()
 {
+    const auto circularError=[](double a,double b) { return std::abs(std::remainder(a-b,1.0)); };
+    for(float angle:{0.0f,0.7f,-2.1f}) for(float stretch:{1.0f,4.0f,16.0f})
+    {
+        const float frequency=0.005f*0.001f;
+        const auto transform=cloudMacroTransform(frequency,angle,stretch);
+        const glm::dmat2 precise(transform);
+        const glm::dvec2 d(std::cos(angle),std::sin(angle)), t(-d.y,d.x);
+        assert(std::abs(glm::length(precise*t)-double(frequency)/stretch)<1e-12);
+        for(auto cell:{0LL,-123LL,1LL<<60,-(1LL<<60)})
+        {
+            Position origin{cell,-cell,{524280,2000,8}};
+            for(glm::dvec3 shift:{glm::dvec3(32,500,-32),glm::dvec3(-524320,-500,524320)})
+            {
+                auto moved=origin.translated(shift);
+                auto p=WorldPhase::periodicWorldPhase(origin,precise);
+                auto q=WorldPhase::periodicWorldPhase(moved,precise);
+                auto delta=precise*glm::dvec2(shift.x,shift.z);
+                for(int axis=0;axis<2;++axis) assert(circularError(p[axis]+delta[axis],q[axis])<1e-9);
+                // Same shader-relative fixed point and same animation under either origin.
+                glm::vec2 relative(100,-50), displaced=relative-glm::vec2(shift.x,shift.z);
+                auto uv=transform*relative+glm::vec2(p);
+                auto other=transform*displaced+glm::vec2(q);
+                for(int axis=0;axis<2;++axis) assert(circularError(uv[axis],other[axis])<1e-6);
+            }
+        }
+        double travel=0.9999,evolution=0.9999;
+        const double initial=travel;
+        advanceCloudMacroPhases(travel,evolution,100,frequency,1,10);
+        auto movement=precise*(d*100.0*10.0);
+        assert(circularError(movement.x-travel,-initial)<1e-9); // Visible motion is +d.
+        assert(std::abs(movement.y)<1e-9);
+        assert(travel>=0 && travel<1 && evolution>=0 && evolution<1);
+        const auto frozenTravel=travel,frozenEvolution=evolution;
+        advanceCloudMacroPhases(travel,evolution,0,frequency,0,10000);
+        assert(travel==frozenTravel && evolution==frozenEvolution);
+        double subdividedTravel=travel,subdividedEvolution=evolution;
+        advanceCloudMacroPhases(travel,evolution,5,frequency,0.1f,3600);
+        for(int i=0;i<36000;++i)
+            advanceCloudMacroPhases(subdividedTravel,subdividedEvolution,5,frequency,0.1f,0.1);
+        assert(circularError(travel,subdividedTravel)<1e-10);
+        assert(circularError(evolution,subdividedEvolution)<1e-10);
+    }
+    for(float start:{0.0f,0.65f,0.95f}) for(float strength:{0.0f,2.0f,16.0f})
+    {
+        float previous=1;
+        for(int i=0;i<=1000;++i)
+        {
+            float h=float(i)/1000, top=Shader::cloudTopFalloff(h,start,strength);
+            assert(std::isfinite(top) && top>=0 && top<=previous);
+            if(h<=start) assert(top==1);
+            if(i==1000) assert(top==0);
+            if(start==0.65f && strength==0)
+                assert(std::abs(top-(1-glm::smoothstep(0.65f,1.0f,h)))<2e-7f);
+            previous=top;
+        }
+    }
+    for(float macro:{0.0f,0.3f,1.0f}) for(float detail:{0.0f,0.4f,1.0f})
+        for(float offset:{0.0f,0.15f,0.5f,1.5f})
+        {
+            assert(Shader::cloudMacroCoverage(macro,detail,0,offset)==glm::clamp(macro+offset-0.5f,0.0f,1.0f));
+            for(float strength:{0.0f,0.5f,1.0f})
+            {
+                float coverage=Shader::cloudMacroCoverage(macro,detail,strength,offset);
+                assert(coverage>=0 && coverage<=1);
+                assert(coverage<=Shader::cloudMacroCoverage(macro,detail,0,offset));
+            }
+            assert(std::abs(Shader::cloudMacroCoverage(macro,detail,1,offset)-glm::clamp(macro*detail+offset-0.5f,0.0f,1.0f))<1e-7f);
+        }
     using glm::vec3; using glm::vec2;
     const vec3 low(-10,2,-10), high(10,4,10);
     assert(Shader::cloudDomainInterval(vec3(0,3,0),vec3(1,0,0),low,high,100)==vec2(0,10));

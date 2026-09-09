@@ -8,6 +8,7 @@
 void CloudRenderer::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat color,SDL_GPUTextureFormat depth,const std::filesystem::path& shaders)
 {
     initializeRendererBase(device,color,depth);
+    m_macroTravel=m_macroEvolution=0;
     try
     {
         SDL_GPUTextureCreateInfo ti{};
@@ -97,7 +98,26 @@ void CloudRenderer::upload(SDL_GPUCopyPass* copy,const Position& origin,double t
     s.octaveCount=std::clamp(s.octaveCount,1,12); s.viewSteps=std::clamp(s.viewSteps,8,128); s.sunSteps=std::clamp(s.sunSteps,1,32);
     s.octaveA=std::clamp(s.octaveA,0.0f,1.0f); s.octaveB=std::clamp(s.octaveB,0.0f,1.0f); s.octaveC=std::clamp(s.octaveC,0.0f,1.0f);
     s.maxDistance=std::clamp(s.maxDistance,10000.0f,500000.0f); s.termination=std::clamp(s.termination,0.001f,0.1f);
+    const auto bounded=[](float value,float low,float high,float fallback) {
+        return std::isfinite(value) ? std::clamp(value,low,high) : fallback;
+    };
+    s.macroDetailFrequency=bounded(s.macroDetailFrequency,0.0001f,0.1f,0.005f);
+    s.macroDetailStrength=bounded(s.macroDetailStrength,0,1,1);
+    s.frontDirection=bounded(s.frontDirection,-3.14159265f,3.14159265f,0);
+    s.transverseStretch=bounded(s.transverseStretch,1,16,4);
+    s.frontTravelSpeed=bounded(s.frontTravelSpeed,0,100,5);
+    s.macroEvolutionSpeed=bounded(s.macroEvolutionSpeed,0,1,0.1f);
+    s.topFalloffStart=bounded(s.topFalloffStart,0,0.95f,0.65f);
+    s.topFalloffStrength=bounded(s.topFalloffStrength,0,16,2);
     const double dt=m_previousTime==0.0 ? 0.0 : std::max(0.0,time-m_previousTime); m_previousTime=time;
+    const float macroFrequency=s.macroDetailFrequency*0.001f;
+    const auto transform=cloudMacroTransform(macroFrequency,s.frontDirection,s.transverseStretch);
+    advanceCloudMacroPhases(m_macroTravel,m_macroEvolution,s.frontTravelSpeed,
+        macroFrequency,s.macroEvolutionSpeed,dt);
+    const auto macroPhase=WorldPhase::periodicWorldPhase(origin,glm::dmat2(transform));
+    m_field.macroTransform={transform[0][0],transform[1][0],transform[0][1],transform[1][1]};
+    m_field.macroPhase={macroPhase.x,macroPhase.y,m_macroTravel,m_macroEvolution};
+    m_field.macroShape={s.macroDetailStrength,s.topFalloffStart,s.topFalloffStrength,0};
     const glm::dvec2 velocity=glm::dvec2(std::cos(s.windDirection),std::sin(s.windDirection))*double(s.windSpeed);
     for(int axis=0;axis<2;++axis)
     {
@@ -174,6 +194,14 @@ void CloudRenderer::drawSettings()
     ImGui::SliderFloat("Thickness (m)",&s.thickness,100,10000);
     ImGui::SliderFloat("Coverage",&s.coverage,0,1.5f);
     ImGui::SliderFloat("Density",&s.density,0,4);
+    ImGui::SliderFloat("Macro detail frequency (cycles/km)",&s.macroDetailFrequency,0.0001f,0.1f,"%.4f",ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Macro detail strength",&s.macroDetailStrength,0,1);
+    ImGui::SliderAngle("Front direction",&s.frontDirection);
+    ImGui::SliderFloat("Transverse stretch",&s.transverseStretch,1,16);
+    ImGui::SliderFloat("Front travel speed (m/s)",&s.frontTravelSpeed,0,100);
+    ImGui::SliderFloat("Macro evolution (cycles/hour)",&s.macroEvolutionSpeed,0,1);
+    ImGui::SliderFloat("Top falloff start",&s.topFalloffStart,0,0.95f);
+    ImGui::SliderFloat("Top falloff strength",&s.topFalloffStrength,0,16);
     ImGui::SliderFloat("Base frequency (cycles/km)",&s.baseNoiseScale,0.01f,4);
     ImGui::SliderFloat("Detail frequency (cycles/km)",&s.detailNoiseScale,0.01f,10);
     ImGui::SliderFloat("Base strength",&s.baseStrength,0,1);
