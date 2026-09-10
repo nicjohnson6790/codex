@@ -12,6 +12,7 @@
 #include "SceneTypes.hpp"
 #include "SkyboxRenderer.hpp"
 #include "CloudRenderer.hpp"
+#include "SkyIlluminationRenderer.hpp"
 #include "SDLRenderer.hpp"
 #include "FoliageImposterRenderer.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
@@ -54,6 +55,7 @@ public:
         LightingSystem& lightingSystem;
         SkyboxRenderer& skyboxRenderer;
         CloudRenderer& cloudRenderer;
+        SkyIlluminationRenderer& skyIlluminationRenderer;
         FoliageCanopyRenderer& foliageCanopyRenderer;
         WorldGridFoliageCanopyManager& foliageCanopyManager;
         FoliageImposterRenderer& foliageRenderer;

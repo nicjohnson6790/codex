@@ -165,6 +165,20 @@ int main()
         glm::vec4(0.650e-6f,1.881e-6f,0.085e-6f,25000.0f),
         glm::vec4(1.0f,0.97f,0.92f,4.8f),
         glm::vec4(12.0f,0.0001f,0,0)};
+    // Surface sunlight and scattered sky must respond to the same source scales.
+    // In vacuum, white Lambertian ground returns incident irradiance / pi.
+    auto vacuum = optics;
+    vacuum.rayleigh = glm::vec4(0,0,0,8000);
+    vacuum.mie = glm::vec4(0,0,1200,0);
+    vacuum.ozone = glm::vec4(0,0,0,25000);
+    const auto direct = surfaceSunIrradiance(0,glm::vec3(0,1,0),top,vacuum);
+    for(int c=0;c<3;++c) near(direct[c],optics.solar[c]*4.8*12);
+    near(glm::length(surfaceSunIrradiance(0,glm::vec3(0,-1,0),top,vacuum)),0);
+    auto doubled = optics; doubled.radianceScales.x *= 2;
+    const auto groundSun = surfaceSunIrradiance(0,glm::vec3(0,1,0),top,optics);
+    const auto scaledSun = surfaceSunIrradiance(0,glm::vec3(0,1,0),top,doubled);
+    const auto highSun = surfaceSunIrradiance(4000,glm::vec3(0,1,0),top,optics);
+    for(int c=0;c<3;++c) { near(scaledSun[c],2*groundSun[c]); assert(highSun[c]>=groundSun[c]); }
     // Infinite reflected-ray radiance is the limit of the same finite camera
     // medium, with zero starting depth. Zero coefficients and night stay finite.
     const glm::vec3 absorption(0.15f,0.05f,0.02f);

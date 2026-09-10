@@ -30,6 +30,14 @@ vec3 airSunTransmission(float h, vec3 sun, float top, AtmosphereOptics a)
         * smoothstep(0.0f, 1.0e-5f, sun.y);
 }
 
+// Direct surface irradiance must share the source calibration used by scattered
+// sky/cloud radiance. The separate visible-disk scale is not an irradiance scale.
+vec3 surfaceSunIrradiance(float height, vec3 sun, float top, AtmosphereOptics a)
+{
+    return airSunTransmission(height,sun,top,a) * vec3(a.solar)
+        * a.solar.w * a.radianceScales.x;
+}
+
 void evaluateAtmosphere(float height, vec3 direction, float distance, float top,
     vec3 sun, AtmosphereOptics a, bool scatter, ATM_OUTPUT(vec3) transmission, ATM_OUTPUT(vec3) scattering)
 {

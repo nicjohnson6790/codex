@@ -31,6 +31,7 @@ layout(location = 1) in vec2 inSampleCoord;
 layout(location = 0) out vec3 fragLocalPosition;
 layout(location = 1) out vec3 fragWorldNormal;
 layout(location = 2) flat out uint fragAllowCaustics;
+layout(location = 3) flat out uint fragIlluminationRegion;
 
 const uint kHeightmapResolution = 259u;
 const uint kHeightmapMaxCoord = kHeightmapResolution - 1u;
@@ -178,6 +179,7 @@ void main()
 
     gl_Position = terrain.viewProjection * vec4(worldPosition, 1.0);
     fragLocalPosition = worldPosition;
+    fragIlluminationRegion = reference >> 2u;
     fragWorldNormal = computeNormal(sliceIndex, sampleCoord, heightSampleSpacing);
     fragAllowCaustics = scalePow == 0u ? 1u : 0u;
 }

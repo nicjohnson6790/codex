@@ -9,6 +9,7 @@
 #include <cassert>
 #include <iostream>
 #include <limits>
+#include "SkyIlluminationTests.hpp"
 
 namespace Shader
 {
@@ -36,22 +37,18 @@ float sampleCloudDensity(vec3, CloudDensityField field, sampler2D, sampler3D)
 
 int main()
 {
+    testSkyIllumination();
     const float horizon=std::sin(glm::radians(AppConfig::Terrain::kSolarHorizonFadeDegrees));
-    const float night=std::sin(glm::radians(AppConfig::Terrain::kAmbientNightElevationDegrees));
-    const float day=std::sin(glm::radians(AppConfig::Terrain::kAmbientDayElevationDegrees));
-    float previousSolar=0, previousAmbient=0;
+    float previousSolar=0;
     for(int i=0;i<=20000;++i)
     {
         float y=-1.0f+float(i)/10000.0f;
         float solar=Shader::terrainSolarVisibility(y,horizon);
-        float ambient=Shader::terrainAmbientDayFactor(y,night,day);
-        assert(solar>=previousSolar && solar<=1 && ambient>=previousAmbient && ambient<=1);
-        assert(solar-previousSolar<0.01f && ambient-previousAmbient<0.01f);
+        assert(solar>=previousSolar && solar<=1);
+        assert(solar-previousSolar<0.01f);
         if(y<=0) assert(solar==0);
         if(y>=horizon) assert(solar==1);
-        if(y<=night) assert(ambient==0);
-        if(y>=day) assert(ambient==1);
-        previousSolar=solar; previousAmbient=ambient;
+        previousSolar=solar;
     }
     const Shader::CloudDensityField field{{2,2,0,0.7f},{-10,-10,1,21}};
     for(int samples:{1,8,32})

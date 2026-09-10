@@ -113,6 +113,7 @@ class App
     QuadtreeWaterMeshRenderer m_waterMeshRenderer;
     SkyboxRenderer m_skyboxRenderer;
     CloudRenderer m_cloudRenderer;
+    SkyIlluminationRenderer m_skyIlluminationRenderer;
     GamepadInput m_gamepadInput;
     SteamService m_steamService;
     SteamSocketsTransport m_steamTransport;

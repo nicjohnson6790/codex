@@ -220,6 +220,7 @@ void AppPanels::drawControlsTab(Context &context)
     ImGui::SeparatorText("Viewport display");
     context.renderer.displayTransform().drawSettings();
     context.cloudRenderer.drawSettings();
+    context.skyIlluminationRenderer.drawSettings();
     if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen))
     {
         SkyboxRenderer::AtmosphereSettings &atmosphere = context.skyboxRenderer.atmosphereSettings();

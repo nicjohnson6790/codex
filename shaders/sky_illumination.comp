@@ -1,0 +1,64 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "atmosphere.glsl"
+#include "cloud_integration.glsl"
+#include "sky_illumination_math.glsl"
+layout(local_size_x=256) in;
+layout(set=0,binding=0) uniform samplerCube skyTexture;
+layout(set=0,binding=1) uniform sampler2D coverageTexture;
+layout(set=0,binding=2) uniform sampler3D noiseTexture;
+layout(set=0,binding=3,std430) readonly buffer Heights { float values[]; } heights;
+layout(set=1,binding=0,std430) buffer Irradiance { vec4 coefficients[]; } irradiance;
+struct ProbeJob { vec4 region; uvec4 indices; vec4 timing; };
+layout(set=2,binding=0) uniform ProbeUniforms
+{
+    CloudSamplingState cloud;
+    mat4 skyRotation;
+    ProbeJob jobs[32];
+} u;
+shared vec4 incident[256];
+float groundHeight(uint slice,vec2 fraction)
+{
+    vec2 coord=vec2(1.0)+fraction*256.0;
+    ivec2 a=ivec2(floor(coord)),b=min(a+ivec2(1),ivec2(257));
+    vec2 f=fract(coord);
+    uint base=slice*259u*259u;
+    float low=mix(heights.values[base+uint(a.y*259+a.x)],heights.values[base+uint(a.y*259+b.x)],f.x);
+    float high=mix(heights.values[base+uint(b.y*259+a.x)],heights.values[base+uint(b.y*259+b.x)],f.x);
+    return mix(low,high,f.y);
+}
+void main()
+{
+    ProbeJob job=u.jobs[gl_WorkGroupID.y];
+    uint probe=gl_WorkGroupID.x, lane=gl_LocalInvocationID.x;
+    vec2 fraction=skyProbeFraction(int(probe));
+    vec2 xz=job.region.xy+fraction*job.region.z;
+    float height=groundHeight(job.indices.x,fraction)+2.0;
+    vec3 origin=vec3(xz.x,job.region.w+height,xz.y);
+    vec3 ray=skyProbeDirection(int(lane));
+    vec3 airT,airS;
+    float skyDistance=max(u.cloud.atmosphere.y-height,0.0)/ray.y;
+    evaluateAtmosphere(height,ray,skyDistance,u.cloud.atmosphere.y,u.cloud.sun.xyz,u.cloud.optics,true,airT,airS);
+    vec3 space=textureLod(skyTexture,transpose(mat3(u.skyRotation))*ray,0.0).rgb;
+    vec3 radiance=linearSkyRadiance(space,airT,airS,u.cloud.optics);
+    if(u.cloud.march.z>0.0 && u.cloud.scattering.x>0.0)
+    {
+        // Same prepared field/lighting as the visible clouds. Full finite domain,
+        // no water cutoff, no camera scene-depth clipping, and no direct sun disk.
+        vec4 cloud=integrateCloudRay(origin,ray,1e30,u.cloud,coverageTexture,noiseTexture);
+        radiance=cloud.rgb+(1.0-cloud.a)*radiance;
+    }
+    if(any(isnan(radiance)) || any(isinf(radiance))) radiance=vec3(0.0);
+    incident[lane]=vec4(max(radiance,vec3(0.0)),0.0);
+    barrier();
+    if(lane<9u)
+    {
+        vec3 coefficient=vec3(0.0);
+        for(int sampleIndex=0;sampleIndex<256;++sampleIndex)
+            coefficient+=incident[sampleIndex].rgb*skyProbeBasis(int(lane),skyProbeDirection(sampleIndex));
+        coefficient*=6.28318530718/256.0*skyProbeConvolution(int(lane));
+        uint index=(job.indices.y*16u+probe)*9u+lane;
+        if(job.indices.z==0u) coefficient=mix(irradiance.coefficients[index].rgb,coefficient,job.timing.x);
+        irradiance.coefficients[index]=vec4(coefficient,0.0);
+    }
+}

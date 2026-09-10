@@ -222,6 +222,7 @@ void SDLRenderer::renderFrame(
     WorldTextRenderer& worldTextRenderer,
     SkyboxRenderer& skyboxRenderer,
     CloudRenderer& cloudRenderer,
+    SkyIlluminationRenderer& illuminationRenderer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
     Extent2D viewportExtent,
@@ -241,12 +242,14 @@ void SDLRenderer::renderFrame(
 
     {
         HELLO_PROFILE_SCOPE("SDLRenderer::UploadGeometry");
+        illuminationRenderer.prepare(quadtreeMeshRenderer.illuminationTiles(),m_activeCameraPosition,double(SDL_GetTicksNS())*1e-9);
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
         if (copyPass == nullptr)
         {
             throwSdlError("Failed to begin SDL GPU copy pass.");
         }
         cloudRenderer.upload(copyPass, m_activeCameraPosition, double(SDL_GetTicksNS()) * 1.0e-9, skyboxRenderer, lightingSystem);
+        illuminationRenderer.upload(copyPass);
         triangleRenderer.upload(copyPass);
         quadtreeMeshRenderer.upload(copyPass);
         if constexpr (AppConfig::Foliage::kCanopyEnabled)
@@ -270,6 +273,8 @@ void SDLRenderer::renderFrame(
     {
         HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::DispatchTerrainCompute", ProfileScopeGroup::Renderer);
         quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
+        illuminationRenderer.dispatch(commandBuffer,quadtreeMeshRenderer.heightmapBuffer(),cloudRenderer.samplingResources(),
+            skyboxRenderer,lightingSystem,cloudRenderer.settings().fullscreenBudget);
         if constexpr (AppConfig::Foliage::kCanopyEnabled)
         {
             canopyRenderer.dispatchCellGenerations(commandBuffer, quadtreeMeshRenderer.heightmapBuffer());
@@ -356,7 +361,7 @@ void SDLRenderer::renderFrame(
                 lightingSystem,
                 waterMeshRenderer,
                 timeSeconds,
-                cloudRenderer.samplingResources(), cloudRenderer.settings().terrainShadowSamples);
+                cloudRenderer.samplingResources(), cloudRenderer.settings().terrainShadowSamples,illuminationRenderer.samplingResources());
         }
         if constexpr (AppConfig::Water::kEnabled)
         {

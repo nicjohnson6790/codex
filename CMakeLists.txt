@@ -189,9 +189,11 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/world_text.frag ${WORLD_TEXT_FRAG_SPV
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.vert ${QUADTREE_MESH_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/terrain_mesh_descriptors.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_MESH_BRIDGE_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/terrain_mesh_descriptors.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl
     ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl
     ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shadow.glsl
-    ${CMAKE_SOURCE_DIR}/shaders/terrain_lighting.glsl)
+    ${CMAKE_SOURCE_DIR}/shaders/terrain_lighting.glsl ${CMAKE_SOURCE_DIR}/shaders/sky_illumination.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/sky_illumination_math.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_GENERATE_COMP_SPV})
 compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_generate.comp
@@ -234,6 +236,11 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/display_transform.frag ${SHADER_OUTPU
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.vert ${SHADER_OUTPUT_DIR}/cloud.vert.spv)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.frag ${SHADER_OUTPUT_DIR}/cloud.frag.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud_noise.comp ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_noise.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/sky_illumination.comp ${SHADER_OUTPUT_DIR}/sky_illumination.comp.spv
+    ${CMAKE_SOURCE_DIR}/shaders/sky_illumination_math.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl)
 foreach(EXPOSURE_STAGE clear histogram reduce)
     compile_shader(${CMAKE_SOURCE_DIR}/shaders/exposure_${EXPOSURE_STAGE}.comp ${SHADER_OUTPUT_DIR}/exposure_${EXPOSURE_STAGE}.comp.spv ${CMAKE_SOURCE_DIR}/shaders/exposure_math.glsl)
 endforeach()
@@ -247,6 +254,7 @@ add_custom_target(shaders ALL
         ${SHADER_OUTPUT_DIR}/cloud.vert.spv
         ${SHADER_OUTPUT_DIR}/cloud.frag.spv
         ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv
+        ${SHADER_OUTPUT_DIR}/sky_illumination.comp.spv
         ${TRIANGLE_VERT_SPV}
         ${TRIANGLE_FRAG_SPV}
         ${LINE_VERT_SPV}
@@ -308,6 +316,7 @@ add_executable(terrain_sandbox
     src/SkyboxRenderer.cpp
     src/DisplayTransformRenderer.cpp
     src/CloudRenderer.cpp
+    src/SkyIlluminationRenderer.cpp
     src/TriangleRenderer.cpp
     src/WorldGridQuadtree.cpp
     src/WorldGridFoliageManager.cpp

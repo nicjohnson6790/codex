@@ -202,6 +202,7 @@ void App::initializeRenderers(const std::filesystem::path &shaderDirectory)
     m_skyboxRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
     m_renderer.displayTransform().initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.swapchainFormat(), shaderDirectory);
     m_cloudRenderer.initialize(m_renderer.device(), m_renderer.sceneColorFormat(), m_renderer.viewportDepthFormat(), shaderDirectory);
+    m_skyIlluminationRenderer.initialize(m_renderer.device(),shaderDirectory);
 }
 
 void App::initializeImGui()
@@ -274,6 +275,7 @@ void App::shutdownRenderers()
     }
     m_skyboxRenderer.shutdown();
     m_cloudRenderer.shutdown();
+    m_skyIlluminationRenderer.shutdown();
     m_worldTextRenderer.shutdown();
     m_lineRenderer.shutdown();
     m_triangleRenderer.shutdown();
@@ -387,6 +389,7 @@ void App::buildUi()
         .lightingSystem = m_lightingSystem,
         .skyboxRenderer = m_skyboxRenderer,
         .cloudRenderer = m_cloudRenderer,
+        .skyIlluminationRenderer = m_skyIlluminationRenderer,
         .foliageCanopyRenderer = m_foliageCanopyRenderer,
         .foliageCanopyManager = m_foliageCanopyManager,
         .foliageRenderer = m_foliageRenderer,
@@ -778,7 +781,7 @@ void App::renderCurrentFrame()
     m_cloudRenderer.manager().update({m_worldGridQuadtree.activeGridX(), m_worldGridQuadtree.activeGridY()}, m_cloudRenderer.settings().seed);
     m_renderer.renderFrame(m_triangleRenderer, m_quadtreeMeshRenderer, m_foliageCanopyRenderer, m_foliageRenderer, m_nearbyFoliageRenderer,
                            m_worldGridQuadtree.heightmapManager(), m_foliageManager, m_foliageCanopyManager, m_nearbyFoliageManager,
-                           m_waterMeshRenderer, m_lineRenderer, m_worldTextRenderer, m_skyboxRenderer, m_cloudRenderer, viewProjection, m_lightingSystem,
+                           m_waterMeshRenderer, m_lineRenderer, m_worldTextRenderer, m_skyboxRenderer, m_cloudRenderer, m_skyIlluminationRenderer, viewProjection, m_lightingSystem,
                            m_panels.viewportExtent(), ImGui::GetDrawData(), !m_panels.viewportPaused(), m_elapsedTimeSeconds, m_frameIndex);
 }
 
@@ -805,6 +808,10 @@ void App::finishFrame()
                 throw std::runtime_error("Cloud validation needs 720 frames and coverage transitions");
             SDL_Log("Cloud validation passed: below/inside/above/horizontal rays, cell crossings, seed changes, universe coordinates; macro revisions=%llu",
                 (unsigned long long)m_cloudRenderer.manager().revision());
+            if(m_skyIlluminationRenderer.totalTileUpdates()==0)
+                throw std::runtime_error("Cloud traversal did not exercise terrain sky illumination updates");
+            SDL_Log("Sky illumination validation: %llu visible tile updates recorded",
+                (unsigned long long)m_skyIlluminationRenderer.totalTileUpdates());
         }
         if (m_options.verifyHeightmapPipeline)
         {

@@ -1,14 +1,18 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#include "atmosphere.glsl"
 #include "cloud_density.glsl"
 #include "cloud_slab.glsl"
 #include "cloud_shadow.glsl"
 #include "terrain_lighting.glsl"
+#include "sky_illumination.glsl"
 
 layout(set=3, binding=1) uniform CloudShadowUniforms
 {
     CloudDensityField field;
     vec4 params;
+    AtmosphereOptics optics;
+    vec4 atmosphere;
 } cloudShadow;
 
 layout(set=3, binding=0) uniform TerrainUniforms
@@ -46,6 +50,7 @@ layout(set=2, binding=8) uniform sampler3D cloudNoiseTexture;
 layout(location = 0) in vec3 fragLocalPosition;
 layout(location = 1) in vec3 fragWorldNormal;
 layout(location = 2) flat in uint fragAllowCaustics;
+layout(location = 3) flat in uint fragIlluminationRegion;
 
 layout(location = 0) out vec4 outColor;
 
@@ -320,11 +325,12 @@ void main()
     vec3 specular = (distribution * geometry * fresnel) / max(4.0 * max(nDotV, 0.05) * max(nDotL, 0.05), 0.0001);
     vec3 diffuse = (albedo * (1.0 - fresnel) / kPi) * nDotL;
 
-    vec3 sunRadiance = terrain.sunColorAmbient.rgb * terrain.sunDirectionIntensity.w;
+    vec3 sunRadiance = surfaceSunIrradiance(worldHeight, sunDirection,
+        cloudShadow.atmosphere.y, cloudShadow.optics);
     vec3 directLighting = (diffuse + (specular * 0.12)) * sunRadiance;
-    vec3 ambient = albedo * terrain.sunColorAmbient.a * terrain.sunColorAmbient.rgb * mix(0.45, 1.0, ao);
+    vec3 ambient = albedo / kPi * sampleSkyIllumination(fragLocalPosition, normal, fragIlluminationRegion)
+        * mix(0.45, 1.0, ao);
     float solarVisibility = terrainSolarVisibility(sunDirection.y, terrain.solarElevationParams.x);
-    ambient *= terrainAmbientDayFactor(sunDirection.y, terrain.solarElevationParams.y, terrain.solarElevationParams.z);
     float solarTransmission = 0.0;
     // Specular remains nonzero at N dot L == 0; caustics also has independent masks.
     if(solarVisibility > 0.0 && terrain.sunDirectionIntensity.w > 0.0 &&

@@ -5,6 +5,7 @@
 #include "ParentMeshDescriptors.hpp"
 #include "FoliageTypes.hpp"
 #include "LightingSystem.hpp"
+#include "SkyIlluminationRenderer.hpp"
 #include "Position.hpp"
 #include "QuadtreeWaterMeshRenderer.hpp"
 #include "SubmittedGpuFence.hpp"
@@ -73,9 +74,13 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     {
         CloudRenderer::DensityUniforms field;
         glm::vec4 params;
+        SkyboxRenderer::AtmosphereOptics optics;
+        glm::vec4 atmosphere;
     };
-    static_assert(sizeof(CloudShadowUniforms) == 144);
+    static_assert(sizeof(CloudShadowUniforms) == 240);
     static_assert(offsetof(CloudShadowUniforms, params) == 128);
+    static_assert(offsetof(CloudShadowUniforms, optics) == 144);
+    static_assert(offsetof(CloudShadowUniforms, atmosphere) == 224);
 
     QuadtreeMeshRenderer() = default;
     ~QuadtreeMeshRenderer() = default;
@@ -131,7 +136,12 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     // Issues the terrain draws for all queued leaf instances.
     void render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection,
                 const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer, float timeSeconds,
-                const CloudRenderer::SamplingResources &clouds, int cloudShadowSamples) const;
+                const CloudRenderer::SamplingResources &clouds, int cloudShadowSamples,
+                SkyIlluminationRenderer::SamplingResources illumination) const;
+    std::span<const SkyIlluminationManager::Tile> illuminationTiles() const
+    {
+        return {m_illuminationTiles.data(),m_instanceCount};
+    }
     [[nodiscard]] SDL_GPUBuffer *heightmapBuffer() const
     {
         return m_heightmapBuffer;
@@ -333,6 +343,9 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     std::array<PendingHeightmapSliceReadback, AppConfig::Terrain::kHeightmapReadbackCapacity> m_pendingHeightmapSliceReadbacks{};
     std::array<PendingFoliageLiveCountReadback, kHeightmapReadbackSlotCount> m_pendingFoliageLiveCountReadbacks{};
     std::uint16_t m_instanceCount = 0;
+    std::array<SkyIlluminationManager::Tile,AppConfig::Terrain::kHeightmapSliceCapacity> m_illuminationTiles{};
+    std::array<std::uint64_t,AppConfig::Terrain::kHeightmapSliceCapacity> m_heightmapRevisions{};
+    std::uint64_t m_nextHeightmapRevision=0;
     std::uint16_t m_bridgeIndirectCommandCount = 0;
     std::uint16_t m_pendingHeightmapGenerationCount = 0;
     std::uint32_t m_pendingHeightmapSourceDescriptorCount = 0;
