@@ -699,10 +699,7 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
         ++treeData.terrainDrawCountByScalePow[scalePow];
     }
 
-    auto& hint = m_residencyHints[nodeIndex].heightmap;
-    hint = m_heightmapManager.requestAsset(node.nodeId, hint);
-    if (hint != kUnavailableCacheIndex)
-        renderEngines.quadtreeMeshRenderer->addLeaf(node.nodeId, hint);
+    std::array<glm::uvec4, 4> bridges{};
 
     std::array<std::optional<CoarseTerrainNeighbor>, 4> coarseNeighbors{};
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
@@ -743,24 +740,17 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
     {
         const auto cornerIds = edgeCorners[edgeIndex];
-        QuadtreeMeshRenderer::BridgeHeightmaps heightmaps{
-            sliceIndex,
-            coarseNeighbors[edgeIndex] ? coarseNeighbors[edgeIndex]->sliceIndex : sliceIndex,
+        const auto coarse = coarseNeighbors[edgeIndex];
+        bridges[edgeIndex] = glm::uvec4(
+            coarse ? coarse->sliceIndex : sliceIndex,
             corners[cornerIds[0]].sliceIndex,
             corners[cornerIds[1]].sliceIndex,
-            corners[cornerIds[0]].selector,
-            corners[cornerIds[1]].selector,
-            coarseNeighbors[edgeIndex] ? coarseNeighbors[edgeIndex]->half : 0u,
-        };
-        if (coarseNeighbors[edgeIndex])
-        {
-            renderEngines.quadtreeMeshRenderer->addCoarseBridge(node.nodeId, heightmaps, edgeIndex);
-        }
-        else
-        {
-            renderEngines.quadtreeMeshRenderer->addBridge(node.nodeId, heightmaps, edgeIndex);
-        }
+            terrainBridgeMetadata(scalePow, edgeIndex, coarse ? coarse->half : 0u,
+                corners[cornerIds[0]].selector, corners[cornerIds[1]].selector)
+                | 0x40000000u | (coarse ? 0x80000000u : 0u));
     }
+    auto& hint = m_residencyHints[nodeIndex].heightmap;
+    hint = m_heightmapManager.requestLeaf(node.nodeId, hint, bridges, *renderEngines.quadtreeMeshRenderer);
 }
 
 void WorldGridQuadtree::clearTerrainCache()
@@ -849,50 +839,18 @@ void WorldGridQuadtree::emitWaterDrawForNode(
     const bool hasTerrainSlice = terrainSliceIndex != kUnavailableCacheIndex;
     HeightmapExtents extents{};
     const bool hasExtents = m_heightmapManager.buildExtents(node.nodeId, terrainSliceIndex, extents);
-    const bool queuedLeaf = waterManager.requestLeaf(
-        node.nodeId,
-        minCorner,
-        leafSizeMeters,
-        hasExtents,
-        extents.minHeight,
-        hasTerrainSlice,
-        hasTerrainSlice ? terrainSliceIndex : 0,
-        quadtreeLodHint);
-    if (!queuedLeaf)
-    {
-        return;
-    }
-
-    const std::uint32_t bandMask = waterManager.computeBandMaskForLeaf(minCorner, leafSizeMeters);
+    std::uint32_t bridgeMask = 0, coarseBridgeMask = 0;
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
     {
         if (edgeHasWaterNeighborCoverage(nodeIndex, edgeIndex))
-        {
-            waterManager.requestBridge(
-                node.nodeId,
-                minCorner,
-                leafSizeMeters,
-                hasTerrainSlice,
-                terrainSliceIndex,
-                quadtreeLodHint,
-                bandMask,
-                edgeIndex);
-            continue;
-        }
-
-        if (edgeHasWaterCoarserNeighbor(nodeIndex, edgeIndex))
-        {
-            waterManager.requestCoarseBridge(
-                node.nodeId,
-                minCorner,
-                leafSizeMeters,
-                hasTerrainSlice,
-                terrainSliceIndex,
-                quadtreeLodHint,
-                bandMask,
-                edgeIndex);
-        }
+            bridgeMask |= 1u << edgeIndex;
+        else if (edgeHasWaterCoarserNeighbor(nodeIndex, edgeIndex))
+            coarseBridgeMask |= 1u << edgeIndex;
     }
+    (void)waterManager.requestLeaf(
+        node.nodeId, minCorner, leafSizeMeters, hasExtents, extents.minHeight,
+        hasTerrainSlice, hasTerrainSlice ? terrainSliceIndex : 0, quadtreeLodHint,
+        bridgeMask, coarseBridgeMask);
 }
 
 CacheIndex WorldGridQuadtree::residentHeightmap(std::uint16_t nodeIndex) const

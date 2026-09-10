@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 layout(set=1, binding=0) uniform TerrainUniforms
 {
@@ -27,16 +28,7 @@ layout(set=0, binding=0, std430) readonly buffer HeightmapBuffer
     float heights[];
 } heightmapBuffer;
 
-struct TerrainInstance
-{
-    vec3 position;
-    uint packedMetadata;
-};
-
-layout(set=0, binding=1, std430) readonly buffer InstanceBuffer
-{
-    TerrainInstance instanceData[];
-} instanceBuffer;
+#include "terrain_mesh_descriptors.glsl"
 
 layout(location = 0) in vec2 inLocalCoord;
 layout(location = 1) in vec2 inSampleCoord;
@@ -81,7 +73,7 @@ vec3 computeNormal(uint sliceIndex, ivec2 sampleCoord, float sampleSpacing)
 
 void main()
 {
-    TerrainInstance instance = instanceBuffer.instanceData[gl_InstanceIndex];
+    TerrainInstance instance = descriptors.parents[gl_InstanceIndex].body;
     uint sliceIndex = instance.packedMetadata & 0xFFFFu;
     uint scalePow = (instance.packedMetadata >> 16u) & 0xFFu;
     float leafSize = kMinimumQuadSize * exp2(float(scalePow));

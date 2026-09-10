@@ -1,6 +1,8 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "SurfacePosition.hpp"
+#include "ParentMeshDescriptors.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
 #include "RenderTypes.hpp"
@@ -93,26 +95,7 @@ public:
         std::uint8_t quadtreeLodHint,
         bool hasTerrainSlice,
         std::uint16_t terrainSliceIndex,
-        std::uint32_t bandMask);
-    void addBridge(
-        const WorldGridQuadtreeLeafId& leafId,
-        const Position& leafOrigin,
-        double leafSizeMeters,
-        std::uint8_t quadtreeLodHint,
-        bool hasTerrainSlice,
-        std::uint16_t terrainSliceIndex,
-        std::uint32_t bandMask,
-        std::uint8_t edgeIndex);
-    void addCoarseBridge(
-        const WorldGridQuadtreeLeafId& leafId,
-        const Position& leafOrigin,
-        double leafSizeMeters,
-        std::uint8_t quadtreeLodHint,
-        bool hasTerrainSlice,
-        std::uint16_t terrainSliceIndex,
-        std::uint32_t bandMask,
-        std::uint8_t edgeIndex);
-
+        std::uint32_t bandMask, std::uint32_t bridgeMask, std::uint32_t coarseBridgeMask);
     void upload(SDL_GPUCopyPass* copyPass);
     void dispatchWaterSimulation(
         SDL_GPUCommandBuffer* commandBuffer,
@@ -151,6 +134,17 @@ private:
         glm::vec4 leafParams{ 0.0f };
     };
 
+    struct alignas(16) ParentDescriptor
+    {
+        InstanceData body{};
+        glm::uvec4 edges{}; // normal mask, coarse mask; remaining fields reserved
+    };
+    static_assert(sizeof(ParentDescriptor) == 48);
+    static_assert(offsetof(ParentDescriptor, edges) == 32);
+    static_assert(sizeof(InstanceData) == 32);
+    static_assert(sizeof(SDL_GPUIndexedIndirectDrawCommand) == 20);
+    static_assert(offsetof(SDL_GPUIndexedIndirectDrawCommand, num_instances) == 4);
+
     struct MeshResources
     {
         SDL_GPUBuffer* vertexBuffer = nullptr;
@@ -167,13 +161,6 @@ private:
         std::uint32_t indexCount = 0;
     };
 
-    struct InstanceResources
-    {
-        SDL_GPUBuffer* instanceBuffer = nullptr;
-        SDL_GPUTransferBuffer* instanceTransferBuffer = nullptr;
-        std::array<InstanceData, AppConfig::Water::kMaxWaterInstances> instances{};
-        std::uint32_t instanceCount = 0;
-    };
 
     struct WorkingBufferResources
     {
@@ -234,8 +221,6 @@ private:
         const std::vector<Vertex>& vertices,
         const std::vector<std::uint32_t>& indices,
         MeshResources& resources);
-    void createInstanceBuffer();
-    void destroyInstanceBuffer();
     void createWorkingBuffers();
     void destroyWorkingBuffers();
     void createWaterTextures();
@@ -270,9 +255,14 @@ private:
     MeshResources m_bridgeMesh{};
     MeshRange m_bridgeMeshRange{};
     MeshRange m_coarseBridgeMeshRange{};
-    InstanceResources m_instances{};
-    InstanceResources m_bridgeInstances{};
-    InstanceResources m_coarseBridgeInstances{};
+    using Descriptors = ParentMeshDescriptors<ParentDescriptor, AppConfig::Water::kMaxWaterInstances>;
+    static_assert(offsetof(Descriptors, bridges) == 48 * 4096);
+    Descriptors m_descriptors{};
+    std::uint32_t m_instanceCount = 0;
+    SDL_GPUBuffer* m_descriptorBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_descriptorTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_indirectBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_indirectTransferBuffer = nullptr;
     SDL_GPUBuffer* m_bridgeIndirectBuffer = nullptr;
     SDL_GPUTransferBuffer* m_bridgeIndirectTransferBuffer = nullptr;
     std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};

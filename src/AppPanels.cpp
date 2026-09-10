@@ -636,7 +636,7 @@ void AppPanels::drawWaterTab(Context &context)
     ImGui::SeparatorText("Mesh");
     ImGui::TextWrapped("Water now uses one reusable mesh for all visible quadtree leaves.");
     ImGui::Text("Mesh resolution: %u x %u vertices", AppConfig::Water::kMeshVertexResolution, AppConfig::Water::kMeshVertexResolution);
-    ImGui::Text("Active instances: %u", context.waterMeshRenderer.instanceCount());
+    ImGui::Text("Water mesh instances: %u", context.waterMeshRenderer.instanceCount());
 }
 
 void AppPanels::drawViewportPane(Context &context)

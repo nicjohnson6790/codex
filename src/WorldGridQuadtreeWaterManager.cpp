@@ -47,7 +47,7 @@ bool WorldGridQuadtreeWaterManager::requestLeaf(
     float terrainMinHeight,
     bool hasTerrainSlice,
     std::uint16_t terrainSliceIndex,
-    std::uint8_t quadtreeLodHint)
+    std::uint8_t quadtreeLodHint, std::uint32_t bridgeMask, std::uint32_t coarseBridgeMask)
 {
     if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
     {
@@ -62,12 +62,12 @@ bool WorldGridQuadtreeWaterManager::requestLeaf(
     const std::uint32_t bandMask = computeBandMaskForLeaf(leafOrigin, leafSizeMeters);
 
     WaterLeafDrawRequest& request = m_requests[m_requestCount++];
-    request.type = WaterLeafDrawRequest::Type::Leaf;
+    request.bridgeMask = bridgeMask;
+    request.coarseBridgeMask = coarseBridgeMask;
     request.leafId = leafId;
     request.origin = leafOrigin;
     request.sizeMeters = leafSizeMeters;
     request.quadtreeLodHint = quadtreeLodHint;
-    request.edgeIndex = 0;
     request.bandMask = bandMask;
     request.terrainSliceIndex = terrainSliceIndex;
     request.hasTerrainSlice = hasTerrainSlice;
@@ -82,60 +82,6 @@ std::uint32_t WorldGridQuadtreeWaterManager::computeBandMaskForLeaf(
     return computeBandMask(leafSizeMeters, distanceMeters);
 }
 
-void WorldGridQuadtreeWaterManager::requestBridge(
-    const WorldGridQuadtreeLeafId& leafId,
-    const Position& leafOrigin,
-    double leafSizeMeters,
-    bool hasTerrainSlice,
-    std::uint16_t terrainSliceIndex,
-    std::uint8_t quadtreeLodHint,
-    std::uint32_t bandMask,
-    std::uint8_t edgeIndex)
-{
-    if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
-    {
-        return;
-    }
-
-    WaterLeafDrawRequest& request = m_requests[m_requestCount++];
-    request.type = WaterLeafDrawRequest::Type::Bridge;
-    request.leafId = leafId;
-    request.origin = leafOrigin;
-    request.sizeMeters = leafSizeMeters;
-    request.quadtreeLodHint = quadtreeLodHint;
-    request.edgeIndex = edgeIndex;
-    request.bandMask = bandMask;
-    request.terrainSliceIndex = terrainSliceIndex;
-    request.hasTerrainSlice = hasTerrainSlice;
-}
-
-void WorldGridQuadtreeWaterManager::requestCoarseBridge(
-    const WorldGridQuadtreeLeafId& leafId,
-    const Position& leafOrigin,
-    double leafSizeMeters,
-    bool hasTerrainSlice,
-    std::uint16_t terrainSliceIndex,
-    std::uint8_t quadtreeLodHint,
-    std::uint32_t bandMask,
-    std::uint8_t edgeIndex)
-{
-    if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
-    {
-        return;
-    }
-
-    WaterLeafDrawRequest& request = m_requests[m_requestCount++];
-    request.type = WaterLeafDrawRequest::Type::CoarseBridge;
-    request.leafId = leafId;
-    request.origin = leafOrigin;
-    request.sizeMeters = leafSizeMeters;
-    request.quadtreeLodHint = quadtreeLodHint;
-    request.edgeIndex = edgeIndex;
-    request.bandMask = bandMask;
-    request.terrainSliceIndex = terrainSliceIndex;
-    request.hasTerrainSlice = hasTerrainSlice;
-}
-
 void WorldGridQuadtreeWaterManager::flushToRenderer(QuadtreeWaterMeshRenderer& renderer) const
 {
     renderer.clear();
@@ -143,41 +89,9 @@ void WorldGridQuadtreeWaterManager::flushToRenderer(QuadtreeWaterMeshRenderer& r
     for (std::uint32_t index = 0; index < m_requestCount; ++index)
     {
         const WaterLeafDrawRequest& request = m_requests[index];
-        switch (request.type)
-        {
-        case WaterLeafDrawRequest::Type::Leaf:
-            renderer.addLeaf(
-                request.leafId,
-                request.origin,
-                request.sizeMeters,
-                request.quadtreeLodHint,
-                request.hasTerrainSlice,
-                request.terrainSliceIndex,
-                request.bandMask);
-            break;
-        case WaterLeafDrawRequest::Type::Bridge:
-            renderer.addBridge(
-                request.leafId,
-                request.origin,
-                request.sizeMeters,
-                request.quadtreeLodHint,
-                request.hasTerrainSlice,
-                request.terrainSliceIndex,
-                request.bandMask,
-                request.edgeIndex);
-            break;
-        case WaterLeafDrawRequest::Type::CoarseBridge:
-            renderer.addCoarseBridge(
-                request.leafId,
-                request.origin,
-                request.sizeMeters,
-                request.quadtreeLodHint,
-                request.hasTerrainSlice,
-                request.terrainSliceIndex,
-                request.bandMask,
-                request.edgeIndex);
-            break;
-        }
+        renderer.addLeaf(request.leafId, request.origin, request.sizeMeters, request.quadtreeLodHint,
+            request.hasTerrainSlice, request.terrainSliceIndex, request.bandMask,
+            request.bridgeMask, request.coarseBridgeMask);
     }
 }
 

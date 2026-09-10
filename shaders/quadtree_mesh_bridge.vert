@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 layout(set=1, binding=0) uniform TerrainUniforms
 {
@@ -22,17 +23,7 @@ layout(set=0, binding=0, std430) readonly buffer HeightmapBuffer
     float heights[];
 } heightmapBuffer;
 
-struct TerrainInstance
-{
-    vec3 position;
-    uint packedMetadata;
-    uvec4 heightmapIndices;
-};
-
-layout(set=0, binding=1, std430) readonly buffer InstanceBuffer
-{
-    TerrainInstance instanceData[];
-} instanceBuffer;
+#include "terrain_mesh_descriptors.glsl"
 
 layout(location = 0) in vec2 inLocalCoord;
 layout(location = 1) in vec2 inSampleCoord;
@@ -139,7 +130,11 @@ ivec2 coarseOuterSampleCoord(uint edgeIndex, uint coarseHalf, vec2 localCoord)
 
 void main()
 {
-    TerrainInstance instance = instanceBuffer.instanceData[gl_InstanceIndex];
+    uint reference = descriptors.bridges[gl_InstanceIndex];
+    TerrainInstance instance = descriptors.parents[reference >> 2u].body;
+    uvec4 edge = descriptors.parents[reference >> 2u].edges[reference & 3u];
+    uvec4 heightmapIndices = uvec4(instance.packedMetadata & 0xFFFFu, edge.xyz);
+    instance.packedMetadata = edge.w & 0x3FFFFFFFu;
     uint scalePow = (instance.packedMetadata >> 16u) & 0xFFu;
     uint edgeIndex = (instance.packedMetadata >> 24u) & 0x3u;
     uint coarseHalf = (instance.packedMetadata >> 26u) & 0x1u;
@@ -153,24 +148,24 @@ void main()
     bool outerVertex = inLocalCoord.x == 0.0;
     bool firstCorner = outerVertex && inLocalCoord.y == 0.0;
     bool secondCorner = outerVertex && inLocalCoord.y == kHeightmapLeafIntervalCount;
-    uint sliceIndex = outerVertex ? instance.heightmapIndices.y : instance.heightmapIndices.x;
+    uint sliceIndex = outerVertex ? heightmapIndices.y : heightmapIndices.x;
     float heightSampleSpacing = sampleSpacing;
-    if (outerVertex && instance.heightmapIndices.y != instance.heightmapIndices.x)
+    if (outerVertex && heightmapIndices.y != heightmapIndices.x)
     {
         sampleCoord = coarseOuterSampleCoord(edgeIndex, coarseHalf, localCoord);
         heightSampleSpacing *= 2.0;
     }
     if (firstCorner)
     {
-        sliceIndex = instance.heightmapIndices.z;
+        sliceIndex = heightmapIndices.z;
         sampleCoord = cornerSampleCoord(instance.packedMetadata & 7u);
-        heightSampleSpacing = sliceIndex == instance.heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
+        heightSampleSpacing = sliceIndex == heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
     }
     else if (secondCorner)
     {
-        sliceIndex = instance.heightmapIndices.w;
+        sliceIndex = heightmapIndices.w;
         sampleCoord = cornerSampleCoord((instance.packedMetadata >> 3u) & 7u);
-        heightSampleSpacing = sliceIndex == instance.heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
+        heightSampleSpacing = sliceIndex == heightmapIndices.x ? sampleSpacing : sampleSpacing * 2.0;
     }
     float height = sampleHeight(sliceIndex, sampleCoord);
     vec2 localOffset = localCoord * sampleSpacing;

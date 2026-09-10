@@ -1,4 +1,5 @@
 #include "CloudRenderer.hpp"
+#include "PerformanceCapture.hpp"
 #include "CloudSampling.hpp"
 #include "PeriodicWorldPhase.hpp"
 #include <imgui.h>
@@ -85,6 +86,7 @@ void CloudRenderer::shutdown()
 
 void CloudRenderer::upload(SDL_GPUCopyPass* copy,const Position& origin,double time,const SkyboxRenderer& sky,const LightingSystem& lighting)
 {
+    HELLO_PROFILE_SCOPE_GROUPS("CloudRenderer::Upload", ProfileScopeGroup::Renderer);
     m_activeCameraPosition=origin;
     auto& s=m_settings;
     // Settings are also available to callers outside the bounded ImGui controls.
@@ -172,6 +174,7 @@ CloudRenderer::SamplingResources CloudRenderer::waterSamplingResources() const
 
 void CloudRenderer::render(SDL_GPURenderPass* pass,SDL_GPUCommandBuffer* command,const glm::mat4& inverse,SDL_GPUTexture* depth)
 {
+    HELLO_PROFILE_SCOPE_GROUPS("CloudRenderer::Render", ProfileScopeGroup::Renderer);
     if(m_prepared.march.z<0.5f) return;
     Uniforms u{inverse,m_prepared};
     u.cloud.march.w=float(std::clamp(m_settings.fullscreenBudget,128,1024));

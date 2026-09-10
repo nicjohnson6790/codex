@@ -1,4 +1,5 @@
 #include "DisplayTransformRenderer.hpp"
+#include "PerformanceCapture.hpp"
 #include <algorithm>
 #include <cmath>
 #include <glm/vec4.hpp>
@@ -78,6 +79,7 @@ void DisplayTransformRenderer::shutdown()
 
 void DisplayTransformRenderer::render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* command, SDL_GPUTexture* scene)
 {
+    HELLO_PROFILE_SCOPE_GROUPS("DisplayTransformRenderer::Render", ProfileScopeGroup::Renderer);
     exposure = std::isfinite(exposure) ? std::max(exposure, 0.0f) : 1.0f;
     const glm::vec4 settings(exposure, automatic ? 1.0f : 0.0f, 0, 0);
     SDL_PushGPUFragmentUniformData(command, 0, &settings, sizeof(settings));
@@ -90,6 +92,7 @@ void DisplayTransformRenderer::render(SDL_GPURenderPass* pass, SDL_GPUCommandBuf
 
 void DisplayTransformRenderer::meter(SDL_GPUCommandBuffer* command,SDL_GPUTexture* scene,unsigned width,unsigned height)
 {
+    HELLO_PROFILE_SCOPE_GROUPS("DisplayTransformRenderer::Meter", ProfileScopeGroup::Renderer);
     if(!width||!height) return;
     auto sanitize=[](float v,float fallback,float low,float high) { return std::isfinite(v) ? std::clamp(v,low,high) : fallback; };
     exposure=sanitize(exposure,1,0,65536);

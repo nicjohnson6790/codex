@@ -283,7 +283,22 @@ void QuadtreeWaterMeshRenderer::initialize(
 {
     initializeRendererBase(device, colorFormat, depthFormat);
     m_settings = makeDefaultWaterSettings();
-    createInstanceBuffer();
+    SDL_GPUBufferCreateInfo descriptorInfo{};
+    descriptorInfo.usage=SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+    descriptorInfo.size=sizeof(m_descriptors);
+    m_descriptorBuffer=SDL_CreateGPUBuffer(m_device,&descriptorInfo);
+    SDL_GPUTransferBufferCreateInfo staging{};
+    staging.usage=SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    staging.size=descriptorInfo.size;
+    m_descriptorTransferBuffer=SDL_CreateGPUTransferBuffer(m_device,&staging);
+    SDL_GPUBufferCreateInfo bodyInfo{};
+    bodyInfo.usage=SDL_GPU_BUFFERUSAGE_INDIRECT;
+    bodyInfo.size=sizeof(SDL_GPUIndexedIndirectDrawCommand);
+    m_indirectBuffer=SDL_CreateGPUBuffer(m_device,&bodyInfo);
+    staging.size=bodyInfo.size;
+    m_indirectTransferBuffer=SDL_CreateGPUTransferBuffer(m_device,&staging);
+    if (!m_descriptorBuffer || !m_descriptorTransferBuffer || !m_indirectBuffer || !m_indirectTransferBuffer)
+        throwSdlError("Failed to create water descriptor resources.");
     createMesh();
     createWorkingBuffers();
     createWaterTextures();
@@ -313,6 +328,12 @@ void QuadtreeWaterMeshRenderer::initialize(
 
 void QuadtreeWaterMeshRenderer::shutdown()
 {
+    if (m_descriptorBuffer) SDL_ReleaseGPUBuffer(m_device,m_descriptorBuffer);
+    if (m_indirectBuffer) SDL_ReleaseGPUBuffer(m_device,m_indirectBuffer);
+    if (m_descriptorTransferBuffer) SDL_ReleaseGPUTransferBuffer(m_device,m_descriptorTransferBuffer);
+    if (m_indirectTransferBuffer) SDL_ReleaseGPUTransferBuffer(m_device,m_indirectTransferBuffer);
+    m_descriptorBuffer=nullptr; m_indirectBuffer=nullptr;
+    m_descriptorTransferBuffer=nullptr; m_indirectTransferBuffer=nullptr;
     if (m_initializeSpectrumPipeline != nullptr)
     {
         SDL_ReleaseGPUComputePipeline(m_device, m_initializeSpectrumPipeline);
@@ -359,15 +380,13 @@ void QuadtreeWaterMeshRenderer::shutdown()
     destroyWaterTextures();
     destroyWorkingBuffers();
     destroyMesh();
-    destroyInstanceBuffer();
     clear();
 }
 
 void QuadtreeWaterMeshRenderer::clear()
 {
-    m_instances.instanceCount = 0;
-    m_bridgeInstances.instanceCount = 0;
-    m_coarseBridgeInstances.instanceCount = 0;
+    m_instanceCount = 0;
+    m_bridgeIndirectCommands = {};
     m_bridgeIndirectCommandCount = 0;
 }
 
@@ -409,17 +428,19 @@ void QuadtreeWaterMeshRenderer::addLeaf(
     std::uint8_t quadtreeLodHint,
     bool hasTerrainSlice,
     std::uint16_t terrainSliceIndex,
-    std::uint32_t bandMask)
+    std::uint32_t bandMask, std::uint32_t bridgeMask, std::uint32_t coarseBridgeMask)
 {
     (void)leafId;
 
-    if (m_instances.instanceCount >= AppConfig::Water::kMaxWaterInstances)
+    if (m_instanceCount >= AppConfig::Water::kMaxWaterInstances)
     {
         return;
     }
 
-    const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
-    InstanceData& instance = m_instances.instances[m_instances.instanceCount++];
+    const glm::vec3 localOrigin = glm::vec3(surfacePositionRelativeTo(leafOrigin, m_activeCameraPosition));
+    ParentDescriptor& parent = m_descriptors.parents[m_instanceCount++];
+    parent.edges = glm::uvec4(bridgeMask, coarseBridgeMask, 0u, 0u);
+    InstanceData& instance = parent.body;
     instance.position[0] = localOrigin.x;
     instance.position[1] = localOrigin.y;
     instance.position[2] = localOrigin.z;
@@ -431,198 +452,32 @@ void QuadtreeWaterMeshRenderer::addLeaf(
         hasTerrainSlice ? 1.0f : 0.0f);
 }
 
-void QuadtreeWaterMeshRenderer::addBridge(
-    const WorldGridQuadtreeLeafId& leafId,
-    const Position& leafOrigin,
-    double leafSizeMeters,
-    std::uint8_t quadtreeLodHint,
-    bool hasTerrainSlice,
-    std::uint16_t terrainSliceIndex,
-    std::uint32_t bandMask,
-    std::uint8_t edgeIndex)
-{
-    (void)leafId;
-
-    if (m_bridgeInstances.instanceCount >= AppConfig::Water::kMaxWaterInstances)
-    {
-        return;
-    }
-
-    const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
-    InstanceData& instance = m_bridgeInstances.instances[m_bridgeInstances.instanceCount++];
-    instance.position[0] = localOrigin.x;
-    instance.position[1] = localOrigin.y;
-    instance.position[2] = localOrigin.z;
-    instance.packedMetadata = packMetadata(quadtreeLodHint, bandMask, edgeIndex);
-    instance.leafParams = glm::vec4(
-        static_cast<float>(leafSizeMeters),
-        m_settings.waterLevel,
-        static_cast<float>(terrainSliceIndex),
-        hasTerrainSlice ? 1.0f : 0.0f);
-}
-
-void QuadtreeWaterMeshRenderer::addCoarseBridge(
-    const WorldGridQuadtreeLeafId& leafId,
-    const Position& leafOrigin,
-    double leafSizeMeters,
-    std::uint8_t quadtreeLodHint,
-    bool hasTerrainSlice,
-    std::uint16_t terrainSliceIndex,
-    std::uint32_t bandMask,
-    std::uint8_t edgeIndex)
-{
-    (void)leafId;
-
-    if (m_coarseBridgeInstances.instanceCount >= AppConfig::Water::kMaxWaterInstances)
-    {
-        return;
-    }
-
-    const glm::vec3 localOrigin = localPositionFromWorldPosition(leafOrigin);
-    InstanceData& instance = m_coarseBridgeInstances.instances[m_coarseBridgeInstances.instanceCount++];
-    instance.position[0] = localOrigin.x;
-    instance.position[1] = localOrigin.y;
-    instance.position[2] = localOrigin.z;
-    instance.packedMetadata = packMetadata(quadtreeLodHint, bandMask, edgeIndex);
-    instance.leafParams = glm::vec4(
-        static_cast<float>(leafSizeMeters),
-        m_settings.waterLevel,
-        static_cast<float>(terrainSliceIndex),
-        hasTerrainSlice ? 1.0f : 0.0f);
-}
-
 void QuadtreeWaterMeshRenderer::upload(SDL_GPUCopyPass* copyPass)
 {
     HELLO_PROFILE_SCOPE_GROUPS("QuadtreeWaterMeshRenderer::Upload", ProfileScopeGroup::Renderer);
-
-    if (totalInstanceCount() == 0)
-    {
-        return;
-    }
-
-    const auto sortInstances = [](InstanceResources& resources)
-    {
-        if (resources.instanceCount <= 1)
-        {
-            return;
-        }
-
-        std::sort(
-            resources.instances.begin(),
-            resources.instances.begin() + resources.instanceCount,
-            [](const InstanceData& left, const InstanceData& right)
-            {
-                const auto distanceSquared = [](const InstanceData& instance)
-                {
-                    const float leafSize = instance.leafParams.x;
-                    const float centerX = instance.position[0] + (leafSize * 0.5f);
-                    const float centerY = instance.leafParams.y;
-                    const float centerZ = instance.position[2] + (leafSize * 0.5f);
-                    return
-                        (centerX * centerX) +
-                        (centerY * centerY) +
-                        (centerZ * centerZ);
-                };
-                return distanceSquared(left) < distanceSquared(right);
-            });
-    };
-
-    const auto uploadInstances = [this, copyPass](InstanceResources& resources)
-    {
-        if (resources.instanceCount == 0)
-        {
-            return;
-        }
-
-        void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, resources.instanceTransferBuffer, true);
-        std::memcpy(
-            mappedInstances,
-            resources.instances.data(),
-            sizeof(InstanceData) * resources.instanceCount);
-        SDL_UnmapGPUTransferBuffer(m_device, resources.instanceTransferBuffer);
-
-        SDL_GPUTransferBufferLocation source{};
-        source.transfer_buffer = resources.instanceTransferBuffer;
-
-        SDL_GPUBufferRegion destination{};
-        destination.buffer = resources.instanceBuffer;
-        destination.size = static_cast<Uint32>(sizeof(InstanceData) * resources.instanceCount);
+    const auto upload = [&](SDL_GPUTransferBuffer* staging, SDL_GPUBuffer* buffer, const void* data, Uint32 bytes) {
+        void* mapped = SDL_MapGPUTransferBuffer(m_device, staging, true);
+        if (!mapped) throwSdlError("Failed to upload water draw descriptors.");
+        std::memcpy(mapped, data, bytes);
+        SDL_UnmapGPUTransferBuffer(m_device, staging);
+        SDL_GPUTransferBufferLocation source{staging, 0};
+        SDL_GPUBufferRegion destination{buffer, 0, bytes};
         SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
     };
-
-    sortInstances(m_instances);
-    sortInstances(m_bridgeInstances);
-    sortInstances(m_coarseBridgeInstances);
-
-    uploadInstances(m_instances);
-    if (m_bridgeInstances.instanceCount > 0 || m_coarseBridgeInstances.instanceCount > 0)
-    {
-        void* mappedInstances = SDL_MapGPUTransferBuffer(m_device, m_bridgeInstances.instanceTransferBuffer, true);
-        std::byte* mappedBytes = static_cast<std::byte*>(mappedInstances);
-        std::size_t bridgeBytes = 0;
-        if (m_bridgeInstances.instanceCount > 0)
-        {
-            bridgeBytes = sizeof(InstanceData) * m_bridgeInstances.instanceCount;
-            std::memcpy(mappedBytes, m_bridgeInstances.instances.data(), bridgeBytes);
-        }
-        if (m_coarseBridgeInstances.instanceCount > 0)
-        {
-            std::memcpy(
-                mappedBytes + bridgeBytes,
-                m_coarseBridgeInstances.instances.data(),
-                sizeof(InstanceData) * m_coarseBridgeInstances.instanceCount);
-        }
-        SDL_UnmapGPUTransferBuffer(m_device, m_bridgeInstances.instanceTransferBuffer);
-
-        SDL_GPUTransferBufferLocation source{};
-        source.transfer_buffer = m_bridgeInstances.instanceTransferBuffer;
-
-        SDL_GPUBufferRegion destination{};
-        destination.buffer = m_bridgeInstances.instanceBuffer;
-        destination.size = static_cast<Uint32>(
-            sizeof(InstanceData) * (m_bridgeInstances.instanceCount + m_coarseBridgeInstances.instanceCount));
-        SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
-
-        m_bridgeIndirectCommandCount = 0;
-        std::uint32_t firstInstance = 0;
-        if (m_bridgeInstances.instanceCount > 0)
-        {
-            m_bridgeIndirectCommands[m_bridgeIndirectCommandCount++] = SDL_GPUIndexedIndirectDrawCommand{
-                m_bridgeMeshRange.indexCount,
-                m_bridgeInstances.instanceCount,
-                m_bridgeMeshRange.firstIndex,
-                0,
-                firstInstance,
-            };
-            firstInstance += m_bridgeInstances.instanceCount;
-        }
-        if (m_coarseBridgeInstances.instanceCount > 0)
-        {
-            m_bridgeIndirectCommands[m_bridgeIndirectCommandCount++] = SDL_GPUIndexedIndirectDrawCommand{
-                m_coarseBridgeMeshRange.indexCount,
-                m_coarseBridgeInstances.instanceCount,
-                m_coarseBridgeMeshRange.firstIndex,
-                0,
-                firstInstance,
-            };
-        }
-
-        void* mappedIndirect = SDL_MapGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer, true);
-        std::memcpy(
-            mappedIndirect,
-            m_bridgeIndirectCommands.data(),
-            sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_bridgeIndirectCommandCount);
-        SDL_UnmapGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer);
-
-        SDL_GPUTransferBufferLocation indirectSource{};
-        indirectSource.transfer_buffer = m_bridgeIndirectTransferBuffer;
-
-        SDL_GPUBufferRegion indirectDestination{};
-        indirectDestination.buffer = m_bridgeIndirectBuffer;
-        indirectDestination.size =
-            sizeof(SDL_GPUIndexedIndirectDrawCommand) * m_bridgeIndirectCommandCount;
-        SDL_UploadToGPUBuffer(copyPass, &indirectSource, &indirectDestination, true);
-    }
+    const auto counts = m_descriptors.buildBridges(m_instanceCount, [](const auto& parent, std::uint32_t edge) {
+        const auto bit = 1u << edge;
+        return (parent.edges.y & bit) ? 1 : (parent.edges.x & bit) ? 0 : -1;
+    });
+    if (m_instanceCount)
+        upload(m_descriptorTransferBuffer, m_descriptorBuffer, &m_descriptors,
+            Uint32(offsetof(Descriptors, bridges) + sizeof(std::uint32_t) * (counts.normal + counts.coarse)));
+    SDL_GPUIndexedIndirectDrawCommand body{m_mesh.indexCount,m_instanceCount,0,0,0};
+    upload(m_indirectTransferBuffer,m_indirectBuffer,&body,sizeof(body));
+    m_bridgeIndirectCommands[0]={m_bridgeMeshRange.indexCount,counts.normal,m_bridgeMeshRange.firstIndex,0,0};
+    m_bridgeIndirectCommands[1]={m_coarseBridgeMeshRange.indexCount,counts.coarse,m_coarseBridgeMeshRange.firstIndex,0,
+        counts.normal};
+    upload(m_bridgeIndirectTransferBuffer,m_bridgeIndirectBuffer,m_bridgeIndirectCommands.data(),sizeof(m_bridgeIndirectCommands));
+    m_bridgeIndirectCommandCount=2;
 }
 
 void QuadtreeWaterMeshRenderer::dispatchWaterSimulation(
@@ -701,13 +556,13 @@ void QuadtreeWaterMeshRenderer::render(
         viewportExtent,
         timeSeconds);
 
-    const auto drawMeshInstances = [&](SDL_GPUGraphicsPipeline* pipeline, const MeshResources& mesh, const InstanceResources& instances)
+    const auto drawMeshInstances = [&](SDL_GPUGraphicsPipeline* pipeline, const MeshResources& mesh)
     {
         if (pipeline == nullptr ||
             mesh.vertexBuffer == nullptr ||
             mesh.indexBuffer == nullptr ||
-            instances.instanceBuffer == nullptr ||
-            instances.instanceCount == 0)
+            m_descriptorBuffer == nullptr ||
+            m_instanceCount == 0)
         {
             return;
         }
@@ -739,22 +594,16 @@ void QuadtreeWaterMeshRenderer::render(
         const SDL_GPUBufferBinding indexBinding{ mesh.indexBuffer, 0 };
         SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, instances.instanceBuffer };
+        SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, m_descriptorBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        SDL_DrawGPUIndexedPrimitives(
-            renderPass,
-            mesh.indexCount,
-            instances.instanceCount,
-            0,
-            0,
-            0);
+        SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
     };
 
-    drawMeshInstances(m_mainPipeline, m_mesh, m_instances);
+    drawMeshInstances(m_mainPipeline, m_mesh);
     if (m_bridgeIndirectCommandCount > 0 &&
         m_bridgeMesh.vertexBuffer != nullptr &&
         m_bridgeMesh.indexBuffer != nullptr &&
-        m_bridgeInstances.instanceBuffer != nullptr &&
+        m_descriptorBuffer != nullptr &&
         m_bridgeIndirectBuffer != nullptr)
     {
         SDL_BindGPUGraphicsPipeline(renderPass, m_bridgePipeline);
@@ -784,7 +633,7 @@ void QuadtreeWaterMeshRenderer::render(
         const SDL_GPUBufferBinding indexBinding{ m_bridgeMesh.indexBuffer, 0 };
         SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, m_bridgeInstances.instanceBuffer };
+        SDL_GPUBuffer* storageBuffers[]{ terrainHeightmapBuffer, m_descriptorBuffer };
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, m_bridgeIndirectCommandCount);
     }
@@ -792,12 +641,12 @@ void QuadtreeWaterMeshRenderer::render(
 
 std::uint32_t QuadtreeWaterMeshRenderer::instanceCount() const
 {
-    return m_instances.instanceCount;
+    return m_instanceCount;
 }
 
 std::uint32_t QuadtreeWaterMeshRenderer::totalInstanceCount() const
 {
-    return m_instances.instanceCount + m_bridgeInstances.instanceCount + m_coarseBridgeInstances.instanceCount;
+    return m_instanceCount + m_bridgeIndirectCommands[0].num_instances + m_bridgeIndirectCommands[1].num_instances;
 }
 
 std::uint32_t QuadtreeWaterMeshRenderer::packMetadata(
@@ -1239,38 +1088,6 @@ void QuadtreeWaterMeshRenderer::createMeshResources(
     {
         throwSdlError("Failed to upload water mesh buffers.");
     }
-}
-
-void QuadtreeWaterMeshRenderer::createInstanceBuffer()
-{
-    SDL_GPUBufferCreateInfo instanceInfo{};
-    instanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-    instanceInfo.size = static_cast<Uint32>(sizeof(InstanceData) * m_instances.instances.size());
-    SDL_GPUBufferCreateInfo bridgeInstanceInfo{};
-    bridgeInstanceInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-    bridgeInstanceInfo.size = static_cast<Uint32>(
-        sizeof(InstanceData) * (m_bridgeInstances.instances.size() + m_coarseBridgeInstances.instances.size()));
-
-    auto createInstanceResources = [this](InstanceResources& resources, const SDL_GPUBufferCreateInfo& bufferInfo, const char* bufferError, const char* transferError)
-    {
-        resources.instanceBuffer = SDL_CreateGPUBuffer(m_device, &bufferInfo);
-        if (resources.instanceBuffer == nullptr)
-        {
-            throwSdlError(bufferError);
-        }
-
-        SDL_GPUTransferBufferCreateInfo transferInfo{};
-        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        transferInfo.size = bufferInfo.size;
-        resources.instanceTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &transferInfo);
-        if (resources.instanceTransferBuffer == nullptr)
-        {
-            throwSdlError(transferError);
-        }
-    };
-
-    createInstanceResources(m_instances, instanceInfo, "Failed to create water instance buffer.", "Failed to create water instance transfer buffer.");
-    createInstanceResources(m_bridgeInstances, bridgeInstanceInfo, "Failed to create water bridge instance buffer.", "Failed to create water bridge instance transfer buffer.");
 }
 
 void QuadtreeWaterMeshRenderer::createWorkingBuffers()
@@ -1915,28 +1732,6 @@ void QuadtreeWaterMeshRenderer::dispatchBuildMaps(
     m_hasValidFoamHistory = true;
 }
 
-void QuadtreeWaterMeshRenderer::destroyInstanceBuffer()
-{
-    auto destroyInstanceResources = [this](InstanceResources& resources)
-    {
-        if (resources.instanceTransferBuffer != nullptr)
-        {
-            SDL_ReleaseGPUTransferBuffer(m_device, resources.instanceTransferBuffer);
-            resources.instanceTransferBuffer = nullptr;
-        }
-        if (resources.instanceBuffer != nullptr)
-        {
-            SDL_ReleaseGPUBuffer(m_device, resources.instanceBuffer);
-            resources.instanceBuffer = nullptr;
-        }
-        resources.instanceCount = 0;
-    };
-
-    destroyInstanceResources(m_bridgeInstances);
-    destroyInstanceResources(m_instances);
-    m_coarseBridgeInstances.instanceCount = 0;
-}
-
 void QuadtreeWaterMeshRenderer::fillMediumUniforms(
     SkyboxRenderer::FragmentUniforms& uniforms, float viewportHeight) const
 {
@@ -1949,9 +1744,9 @@ void QuadtreeWaterMeshRenderer::fillMediumUniforms(
     uniforms.waterDepthParams = glm::vec4(AppConfig::Water::kShallowDepthFadeStartMeters,
         AppConfig::Water::kShallowDepthFadeEndMeters, 15.0f, 0.0f);
     // Forward existing emitted terrain metadata only; water height stays entirely GPU-side.
-    for (std::uint32_t i = 0; i < m_instances.instanceCount; ++i)
+    for (std::uint32_t i = 0; i < m_instanceCount; ++i)
     {
-        const auto& instance = m_instances.instances[i];
+        const auto& instance = m_descriptors.parents[i].body;
         const float size = instance.leafParams.x;
         if (instance.position[0] <= 0.0f && instance.position[0] + size > 0.0f &&
             instance.position[2] <= 0.0f && instance.position[2] + size > 0.0f)

@@ -307,7 +307,7 @@ void SDLRenderer::renderFrame(
 
     if (renderViewport)
     {
-        HELLO_PROFILE_SCOPE("SDLRenderer::RenderViewport");
+        HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::RenderViewport", ProfileScopeGroup::Renderer);
 
         SDL_GPUColorTargetInfo colorTargetInfo{};
         colorTargetInfo.texture = m_sceneColorTexture;

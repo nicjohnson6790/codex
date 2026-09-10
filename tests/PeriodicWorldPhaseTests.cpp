@@ -1,4 +1,5 @@
 #include "PeriodicWorldPhase.hpp"
+#include "SurfacePosition.hpp"
 
 #ifdef NDEBUG
 #undef NDEBUG
@@ -87,6 +88,15 @@ int main()
         {
             const Position huge(sign * grid, -sign * grid, {11.0, 0.0, 23.0});
             const Position moved(sign * grid, -sign * grid, {11.03125, 0.0, 22.984375});
+            const auto relative = surfacePositionRelativeTo(moved, huge);
+            expectNear(relative.x, 0.03125);
+            expectNear(relative.z, -0.015625);
+            const Position beforeWrap(sign * grid, -sign * grid, {524287.75, 4.0, 0.25});
+            const Position afterWrap(sign * grid + 1, -sign * grid - 1, {0.25, 7.0, 524287.75});
+            const auto wrappedRelative = surfacePositionRelativeTo(afterWrap, beforeWrap);
+            expectNear(wrappedRelative.x, 0.5);
+            expectNear(wrappedRelative.y, 3.0);
+            expectNear(wrappedRelative.z, -0.5);
             const glm::dvec2 phase = WorldPhase::periodicWorldPhase(huge, boundaryTransform);
             const glm::dvec2 movedPhase = WorldPhase::periodicWorldPhase(moved, boundaryTransform);
             expectNear(movedPhase.x, phase.x + (0.03125 * boundaryTransform[0][0]) - (0.015625 * boundaryTransform[1][0]));

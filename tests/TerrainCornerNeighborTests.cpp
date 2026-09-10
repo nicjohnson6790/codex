@@ -1,5 +1,6 @@
 #include "TerrainCornerNeighbor.hpp"
 #include "TerrainBridgeMetadata.hpp"
+#include "ParentMeshDescriptors.hpp"
 
 #include <array>
 #include <cstdlib>
@@ -17,6 +18,29 @@ int main()
 {
     int failures = 0;
     const auto check = [&](bool success) { if (!success) ++failures; };
+    // Mixed types must preserve parent/edge identity across the coarse draw's
+    // first-instance offset, including sparse edges and maximum occupancy.
+    ParentMeshDescriptors<std::array<int, 4>, 3> descriptors{};
+    descriptors.parents = {{{0, 1, -1, 0}, {1, -1, 0, 1}, {-1, 0, 1, -1}}};
+    const auto classify = [](const auto& parent, std::uint32_t edge) { return parent[edge]; };
+    auto counts = descriptors.buildBridges(3, classify);
+    check(counts.normal == 4 && counts.coarse == 4);
+    const std::array<std::uint32_t, 8> expected{0, 3, 6, 9, 1, 4, 7, 10};
+    for (std::size_t i = 0; i < expected.size(); ++i)
+        check(descriptors.bridges[i] == expected[i]);
+    for (int type : {0, 1})
+    {
+        for (auto& parent : descriptors.parents) parent.fill(type);
+        counts = descriptors.buildBridges(3, classify);
+        check(counts.normal == (type == 0 ? 12u : 0u));
+        check(counts.coarse == (type == 1 ? 12u : 0u));
+        for (std::uint32_t i = 0; i < 12; ++i) check(descriptors.bridges[i] == i);
+    }
+    counts = descriptors.buildBridges(0, classify);
+    check(counts.normal == 0 && counts.coarse == 0);
+    for (auto& parent : descriptors.parents) parent.fill(-1);
+    counts = descriptors.buildBridges(3, classify);
+    check(counts.normal == 0 && counts.coarse == 0);
     // Exact neighbor sample positions, independent of world position or pitch.
     constexpr std::array<std::array<int, 2>, 8> samples{{
         {1, 1}, {129, 1}, {257, 1}, {1, 129},

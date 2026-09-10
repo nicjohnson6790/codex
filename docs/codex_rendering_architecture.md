@@ -66,7 +66,7 @@ The current App loop performs platform/input/simulation and ImGui setup, synchro
 
 1. Schedule queued generation with fixed per-frame budgets. Missing heightmaps, foliage pages, canopy cells, and nearby decode work converge over later frames rather than blocking the current frame.
 
-1. Build transient renderer queues: debug triangles/lines, multiplayer primitives, world-space MSDF text, terrain/bridge instances, water instances, canopy/imposter/nearby draws.
+1. Build transient renderer queues: debug triangles/lines, multiplayer primitives, world-space MSDF text, parent terrain/water submissions, canopy/imposter/nearby draws.
 
 A notable consequence is that draw emission and generation scheduling are coupled to cache state. The visible frame may deliberately use a lower-detail/fallback representation while a higher-detail asset is pending.
 
@@ -79,7 +79,7 @@ A notable consequence is that draw emission and generation scheduling are couple
 | 3 | Terrain + foliage compute | Generate queued heightmap slices; generate canopy cells; generate canonical foliage page instances; expand/decode nearby pages. |
 | 4 | Water compute | Update spectrum/FFT/map generation for the active water cascades. |
 | 5 | Readback copy | Queue height extents, optional heightmap slices, foliage live counts, and decoded nearby-page copies. |
-| 6 | Main viewport pass | Render terrain → water → nearby foliage → imposter foliage → canopy → debug triangles/lines → world text into viewport color/depth. |
+| 6 | Viewport | Draw terrain bodies/bridges, water bodies/bridges and foliage with shared scene depth. Sky/clouds, display transformation, display overlays and UI follow. |
 | 7 | Sky/atmosphere composite | Load the existing viewport color and composite sky/haze using the depth texture and inverse view-projection. |
 | 8 | Editor UI pass | Acquire swapchain texture and render ImGui, including the viewport texture. |
 | 9 | Submit + fence | Submit command buffer, acquire a fence, and attach a shared fence object to readback-producing renderers. |
@@ -120,7 +120,7 @@ QuadtreeMeshRenderer is both the terrain draw renderer and an important GPU-gene
 
 - A later copy stage queues extents and requested heightmap-slice readbacks. Those are consumed only after the submission fence completes.
 
-- Terrain draws reference resident slice indices and render main patches plus bridge/coarse-bridge geometry for LOD seams. Each 32-byte bridge instance identifies the fine inner slice, the resident coarse outer slice and half mapping, and independently resolved slices for both outer corners. Two 3-bit selectors in metadata bits 0–2 and 3–5 identify owner-relative perimeter positions (SW,S,SE,W,E,NW,N,NE); the shader derives their sample coordinates. The bridge vertex shader therefore samples the heightmap that owns each edge or corner instead of extending one leaf's samples across a neighboring heightmap boundary; normals use the same selected slice and pitch.
+- Terrain draws reference resident slice indices and render main patches plus bridge/coarse-bridge geometry for LOD seams. Each parent descriptor and its selected 16-byte bridge edge identify the fine inner slice, the resident coarse outer slice and half mapping, and independently resolved slices for both outer corners. Two 3-bit selectors in metadata bits 0–2 and 3–5 identify owner-relative perimeter positions (SW,S,SE,W,E,NW,N,NE); the shader derives their sample coordinates. The bridge vertex shader therefore samples the heightmap that owns each edge or corner instead of extending one leaf's samples across a neighboring heightmap boundary; normals use the same selected slice and pitch.
 
 ### 4.2 Persistent assets
 
@@ -227,7 +227,7 @@ WorldGridQuadtreeWaterManager is primarily a per-frame visibility/emission manag
 
 - The water graphics pass consumes current terrain heightmaps for terrain-relative placement/intersection, the simulated displacement/slope products, and environment/sky information.
 
-- Static water/bridge meshes and graphics/compute pipelines live for the renderer lifetime. Current water instances and indirect data are rebuilt/uploaded per frame.
+- Static water/bridge meshes and graphics/compute pipelines live for the renderer lifetime. Parent descriptors and bridge references share one SSBO uploaded each frame; CPU-generated indirect counts select body, normal bridge and coarse bridge ranges (section 18).
 
 - Simulation working buffers and output textures persist across frames; they are not managed by an LRU. Settings changes or resource recreation may reset/rebuild state.
 
@@ -238,7 +238,7 @@ WorldGridQuadtreeWaterManager is primarily a per-frame visibility/emission manag
 
 SDLRenderer owns a viewport-sized R16G16B16A16_FLOAT scene texture, an ordinary swapchain-compatible UNORM display texture, and one shared depth texture. RGB uses linear Rec.709 / linear-sRGB primaries and relative radiance, including values above one. Both color textures follow the existing post-submission resize/release lifecycle; no new synchronization or retirement mechanism is introduced. ImGui receives only the display texture. The SDR swapchain and ImGui sampling remain ordinary UNORM, without automatic sRGB encoding or decoding.
 
-Frame order is uploads/compute → terrain, water, nearby foliage, imposters and canopy into HDR/depth → HDR sky replacement, destination transmission multiplication and additive scattering → HDR premultiplied clouds → DisplayTransformRenderer → display overlays → ImGui/swapchain. Terrain/foliage are opaque or alpha-tested; water retains its existing shallow premultiplied blend, now over linear terrain. Triangle indicators (including player/multiplayer), lines and world text keep their original display-format pipelines, alpha, depth behavior and relative draw order after the display transform. Their depth pass loads scene depth, but these HUD indicators intentionally receive no volumetric shading.
+Frame order is uploads/generation/simulation → terrain, water, nearby foliage, imposters and canopy into HDR/depth → HDR sky replacement, destination transmission multiplication and additive scattering → HDR premultiplied clouds → DisplayTransformRenderer → display overlays → ImGui/swapchain. Terrain/foliage are opaque or alpha-tested; water retains its existing shallow premultiplied blend, now over linear terrain. Triangle indicators (including player/multiplayer), lines and world text keep their original display-format pipelines, alpha, depth behavior and relative draw order after the display transform. Their depth pass loads scene depth, but these HUD indicators intentionally receive no volumetric shading.
 
 DisplayTransformRenderer owns its display pipeline/sampler, three exposure compute pipelines, a 256-bin histogram and an eight-byte persistent exposure/validity buffer. After cloud compositing, separate clear, accumulation and reduction passes meter at most 256×144 uniformly distributed valid scene texels, trim 2% at each end with partial-bin weights, and adapt mean-log luminance toward linear 0.18. Automatic mode defaults on (0 EV compensation, limits −12/+16 EV, 0.5 s bright-scene and 2 s dark-scene time constants, dt capped at 0.1 s). First valid automatic input initializes directly; invalid frames retain state and black tends toward maximum exposure. Manual-to-auto seeds from the preserved manual setting. Settings are sanitized independently of ImGui. Queue-ordered, non-cycling buffer accesses serialize state between frames without CPU waits or readback; viewport recreation does not reset it.
 
@@ -448,3 +448,18 @@ Directional-density validation: canonical Debug/Release builds and all six tests
 After the SDL barrier compatibility patch (before the subsequent tuning correction to base/detail 0.063/0.052 cycles/km), Debug/Release builds and all six tests in each configuration passed again. The 720-frame Debug traversal completed all 12 stages and 24 coverage revisions with Vulkan debug mode still enabled and no validation warnings or errors (`build/Debug/app/sdl-barrier-traversal.log`). Reapplying the configure patch leaves the SDL source timestamp unchanged.
 
 Future terrain cloud shadows should call the same density function with the same field uniforms and use only `exp(-tauSun)`. They remain separate from geometric PCF and must not include phase, powder, or scattering octaves. No cloud shadow texture is allocated by this implementation.
+
+
+## 18. Parent mesh submissions and shared bridge descriptors
+
+The temporal height-sampled visibility experiment was removed after user traversal revealed missing bridges, alternating-frame flicker and insufficient performance benefit. Rendering has no previous-depth rejection, history capture, visibility compute pipelines or GPU-compacted instance outputs. CPU traversal, frustum/LOD decisions, ready-only residency and neighbor/corner ownership remain authoritative.
+
+The quadtree resolves all four terrain edges and submits one complete parent through WorldGridQuadtreeHeightmapManager. The manager touches/checks parent residency and forwards the complete record to QuadtreeMeshRenderer. Water likewise submits one complete request with normal/coarse masks through WorldGridQuadtreeWaterManager. No bridge manager, independent bridge residency lifecycle, or attach-to-most-recent-parent API is needed. Terrain and water remain separate renderers, each retaining its body and bridge graphics pipelines and static mesh ranges.
+
+Each renderer owns one graphics descriptor SSBO shared by its body and bridge pipelines. ParentMeshDescriptors stores a fixed-capacity parent array followed by up to four uint32 bridge references per parent. Each reference is (parentIndex << 2) | edgeIndex. References are partitioned into normal then coarse ranges; the coarse indirect command starts at the normal count. CPU upload prepares body/normal/coarse counts every frame, including empty frames. Only references are partitioned: parent records are uploaded once, with no duplicated body/bridge descriptors or GPU expansion pass.
+
+Terrain parents have 80-byte stride: a 16-byte position/inner-slice record followed by four 16-byte edges containing outer slice, first corner slice, second corner slice and metadata. Existing corner/scale/edge/half selectors are preserved; bits 30/31 indicate required/coarse. The bridge shader loads its parent and selected edge, strips those two flags and uses the original height sampling/topology. All emitted terrain parents own four edges. Capacity is 512 parents, with bridge references at byte 40960.
+
+Water parents have 48-byte stride: the existing 32-byte surface record plus normal/coarse masks and two reserved words. Capacity is 4096 parents, with bridge references at byte 196608. Both vertex paths share water_surface.glsl; the bridge path inserts its referenced edge selector into the loaded body metadata. FFT scheduling, displacement, damping, periodic phases, shading and camera-medium classification remain unchanged.
+
+C++ static assertions enforce parent strides and bridge-array offsets; shared GLSL includes define the matching layouts. Terrain corner tests also exercise reference identity, mixed normal/coarse ranges, full capacity, absent edges and empty-frame count reset. Visual review should confirm bridges at LOD transitions, camera motion and shorelines after removal of the experimental culling.

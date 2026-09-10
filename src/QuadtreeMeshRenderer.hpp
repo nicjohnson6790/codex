@@ -1,6 +1,8 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "SurfacePosition.hpp"
+#include "ParentMeshDescriptors.hpp"
 #include "FoliageTypes.hpp"
 #include "LightingSystem.hpp"
 #include "Position.hpp"
@@ -92,15 +94,8 @@ class QuadtreeMeshRenderer : private EngineRendererBase
 
     // Queues one quadtree leaf instance for drawing, using the given heightmap
     // slice.
-    void addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex);
-    struct BridgeHeightmaps
-    {
-        std::uint16_t inner = 0, outer = 0, firstCorner = 0, secondCorner = 0;
-        std::uint8_t firstCornerSelector = 0, secondCornerSelector = 0;
-        std::uint8_t coarseHalf = 0;
-    };
-    void addBridge(const WorldGridQuadtreeLeafId &leafId, const BridgeHeightmaps &heightmaps, std::uint8_t edgeIndex);
-    void addCoarseBridge(const WorldGridQuadtreeLeafId &leafId, const BridgeHeightmaps &heightmaps, std::uint8_t edgeIndex);
+    [[nodiscard]] bool addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex,
+        const std::array<glm::uvec4, 4>& bridges);
 
     // Uploads staged instance and indirect draw data into GPU buffers.
     void upload(SDL_GPUCopyPass *copyPass);
@@ -147,12 +142,19 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         std::uint32_t packedMetadata = 0;
     };
 
-    struct alignas(16) BridgeInstanceData
+    struct alignas(16) ParentDescriptor
     {
-        float position[3]{};
-        std::uint32_t packedMetadata = 0;
-        std::uint32_t heightmapIndices[4]{};
+        InstanceData body{};
+        // outer, first corner, second corner, original bridge metadata + required bit 30 + coarse bit 31
+        std::array<glm::uvec4, 4> edges{};
     };
+    static_assert(sizeof(ParentDescriptor) == 80);
+    static_assert(offsetof(ParentDescriptor, edges) == 16);
+    static_assert(sizeof(SDL_GPUIndexedIndirectDrawCommand) == 20);
+    static_assert(offsetof(SDL_GPUIndexedIndirectDrawCommand, num_instances) == 4);
+    static_assert(AppConfig::Terrain::kHeightmapLeafIntervalCount == 256);
+    static_assert(AppConfig::Terrain::kHeightmapLeafHalo == 1);
+    static_assert(AppConfig::Terrain::kRenderedPatchInset == 1);
 
     struct MeshResources
     {
@@ -221,7 +223,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     static_assert(sizeof(InstanceData) == 16, "Terrain instance data must stay 16 bytes.");
     static_assert(offsetof(InstanceData, position) == 0, "Terrain instance position must start at offset 0.");
     static_assert(offsetof(InstanceData, packedMetadata) == 12, "Terrain packed metadata must stay at offset 12.");
-    static_assert(sizeof(BridgeInstanceData) == 32, "Terrain bridge instance data must stay 32 bytes.");
     static_assert(sizeof(HeightmapGenerationDescriptor) == 16);
     static_assert(sizeof(HeightmapSourceGpuDescriptor) == 80);
 
@@ -243,9 +244,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     // Builds the static mesh buffers for the reusable terrain meshes.
     void createStaticMeshResources();
     void createMeshResources(const std::vector<Vertex> &vertices, const std::vector<std::uint32_t> &indices, MeshResources &meshResources);
-    [[nodiscard]] static float instanceDistanceSquared(const InstanceData &instance);
-    static void sortInstances(InstanceData *instances, std::uint16_t instanceCount);
-    static void sortBridgeInstances(BridgeInstanceData *instances, std::uint16_t instanceCount);
 
     // Convenience helper for filling SDL's indexed-indirect draw struct.
     [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(std::uint32_t indexCount, std::uint32_t instanceCount,
@@ -273,14 +271,12 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     MeshRange m_coarseBridgeMeshRange{};
 
     // Per-frame instance data buffer plus staging buffer.
-    SDL_GPUBuffer *m_instanceBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_instanceTransferBuffer = nullptr;
-    SDL_GPUBuffer *m_bridgeInstanceBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_bridgeInstanceTransferBuffer = nullptr;
 
     // Indirect draw-command buffer plus staging buffer.
     SDL_GPUBuffer *m_indirectBuffer = nullptr;
     SDL_GPUTransferBuffer *m_indirectTransferBuffer = nullptr;
+    SDL_GPUBuffer* m_descriptorBuffer = nullptr;
+    SDL_GPUTransferBuffer* m_descriptorTransferBuffer = nullptr;
     SDL_GPUBuffer *m_bridgeIndirectBuffer = nullptr;
     SDL_GPUTransferBuffer *m_bridgeIndirectTransferBuffer = nullptr;
 
@@ -300,9 +296,9 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     SDL_GPUBuffer *m_foliageInstanceLiveCountBuffer = nullptr;
     SDL_GPUTransferBuffer *m_foliageInstanceLiveCountInitTransferBuffer = nullptr;
 
-    std::array<InstanceData, AppConfig::Terrain::kHeightmapSliceCapacity> m_instanceData{};
-    std::array<BridgeInstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_bridgeInstanceData{};
-    std::array<BridgeInstanceData, AppConfig::Terrain::kHeightmapSliceCapacity * 4> m_coarseBridgeInstanceData{};
+    using Descriptors = ParentMeshDescriptors<ParentDescriptor, AppConfig::Terrain::kHeightmapSliceCapacity>;
+    static_assert(offsetof(Descriptors, bridges) == 80 * 512);
+    Descriptors m_descriptors{};
     std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
     std::array<HeightmapGenerationDescriptor, WorldGridQuadtreeHeightmapManager::kMaxFinalHeightmapsPerDispatch>
         m_pendingHeightmapGenerations{};
@@ -326,8 +322,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     std::array<PendingHeightmapSliceReadback, AppConfig::Terrain::kHeightmapReadbackCapacity> m_pendingHeightmapSliceReadbacks{};
     std::array<PendingFoliageLiveCountReadback, kHeightmapReadbackSlotCount> m_pendingFoliageLiveCountReadbacks{};
     std::uint16_t m_instanceCount = 0;
-    std::uint16_t m_bridgeInstanceCount = 0;
-    std::uint16_t m_coarseBridgeInstanceCount = 0;
     std::uint16_t m_bridgeIndirectCommandCount = 0;
     std::uint16_t m_pendingHeightmapGenerationCount = 0;
     std::uint32_t m_pendingHeightmapSourceDescriptorCount = 0;

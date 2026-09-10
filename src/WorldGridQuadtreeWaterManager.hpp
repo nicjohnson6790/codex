@@ -29,26 +29,8 @@ public:
         float terrainMinHeight,
         bool hasTerrainSlice,
         std::uint16_t terrainSliceIndex,
-        std::uint8_t quadtreeLodHint);
+        std::uint8_t quadtreeLodHint, std::uint32_t bridgeMask, std::uint32_t coarseBridgeMask);
     [[nodiscard]] std::uint32_t computeBandMaskForLeaf(const Position& leafOrigin, double leafSizeMeters) const;
-    void requestBridge(
-        const WorldGridQuadtreeLeafId& leafId,
-        const Position& leafOrigin,
-        double leafSizeMeters,
-        bool hasTerrainSlice,
-        std::uint16_t terrainSliceIndex,
-        std::uint8_t quadtreeLodHint,
-        std::uint32_t bandMask,
-        std::uint8_t edgeIndex);
-    void requestCoarseBridge(
-        const WorldGridQuadtreeLeafId& leafId,
-        const Position& leafOrigin,
-        double leafSizeMeters,
-        bool hasTerrainSlice,
-        std::uint16_t terrainSliceIndex,
-        std::uint8_t quadtreeLodHint,
-        std::uint32_t bandMask,
-        std::uint8_t edgeIndex);
 
     void flushToRenderer(QuadtreeWaterMeshRenderer& renderer) const;
     [[nodiscard]] std::uint32_t queuedCount() const;
