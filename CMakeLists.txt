@@ -35,7 +35,7 @@ endif()
 
 FetchContent_Declare(
     SDL3
-    URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.0.zip
+    URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.16.zip
 )
 
 FetchContent_Declare(
@@ -63,7 +63,7 @@ set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL3 imgui glm lz4)
-include(cmake/PatchSDLVulkan.cmake)
+include(cmake/PatchSDLVulkanFullTexture.cmake)
 
 if (TERRAIN_SANDBOX_ENABLE_STEAM)
     if (NOT WIN32)
@@ -364,6 +364,9 @@ add_custom_target(stage_steam_input ALL
 
 add_dependencies(terrain_sandbox stage_steam_input)
 
+# A DLL-only SDL fix may leave its import library unchanged. Relink so the
+# post-build staging step also runs when the runtime DLL changes.
+set_property(TARGET terrain_sandbox APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:SDL3::SDL3>)
 add_custom_command(TARGET terrain_sandbox POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy -t $<TARGET_FILE_DIR:terrain_sandbox> $<TARGET_RUNTIME_DLLS:terrain_sandbox>
     COMMAND_EXPAND_LISTS
