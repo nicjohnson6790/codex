@@ -10,7 +10,7 @@ public:
     void render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* command, SDL_GPUTexture* scene);
     float exposure = 1.0f;
     bool automatic = true;
-    float compensationEV = 0, minimumEV = -12, maximumEV = 16;
+    float compensationEV = 0, minimumEV = -8, maximumEV = 6;
     float brightenSceneSeconds = 0.5f, darkenSceneSeconds = 2.0f;
     float deltaSeconds = 1.0f / 60.0f;
     void meter(SDL_GPUCommandBuffer*, SDL_GPUTexture*, unsigned width, unsigned height);

@@ -67,6 +67,10 @@ inline constexpr std::uint32_t kSourceHeightmapHashLookupDepth = 4;
 inline constexpr std::uint32_t kMaxFinalHeightmapsPerDispatch = 16;
 inline constexpr std::uint32_t kSourceHeightmapDescriptorCapacity = kSourceHeightmapCacheCapacity * kMaxFinalHeightmapsPerDispatch;
 inline constexpr float kAmbientLight = 0.26f;
+inline constexpr float kSolarHorizonFadeDegrees = 1.0f;
+inline constexpr float kAmbientNightElevationDegrees = -6.0f;
+inline constexpr float kAmbientDayElevationDegrees = 6.0f;
+inline constexpr int kCloudShadowSamples = 8;
 } // namespace Terrain
 
 namespace Water

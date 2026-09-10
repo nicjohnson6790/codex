@@ -50,7 +50,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         glm::mat4 viewProjection{1.0f};
         glm::vec4 sunDirectionIntensity{0.0f, 1.0f, 0.0f, 1.0f};
         glm::vec4 sunColorAmbient{1.0f, 1.0f, 1.0f, 0.2f};
-        glm::vec4 reservedTerrainParams{0.0f};
+        glm::vec4 solarElevationParams{0.0f};
         glm::vec4 cameraWorldAndTime{0.0f};
         glm::vec4 waterCausticsParams{0.0f};
         glm::vec4 waterCascadeWorldSizesA{0.0f};
@@ -66,6 +66,16 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         glm::vec4 waterCascadeOriginPhasesB{0.0f};
         glm::vec4 waterCausticsOriginPhases{0.0f};
     };
+
+    static_assert(sizeof(TerrainUniforms) == 336);
+    static_assert(offsetof(TerrainUniforms, solarElevationParams) == 96);
+    struct CloudShadowUniforms
+    {
+        CloudRenderer::DensityUniforms field;
+        glm::vec4 params;
+    };
+    static_assert(sizeof(CloudShadowUniforms) == 144);
+    static_assert(offsetof(CloudShadowUniforms, params) == 128);
 
     QuadtreeMeshRenderer() = default;
     ~QuadtreeMeshRenderer() = default;
@@ -120,7 +130,8 @@ class QuadtreeMeshRenderer : private EngineRendererBase
 
     // Issues the terrain draws for all queued leaf instances.
     void render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection,
-                const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer, float timeSeconds) const;
+                const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer, float timeSeconds,
+                const CloudRenderer::SamplingResources &clouds, int cloudShadowSamples) const;
     [[nodiscard]] SDL_GPUBuffer *heightmapBuffer() const
     {
         return m_heightmapBuffer;

@@ -98,6 +98,7 @@ void CloudRenderer::upload(SDL_GPUCopyPass* copy,const Position& origin,double t
     s.anisotropy=std::clamp(s.anisotropy,0.0f,0.95f); s.lobeWeight=std::clamp(s.lobeWeight,0.0f,1.0f);
     s.powderStrength=std::clamp(s.powderStrength,0.0f,1.0f); s.powderAngularPower=std::clamp(s.powderAngularPower,0.1f,8.0f);
     s.octaveCount=std::clamp(s.octaveCount,1,12); s.viewSteps=std::clamp(s.viewSteps,8,128); s.sunSteps=std::clamp(s.sunSteps,1,32);
+    s.terrainShadowSamples=std::clamp(s.terrainShadowSamples,1,32);
     s.octaveA=std::clamp(s.octaveA,0.0f,1.0f); s.octaveB=std::clamp(s.octaveB,0.0f,1.0f); s.octaveC=std::clamp(s.octaveC,0.0f,1.0f);
     s.maxDistance=std::clamp(s.maxDistance,10000.0f,500000.0f); s.termination=std::clamp(s.termination,0.001f,0.1f);
     const auto bounded=[](float value,float low,float high,float fallback) {
@@ -163,12 +164,18 @@ void CloudRenderer::upload(SDL_GPUCopyPass* copy,const Position& origin,double t
     m_uploadedRevision=m_manager.revision();
 }
 
-CloudRenderer::SamplingResources CloudRenderer::waterSamplingResources() const
+CloudRenderer::SamplingResources CloudRenderer::samplingResources() const
 {
     SamplingResources result{{m_macro,m_linear},{m_noise,m_repeat},m_prepared};
+    if(!m_uploadedRevision) result.state.march.z=0;
+    return result;
+}
+
+CloudRenderer::SamplingResources CloudRenderer::waterSamplingResources() const
+{
+    auto result=samplingResources();
     result.state.powder.z=m_waterSteps.x;
     result.state.powder.w=m_waterSteps.y;
-    if(!m_uploadedRevision) result.state.march.z=0;
     return result;
 }
 
@@ -189,6 +196,7 @@ void CloudRenderer::drawSettings()
 {
     if(!ImGui::CollapsingHeader("Clouds")) return;
     ImGui::PushID("clouds");
+    ImGui::SliderInt("Terrain cloud shadow samples", &m_settings.terrainShadowSamples, 1, 32);
     auto& s=m_settings;
     ImGui::Checkbox("Enabled",&s.enabled);
     ImGui::InputScalar("Seed",ImGuiDataType_U32,&s.seed);

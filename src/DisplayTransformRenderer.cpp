@@ -97,7 +97,7 @@ void DisplayTransformRenderer::meter(SDL_GPUCommandBuffer* command,SDL_GPUTextur
     auto sanitize=[](float v,float fallback,float low,float high) { return std::isfinite(v) ? std::clamp(v,low,high) : fallback; };
     exposure=sanitize(exposure,1,0,65536);
     compensationEV=sanitize(compensationEV,0,-24,24);
-    minimumEV=sanitize(minimumEV,-12,-20,16); maximumEV=sanitize(maximumEV,16,minimumEV,20);
+    minimumEV=sanitize(minimumEV,-8,-20,16); maximumEV=sanitize(maximumEV,6,minimumEV,20);
     brightenSceneSeconds=sanitize(brightenSceneSeconds,0.5f,0.01f,60);
     darkenSceneSeconds=sanitize(darkenSceneSeconds,2,0.01f,60);
     deltaSeconds=sanitize(deltaSeconds,0,0,0.1f);

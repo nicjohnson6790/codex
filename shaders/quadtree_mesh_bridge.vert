@@ -6,7 +6,7 @@ layout(set=1, binding=0) uniform TerrainUniforms
     mat4 viewProjection;
     vec4 sunDirectionIntensity;
     vec4 sunColorAmbient;
-    vec4 reservedTerrainParams;
+    vec4 solarElevationParams;
     vec4 cameraWorldAndTime;
     vec4 waterCausticsParams;
     vec4 waterCascadeWorldSizesA;

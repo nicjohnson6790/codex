@@ -23,6 +23,7 @@ public:
         float powderStrength=1, powderAngularPower=1;
         int octaveCount=8, viewSteps=48, sunSteps=6;
         int fullscreenBudget=512;
+        int terrainShadowSamples=AppConfig::Terrain::kCloudShadowSamples;
         float octaveA=0.5f, octaveB=0.5f, octaveC=0.5f;
         float waterSamplingMultiplier=0.5f;
         float ambient=0.15f, maxDistance=180000, termination=0.01f;
@@ -66,6 +67,7 @@ public:
     static_assert(sizeof(Uniforms)==368);
     static_assert(offsetof(Uniforms,cloud)==64);
     SamplingResources waterSamplingResources() const;
+    SamplingResources samplingResources() const;
     Settings& settings() { return m_settings; }
     void drawSettings();
     void initialize(SDL_GPUDevice*,SDL_GPUTextureFormat,SDL_GPUTextureFormat,const std::filesystem::path&);

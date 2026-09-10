@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include "CloudManager.hpp"
+#include "AppConfig.hpp"
 #include "CloudSampling.hpp"
 #include "PeriodicWorldPhase.hpp"
 #include <glm/glm.hpp>
@@ -21,10 +22,65 @@ inline float smoothstep(double a,double b,float c) { return glm::smoothstep(floa
 #include "../shaders/cloud_optics.glsl"
 #include "../shaders/cloud_noise.glsl"
 #include "../shaders/cloud_slab.glsl"
+#include "../shaders/terrain_lighting.glsl"
+// Constant density isolates the actual shadow march from texture generation.
+struct CloudDensityField { vec4 layer, macro; };
+using sampler2D = int;
+using sampler3D = int;
+float sampleCloudDensity(vec3, CloudDensityField field, sampler2D, sampler3D)
+{
+    return field.layer.w;
+}
+#include "../shaders/cloud_shadow.glsl"
 }
 
 int main()
 {
+    const float horizon=std::sin(glm::radians(AppConfig::Terrain::kSolarHorizonFadeDegrees));
+    const float night=std::sin(glm::radians(AppConfig::Terrain::kAmbientNightElevationDegrees));
+    const float day=std::sin(glm::radians(AppConfig::Terrain::kAmbientDayElevationDegrees));
+    float previousSolar=0, previousAmbient=0;
+    for(int i=0;i<=20000;++i)
+    {
+        float y=-1.0f+float(i)/10000.0f;
+        float solar=Shader::terrainSolarVisibility(y,horizon);
+        float ambient=Shader::terrainAmbientDayFactor(y,night,day);
+        assert(solar>=previousSolar && solar<=1 && ambient>=previousAmbient && ambient<=1);
+        assert(solar-previousSolar<0.01f && ambient-previousAmbient<0.01f);
+        if(y<=0) assert(solar==0);
+        if(y>=horizon) assert(solar==1);
+        if(y<=night) assert(ambient==0);
+        if(y>=day) assert(ambient==1);
+        previousSolar=solar; previousAmbient=ambient;
+    }
+    const Shader::CloudDensityField field{{2,2,0,0.7f},{-10,-10,1,21}};
+    for(int samples:{1,8,32})
+    {
+        glm::vec4 params(0.3f,0,1,float(samples));
+        const auto transmission=[&](glm::vec3 origin,glm::vec3 ray,glm::vec4 p) {
+            return Shader::terrainCloudTransmission(origin,ray,field,p,0,0);
+        };
+        assert(std::abs(transmission({0,0,0},{0,1,0},params)-std::exp(-0.7f*0.3f*2))<1e-6f);
+        assert(std::abs(transmission({0,3,0},{0,1,0},params)-std::exp(-0.7f*0.3f))<1e-6f);
+        assert(transmission({0,5,0},{0,1,0},params)==1);
+        assert(transmission({20,0,0},{0,1,0},params)==1);
+        assert(std::abs(transmission({0,3,0},{1,1e-8f,0},params)-std::exp(-0.7f*0.3f*10))<1e-6f);
+        auto disabled=params; disabled.z=0;
+        assert(transmission({0,0,0},{0,1,0},disabled)==1);
+        auto zero=params; zero.x=0;
+        assert(transmission({0,0,0},{0,1,0},zero)==1);
+        float previous=1;
+        for(int i=0;i<=100;++i)
+        {
+            params.x=float(i)*0.05f;
+            float t=transmission({0,0,0},{0,1,0},params);
+            assert(std::isfinite(t) && t>=0 && t<=previous);
+            previous=t;
+        }
+        params={5,0.01f,1,float(samples)};
+        float terminated=transmission({0,0,0},{0,1,0},params);
+        assert(terminated>0 && terminated<=params.y);
+    }
     const auto circularError=[](double a,double b) { return std::abs(std::remainder(a-b,1.0)); };
     for(float angle:{0.0f,0.7f,-2.1f}) for(float stretch:{1.0f,4.0f,16.0f})
     {

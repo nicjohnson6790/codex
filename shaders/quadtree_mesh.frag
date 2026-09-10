@@ -1,11 +1,22 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "cloud_density.glsl"
+#include "cloud_slab.glsl"
+#include "cloud_shadow.glsl"
+#include "terrain_lighting.glsl"
+
+layout(set=3, binding=1) uniform CloudShadowUniforms
+{
+    CloudDensityField field;
+    vec4 params;
+} cloudShadow;
 
 layout(set=3, binding=0) uniform TerrainUniforms
 {
     mat4 viewProjection;
     vec4 sunDirectionIntensity;
     vec4 sunColorAmbient;
-    vec4 reservedTerrainParams;
+    vec4 solarElevationParams;
     vec4 cameraWorldAndTime;
     vec4 waterCausticsParams;
     vec4 waterCascadeWorldSizesA;
@@ -29,6 +40,8 @@ layout(set=2, binding=3) uniform sampler2DArray terrainAlbedoTextureArray;
 layout(set=2, binding=4) uniform sampler2DArray terrainNormalTextureArray;
 layout(set=2, binding=5) uniform sampler2DArray terrainRoughnessTextureArray;
 layout(set=2, binding=6) uniform sampler2DArray terrainAoTextureArray;
+layout(set=2, binding=7) uniform sampler2D cloudCoverageTexture;
+layout(set=2, binding=8) uniform sampler3D cloudNoiseTexture;
 
 layout(location = 0) in vec3 fragLocalPosition;
 layout(location = 1) in vec3 fragWorldNormal;
@@ -310,7 +323,20 @@ void main()
     vec3 sunRadiance = terrain.sunColorAmbient.rgb * terrain.sunDirectionIntensity.w;
     vec3 directLighting = (diffuse + (specular * 0.12)) * sunRadiance;
     vec3 ambient = albedo * terrain.sunColorAmbient.a * terrain.sunColorAmbient.rgb * mix(0.45, 1.0, ao);
-    vec3 litColor = ambient + directLighting;
+    float solarVisibility = terrainSolarVisibility(sunDirection.y, terrain.solarElevationParams.x);
+    ambient *= terrainAmbientDayFactor(sunDirection.y, terrain.solarElevationParams.y, terrain.solarElevationParams.z);
+    float solarTransmission = 0.0;
+    // Specular remains nonzero at N dot L == 0; caustics also has independent masks.
+    if(solarVisibility > 0.0 && terrain.sunDirectionIntensity.w > 0.0 &&
+       any(greaterThan(terrain.sunColorAmbient.rgb, vec3(0.0))))
+    {
+        // Both terrain vertices and CloudRenderer::upload use the active camera
+        // Position as render origin. Y already includes the sampled terrain height.
+        solarTransmission = solarVisibility * terrainCloudTransmission(
+            fragLocalPosition, sunDirection, cloudShadow.field, cloudShadow.params,
+            cloudCoverageTexture, cloudNoiseTexture);
+    }
+    vec3 litColor = ambient + directLighting * solarTransmission;
 
     if (terrain.waterCausticsParams.y > 0.5 &&
         fragAllowCaustics != 0u &&
@@ -331,7 +357,7 @@ void main()
             (slopeWarp * terrain.waterCausticsPatternParams.w);
         float caustics = causticsPattern(fragLocalPosition.xz, waterWarp, focusSignal);
         float causticsStrength = caustics * shoreFade * depthFade * sunFade * slopeFade * terrain.waterCausticsParams.w;
-        litColor += terrain.sunColorAmbient.rgb * terrain.sunDirectionIntensity.w * causticsStrength;
+        litColor += sunRadiance * causticsStrength * solarTransmission;
     }
 
     outColor = vec4(litColor, 1.0);

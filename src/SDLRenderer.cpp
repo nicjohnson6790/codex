@@ -355,7 +355,8 @@ void SDLRenderer::renderFrame(
                 viewProjection,
                 lightingSystem,
                 waterMeshRenderer,
-                timeSeconds);
+                timeSeconds,
+                cloudRenderer.samplingResources(), cloudRenderer.settings().terrainShadowSamples);
         }
         if constexpr (AppConfig::Water::kEnabled)
         {

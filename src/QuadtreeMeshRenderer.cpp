@@ -1,4 +1,5 @@
 #include "QuadtreeMeshRenderer.hpp"
+#include <glm/trigonometric.hpp>
 #include "TerrainBridgeMetadata.hpp"
 #include <cassert>
 #include "PeriodicWorldPhase.hpp"
@@ -1324,7 +1325,7 @@ void QuadtreeMeshRenderer::collectCompletedFoliagePageLiveCounts(std::vector<Gen
 
 void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection,
                                   const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer,
-                                  float timeSeconds) const
+                                  float timeSeconds, const CloudRenderer::SamplingResources &clouds, int cloudShadowSamples) const
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::Render");
 
@@ -1338,6 +1339,10 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
     const glm::vec3 sunDirection = lightingSystem.sunDirection();
     uniforms.sunDirectionIntensity = glm::vec4(sunDirection, lightingSystem.sun().intensity);
     uniforms.sunColorAmbient = glm::vec4(lightingSystem.sun().color, AppConfig::Terrain::kAmbientLight);
+    uniforms.solarElevationParams = glm::vec4(
+        std::sin(glm::radians(AppConfig::Terrain::kSolarHorizonFadeDegrees)),
+        std::sin(glm::radians(AppConfig::Terrain::kAmbientNightElevationDegrees)),
+        std::sin(glm::radians(AppConfig::Terrain::kAmbientDayElevationDegrees)), 0.0f);
     uniforms.cameraWorldAndTime =
         glm::vec4(0.0f, static_cast<float>(m_activeCameraPosition.localPosition().y), 0.0f, timeSeconds);
     const bool causticsEnabled = m_waterSettings.enabled && m_waterSettings.drawTerrainCaustics;
@@ -1400,6 +1405,10 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
     }
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+    const CloudShadowUniforms shadowUniforms{clouds.state.field,
+        {clouds.state.scattering.x, clouds.state.march.y, clouds.state.march.z,
+         float(std::clamp(cloudShadowSamples, 1, 32))}};
+    SDL_PushGPUFragmentUniformData(commandBuffer, 1, &shadowUniforms, sizeof(shadowUniforms));
 
     if (m_instanceCount > 0)
     {
@@ -1413,7 +1422,7 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
 
         SDL_GPUBuffer *storageBuffers[2]{m_heightmapBuffer, m_descriptorBuffer};
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[9]{
             {waterRenderer.displacementTexture(), waterRenderer.waterSampler()},
             {waterRenderer.slopeTexture(), waterRenderer.waterSampler()},
             {m_causticsTextureA, m_causticsSampler},
@@ -1421,8 +1430,9 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
             {m_pbrNormalTextureArray, m_pbrSampler},
             {m_pbrRoughnessTextureArray, m_pbrSampler},
             {m_pbrAoTextureArray, m_pbrSampler},
+            clouds.coverage, clouds.noise,
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 9);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
     }
 
@@ -1438,7 +1448,7 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
 
         SDL_GPUBuffer *storageBuffers[2]{m_heightmapBuffer, m_descriptorBuffer};
         SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[7]{
+        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[9]{
             {waterRenderer.displacementTexture(), waterRenderer.waterSampler()},
             {waterRenderer.slopeTexture(), waterRenderer.waterSampler()},
             {m_causticsTextureA, m_causticsSampler},
@@ -1446,8 +1456,9 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
             {m_pbrNormalTextureArray, m_pbrSampler},
             {m_pbrRoughnessTextureArray, m_pbrSampler},
             {m_pbrAoTextureArray, m_pbrSampler},
+            clouds.coverage, clouds.noise,
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 7);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 9);
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, m_bridgeIndirectCommandCount);
     }
 }
@@ -1504,7 +1515,7 @@ void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path &shaderDi
 
     auto createGraphicsPipeline = [this, &pipelineInfo, &shaderDirectory](const char *vertexShaderName) {
         SDL_GPUShader *vertexShader = createShader(shaderDirectory / vertexShaderName, SDL_GPU_SHADERSTAGE_VERTEX, 1, 2);
-        SDL_GPUShader *fragmentShader = createShader(shaderDirectory / "quadtree_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 7);
+        SDL_GPUShader *fragmentShader = createShader(shaderDirectory / "quadtree_mesh.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 0, 9);
 
         pipelineInfo.vertex_shader = vertexShader;
         pipelineInfo.fragment_shader = fragmentShader;

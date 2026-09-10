@@ -188,7 +188,10 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/world_text.vert ${WORLD_TEXT_VERT_SPV
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/world_text.frag ${WORLD_TEXT_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.vert ${QUADTREE_MESH_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/terrain_mesh_descriptors.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_MESH_BRIDGE_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/terrain_mesh_descriptors.glsl)
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV}
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shadow.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/terrain_lighting.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/heightmap_generate.comp ${HEIGHTMAP_GENERATE_COMP_SPV})
 compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_generate.comp
@@ -404,6 +407,7 @@ if (CODEX_BUILD_TESTS)
     add_executable(cloud_tests tests/CloudTests.cpp)
     set_target_properties(cloud_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
     target_include_directories(cloud_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
+    target_link_libraries(cloud_tests PRIVATE SDL3::Headers)
     add_test(NAME cloud_tests COMMAND $<TARGET_FILE:cloud_tests>)
     add_executable(asset_residency_tests tests/AssetResidencyTests.cpp)
     set_target_properties(asset_residency_tests PROPERTIES
