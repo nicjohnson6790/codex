@@ -13,8 +13,8 @@ struct CanopyDrawData
     vec4 terrainOriginAndSize;
     vec4 terrainSliceData;
     uvec4 patchSeedData;
-    uvec4 cellSlots[16];
-    uvec4 cellSeeds[16];
+    uvec4 cellSlots[25];
+    uvec4 cellSeeds[25];
 };
 
 layout(set=0, binding=0, std430) readonly buffer CanopyDrawMetadataBuffer
@@ -39,6 +39,7 @@ layout(location = 0) out vec2 fragPatchMeters;
 layout(location = 1) out vec2 fragWorldXZ;
 layout(location = 2) flat out uint fragDrawIndex;
 layout(location = 3) flat out float fragShellY;
+layout(location = 4) out vec3 fragPosition;
 
 const uint kHeightmapResolution = 259u;
 const float kHeightmapLeafIntervalCount = 256.0;
@@ -72,15 +73,15 @@ float sampleHeightBilinear(uint sliceIndex, vec2 normalizedCoord)
 
 void main()
 {
-    CanopyDrawData draw = drawMetadataBuffer.draws[gl_InstanceIndex];
-    vec2 patchMeters = inUv * draw.patchOriginAndSize.w;
-    vec2 normalizedTerrainCoord = clamp(patchMeters / draw.terrainOriginAndSize.w, vec2(0.0), vec2(1.0));
-    float terrainHeight = sampleHeightBilinear(uint(draw.terrainSliceData.x + 0.5), normalizedTerrainCoord);
+    vec2 patchMeters = inUv * drawMetadataBuffer.draws[gl_InstanceIndex].patchOriginAndSize.w;
+    vec2 normalizedTerrainCoord = clamp(patchMeters / drawMetadataBuffer.draws[gl_InstanceIndex].terrainOriginAndSize.w, vec2(0.0), vec2(1.0));
+    float terrainHeight = sampleHeightBilinear(uint(drawMetadataBuffer.draws[gl_InstanceIndex].terrainSliceData.x + 0.5), normalizedTerrainCoord);
     vec3 worldPosition = vec3(
-        draw.patchOriginAndSize.x + patchMeters.x,
-        draw.patchOriginAndSize.y + terrainHeight + (inShellY * canopy.canopyShellParams.x),
-        draw.patchOriginAndSize.z + patchMeters.y);
+        drawMetadataBuffer.draws[gl_InstanceIndex].patchOriginAndSize.x + patchMeters.x,
+        drawMetadataBuffer.draws[gl_InstanceIndex].patchOriginAndSize.y + terrainHeight + (inShellY * canopy.canopyShellParams.x),
+        drawMetadataBuffer.draws[gl_InstanceIndex].patchOriginAndSize.z + patchMeters.y);
 
+    fragPosition=worldPosition;
     fragPatchMeters = patchMeters;
     fragWorldXZ = worldPosition.xz;
     fragDrawIndex = uint(gl_InstanceIndex);

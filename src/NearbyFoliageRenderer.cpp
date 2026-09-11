@@ -25,9 +25,8 @@ namespace
 constexpr std::uint32_t kDecodeComputeThreadCountX = 64u;
 constexpr std::uint32_t kDecodeComputeThreadCountY = 1u;
 constexpr std::uint32_t kDecodeComputeThreadCountZ = 1u;
-constexpr float kNearbyLod0MaxDistanceMeters = 25.0f;
-constexpr float kNearbyLod1MaxDistanceMeters = 50.0f;
-constexpr float kNearbyLod2MaxDistanceMeters = 100.0f;
+constexpr float kNearbyLod0MaxDistanceMeters = 5.0f;
+constexpr float kNearbyLod1MaxDistanceMeters = 25.0f;
 
 constexpr std::uint32_t kDecodedNearbyMeshIdMask = 0x0000FFFFu;
 constexpr std::uint32_t kDecodedNearbyFlagsShift = 16u;
@@ -478,9 +477,9 @@ void NearbyFoliageRenderer::addNearbyInstancesForPage(
             const float rotationCosine = std::cos(instance.rotationRadians);
             const float rotationSine = std::sin(instance.rotationRadians);
             const glm::vec3 rotatedBoundsCenter{
-                (lodAsset.boundsCenter.x * rotationCosine) - (lodAsset.boundsCenter.z * rotationSine),
+                (lodAsset.boundsCenter.x * rotationCosine) + (lodAsset.boundsCenter.z * rotationSine),
                 lodAsset.boundsCenter.y,
-                (lodAsset.boundsCenter.x * rotationSine) + (lodAsset.boundsCenter.z * rotationCosine),
+                -(lodAsset.boundsCenter.x * rotationSine) + (lodAsset.boundsCenter.z * rotationCosine),
             };
             const glm::vec3 instanceBoundsCenter{
                 localPageOrigin.x + instance.localX + rotatedBoundsCenter.x,
@@ -794,7 +793,7 @@ void NearbyFoliageRenderer::render(
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
     const SkyboxRenderer& skyboxRenderer,
-    SDL_GPUBuffer* terrainHeightmapBuffer) const
+    SDL_GPUBuffer* terrainHeightmapBuffer, const FoliageLighting& lighting) const
 {
     HELLO_PROFILE_SCOPE("NearbyFoliageRenderer::Render");
 
@@ -877,6 +876,7 @@ void NearbyFoliageRenderer::render(
     fragmentUniforms.atmosphereParams = sharedSkyUniforms.atmosphereParams;
     fragmentUniforms.sunDirectionTimeOfDay = sharedSkyUniforms.sunDirectionTimeOfDay;
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &fragmentUniforms, sizeof(fragmentUniforms));
+    lighting.bind(renderPass,commandBuffer,7,1);
 
     SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, m_activeDrawCommandCount);
 }
@@ -936,9 +936,9 @@ void NearbyFoliageRenderer::createPipeline(const std::filesystem::path& shaderDi
     SDL_GPUShader* fragmentShader = createShader(
         shaderDirectory / "nearby_foliage.frag.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT,
-        1,
-        1,
-        7);
+        2,
+        3,
+        9);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -1873,9 +1873,9 @@ void NearbyFoliageRenderer::loadRuntimeAssets()
                 (lodMaxZ[lodIndex] - lodMinZ[lodIndex]) * 0.5f,
             };
             lod.boundsCenter = {
-                classCenterXz.x,
+                (lodMinX[lodIndex] + lodMaxX[lodIndex]) * 0.5f,
                 (lodMinY[lodIndex] + lodMaxY[lodIndex]) * 0.5f,
-                classCenterXz.y,
+                (lodMinZ[lodIndex] + lodMaxZ[lodIndex]) * 0.5f,
             };
             lod.boundsRadius = glm::length(halfExtents);
         }
@@ -2043,4 +2043,12 @@ bool NearbyFoliageRenderer::entryMatchesSource(
         entry.sourcePageIndex == sourcePageInfo.pageIndex &&
         entry.contentVersion == sourcePageInfo.contentVersion &&
         entry.layoutVersion == FoliageConfig::kNearbyDecodedInstanceLayoutVersion;
+}
+
+void NearbyFoliageRenderer::prepareLighting(const SkyIlluminationRenderer& illumination)
+{
+    for(unsigned i=0;i<m_drawCount;++i) {
+        auto& d=m_drawInstances[i];
+        d.rotationAndReserved.w=float(illumination.regionForPosition({d.pageOriginAndSlice.x+d.localOffsetAndMesh.x,d.pageOriginAndSlice.z+d.localOffsetAndMesh.y}));
+    }
 }

@@ -45,7 +45,7 @@ public:
         std::uint32_t readyCellCount,
         std::uint8_t drawAgeFrames,
         const std::array<std::uint8_t, 4>& edgeFadeStrengths,
-        FoliageCanopyRenderer& renderer) const;
+        FoliageCanopyRenderer& renderer);
     [[nodiscard]] CacheIndex isResident(
         const WorldGridQuadtreeLeafId& leafId, CacheIndex hint = kUnavailable) const;
     void noteRenderedCell(const WorldGridQuadtreeLeafId& leafId);

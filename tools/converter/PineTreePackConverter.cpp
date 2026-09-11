@@ -207,7 +207,7 @@ bool ValidateCrossReferences(
                     "color/alpha") ||
                 !validateImposterTexture(
                     normalTexture,
-                    RuntimeAssets::TextureFormat::BC5_RG_UNORM,
+                    RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
                     "normal"))
             {
                 return false;

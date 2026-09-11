@@ -82,6 +82,7 @@ struct ImportedAsset
     std::vector<std::uint32_t> materialIndices;
     std::uint32_t imposterColorTextureIndex = std::numeric_limits<std::uint32_t>::max();
     std::uint32_t imposterNormalTextureIndex = std::numeric_limits<std::uint32_t>::max();
+    RuntimeAssets::FoliageCaptureRecord capture{};
 };
 
 struct ImportedFontAtlas

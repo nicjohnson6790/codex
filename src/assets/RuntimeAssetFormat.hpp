@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 
 namespace RuntimeAssets
 {
@@ -320,11 +321,38 @@ struct AssetRecord
     std::uint32_t meshRefCount = 0;
     std::uint32_t firstMaterial = 0;
     std::uint32_t materialCount = 0;
-    std::uint32_t flags = 0;
+    std::uint32_t captureMetadataOffset = 0;
     std::uint32_t imposterColorTextureIndex = 0;
     std::uint32_t imposterNormalTextureIndex = 0;
 };
 static_assert(sizeof(AssetRecord) == 32);
+
+// AssetRecord::captureMetadataOffset is the byte offset of this versioned foliage extension,
+// or zero for assets without captures. Unrelated pack layouts stay unchanged.
+struct FoliageCaptureRecord
+{
+    // Schema 2: signed tree-local XYZ normals in linear BC3, not view-space BC5 XY.
+    std::uint32_t version = 2;
+    std::uint32_t canopyColorTextureIndex = 0;
+    std::uint32_t canopyNormalTextureIndex = 0;
+    std::uint32_t reserved = 0;
+    std::array<float, 4> centerAndRadius{};
+    std::array<float, 4> pitchHalfHeights{};
+    std::array<float, 4> canopyCenterAndHalfExtents{};
+};
+static_assert(sizeof(FoliageCaptureRecord) == 64);
+inline bool ValidFoliageCapture(const FoliageCaptureRecord& capture, std::uint32_t textures)
+{
+    if(capture.version!=2 || capture.canopyColorTextureIndex>=textures ||
+        capture.canopyNormalTextureIndex>=textures) return false;
+    for(float value:capture.centerAndRadius) if(!std::isfinite(value)) return false;
+    for(float value:capture.pitchHalfHeights) if(!std::isfinite(value)||value<=0) return false;
+    for(float value:capture.canopyCenterAndHalfExtents) if(!std::isfinite(value)) return false;
+    const auto& f=capture.canopyCenterAndHalfExtents;
+    // A single neighboring 256 m cell covers every supported rotated footprint.
+    return capture.centerAndRadius[3]>0 && f[2]>0 && f[3]>0 &&
+        std::hypot(f[0],f[1])+std::hypot(f[2],f[3])+1.2f<256.0f;
+}
 
 struct MeshRefRecord
 {

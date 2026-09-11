@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "FoliageLighting.hpp"
 #include "SkyboxRenderer.hpp"
 #include "FoliageTypes.hpp"
 #include "AssetResidency.hpp"
@@ -109,6 +110,7 @@ public:
         const Position& nearCenter,
         float nearRadiusMeters);
 
+    void prepareLighting(const SkyIlluminationRenderer& illumination);
     void upload(SDL_GPUCopyPass* copyPass);
     void dispatchDecodedPageExpansions(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUBuffer* sourcePagePoolBuffer);
     void queueDecodedPageDownloads(SDL_GPUCopyPass* copyPass);
@@ -121,7 +123,7 @@ public:
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
         const SkyboxRenderer& skyboxRenderer,
-        SDL_GPUBuffer* terrainHeightmapBuffer) const;
+        SDL_GPUBuffer* terrainHeightmapBuffer, const FoliageLighting& lighting) const;
 
     [[nodiscard]] std::uint32_t drawCount() const { return m_drawCount; }
     [[nodiscard]] std::uint32_t drawCallCount() const;

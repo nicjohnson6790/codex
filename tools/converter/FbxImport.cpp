@@ -71,11 +71,11 @@ float DefaultLodDistance(std::uint32_t lodIndex)
     switch (lodIndex)
     {
     case 0:
-        return 25.0f;
+        return 5.0f;
     case 1:
-        return 50.0f;
+        return 25.0f;
     case 2:
-        return 100.0f;
+        return 105.0f;
     case 3:
         return 200.0f;
     default:

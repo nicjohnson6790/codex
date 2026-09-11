@@ -1,6 +1,11 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "atmosphere.glsl"
+#define FOLIAGE_CLOUD_BINDING 7
+#define FOLIAGE_NOISE_BINDING 8
+#define SKY_PROBE_COEFFICIENT_BINDING 10
+#define SKY_PROBE_REGION_BINDING 11
+#include "foliage_lighting.glsl"
+
 
 layout(early_fragment_tests) in;
 
@@ -30,7 +35,7 @@ struct NearbyMaterialGpu
     vec4 params;
 };
 
-layout(set=2, binding=7, std430) readonly buffer NearbyMaterialBuffer
+layout(set=2, binding=9, std430) readonly buffer NearbyMaterialBuffer
 {
     NearbyMaterialGpu materials[];
 } materialBuffer;
@@ -42,29 +47,17 @@ layout(location = 3) in vec3 fragBitangent;
 layout(location = 4) in vec3 fragViewPosition;
 layout(location = 5) flat in uint fragMaterialIndex;
 layout(location = 6) flat in uint fragLodIndex;
+layout(location = 7) flat in uint fragIlluminationRegion;
 
 layout(location = 0) out vec4 outColor;
 
 const float kPi = 3.14159265359;
-const float kFoliageAmbientBoost = 3.35;
-const float kFoliageSkyFillStrength = 0.52;
-const float kFoliageLightingScale = 1.18;
-const float kNearbyLod2FadeStartMeters = 105.0;
-const float kNearbyLod2FadeEndMeters = 100.0;
+const float kNearbyLod2FadeStartMeters = 100.0;
+const float kNearbyLod2FadeEndMeters = 105.0;
 
 float saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
-}
-
-float sunVisibility(float sunHeight)
-{
-    return smoothstep(-0.045, 0.02, sunHeight);
-}
-
-float daylightVisibility(float sunHeight)
-{
-    return smoothstep(-0.12, 0.10, sunHeight);
 }
 
 float interleavedGradientNoise(vec2 pixelCoord)
@@ -119,8 +112,8 @@ void main()
     {
         float nearbyDistanceMeters = length(fragViewPosition.xz);
         float lod2FadeAlpha = saturate(
-            (kNearbyLod2FadeStartMeters - nearbyDistanceMeters) /
-            max(kNearbyLod2FadeStartMeters - kNearbyLod2FadeEndMeters, 0.00001));
+            (kNearbyLod2FadeEndMeters - nearbyDistanceMeters) /
+            max(kNearbyLod2FadeEndMeters - kNearbyLod2FadeStartMeters, 0.00001));
         if (lod2FadeAlpha <= 0.0)
         {
             discard;
@@ -192,13 +185,8 @@ void main()
     float backScatter = pow(saturate(dot(-viewDirection, sunDirection)), 2.0) * saturate(dot(-normal, sunDirection));
     vec3 transmission = subsurfaceColor * albedoSample.rgb * backScatter * transmissionStrength;
 
-    float directVisibility = sunVisibility(sunDirection.y);
-    float ambientVisibility = mix(0.10, 1.0, daylightVisibility(sunDirection.y));
-    vec3 sunRadiance = foliageMaterial.sunColorAmbient.rgb * foliageMaterial.sunDirectionIntensity.w * directVisibility;
-    vec3 directLighting =
-        (diffuse * sunRadiance * 1.18) +
-        (specular * sunRadiance * 0.06) +
-        (transmission * sunRadiance * 1.28);
+    vec3 sunRadiance = foliageSun(fragViewPosition,sunDirection);
+    vec3 directLighting = (diffuse + specular + transmission) * sunRadiance;
 
     vec3 reflectionDirection = reflect(-viewDirection, normal);
     vec3 reflectedSky = sampleSkyRadiance(reflectionDirection);
@@ -209,10 +197,9 @@ void main()
         mix(0.35, 0.7, pow(1.0 - nDotV, 0.35));
     environmentSpecular *= mix(0.8, 1.0, effectiveAo) * 0.28;
 
-    float ambientScale = foliageMaterial.sunColorAmbient.a * ambientVisibility;
-    vec3 skyFill = sampleSkyRadiance(normal) * albedoSample.rgb * kFoliageSkyFillStrength * ambientVisibility;
-    vec3 ambient = albedoSample.rgb * ambientScale * mix(0.92, 1.0, effectiveAo) * kFoliageAmbientBoost;
-    vec3 litColor = (ambient + skyFill + directLighting + environmentSpecular) * kFoliageLightingScale;
+    vec3 ambient = albedoSample.rgb / kPi * effectiveAo *
+        foliageSky(fragViewPosition,normal,fragIlluminationRegion);
+    vec3 litColor = ambient + directLighting + environmentSpecular;
 
     outColor = vec4(litColor, albedoSample.a);
 }

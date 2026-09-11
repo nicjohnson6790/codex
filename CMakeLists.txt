@@ -215,8 +215,8 @@ compile_shader(
     ${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.vert
     ${FOLIAGE_IMPOSTER_VERT_SPV}
     ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter_depth_prepass.frag ${FOLIAGE_IMPOSTER_DEPTH_PREPASS_FRAG_SPV})
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.frag ${FOLIAGE_IMPOSTER_FRAG_SPV})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter_depth_prepass.frag ${FOLIAGE_IMPOSTER_DEPTH_PREPASS_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/foliage_imposter_blend.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/foliage_imposter.frag ${FOLIAGE_IMPOSTER_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/foliage_imposter_blend.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.vert ${NEARBY_FOLIAGE_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage_depth_prepass.frag ${NEARBY_FOLIAGE_DEPTH_PREPASS_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/nearby_foliage.frag ${NEARBY_FOLIAGE_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl)
@@ -413,6 +413,15 @@ target_link_libraries(terrain_sandbox
 
 if (CODEX_BUILD_TESTS)
     enable_testing()
+    add_executable(foliage_capture_tests tests/FoliageCaptureTests.cpp
+        src/assets/RuntimeAssetReader.cpp src/assets/RuntimeAssetCompression.cpp)
+    set_target_properties(foliage_capture_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
+    target_include_directories(foliage_capture_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(foliage_capture_tests PRIVATE SDL3::SDL3 lz4_local)
+    add_custom_command(TARGET foliage_capture_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy -t $<TARGET_FILE_DIR:foliage_capture_tests> $<TARGET_RUNTIME_DLLS:foliage_capture_tests>
+        COMMAND_EXPAND_LISTS)
+    add_test(NAME foliage_capture_tests COMMAND $<TARGET_FILE:foliage_capture_tests>)
     add_executable(cloud_tests tests/CloudTests.cpp)
     set_target_properties(cloud_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
     target_include_directories(cloud_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})

@@ -15,6 +15,14 @@ public:
     void dispatch(SDL_GPUCommandBuffer*,SDL_GPUBuffer* heightmaps,const CloudRenderer::SamplingResources&,
                   const SkyboxRenderer&,const LightingSystem&,int cloudBudget);
     SamplingResources samplingResources() const { return {m_coefficients,m_regions}; }
+    CacheIndex regionForPosition(glm::vec2 p) const {
+        const auto regions=m_manager.regions();
+        for(unsigned i=0;i<regions.size();++i) {
+            const auto d=regions[i].domain;
+            if(p.x>=d.x && p.y>=d.y && p.x<d.x+d.z && p.y<d.y+d.z) return CacheIndex(i);
+        }
+        return kUnavailableCacheIndex;
+    }
     CacheIndex regionForTile(const WorldGridQuadtreeLeafId& id) const { return m_manager.regionForTile(id); }
     std::uint64_t totalTileUpdates() const { return m_totalTileUpdates; }
     void drawSettings();

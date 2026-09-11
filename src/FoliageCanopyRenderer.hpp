@@ -1,6 +1,8 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "FoliageLighting.hpp"
+#include "FoliageImposterRenderer.hpp"
 #include "FoliageTypes.hpp"
 #include "LightingSystem.hpp"
 #include "AssetResidency.hpp"
@@ -37,9 +39,11 @@ public:
         glm::vec4 terrainOriginAndSize{ 0.0f };
         glm::vec4 terrainSliceData{ 0.0f };
         glm::uvec4 patchSeedData{ 0u };
-        glm::uvec4 cellSlots[FoliageConfig::kCanopyCellCountPerNode / 4u]{};
-        glm::uvec4 cellSeeds[FoliageConfig::kCanopyCellCountPerNode / 4u]{};
+        glm::uvec4 cellSlots[kCanopyDrawCellCount / 4u]{};
+        glm::uvec4 cellSeeds[kCanopyDrawCellCount / 4u]{};
     };
+    static_assert(sizeof(DrawMetadataGpu)==864 && offsetof(DrawMetadataGpu,cellSlots)==64 &&
+                  offsetof(DrawMetadataGpu,cellSeeds)==464);
 
     struct alignas(16) CellGenerationParams
     {
@@ -72,6 +76,7 @@ public:
         float waterLevel,
         GenerationJobHandle job);
     void addCanopyDraw(const FoliageCanopyDrawReference& drawReference);
+    void prepareLighting(const SkyIlluminationRenderer& illumination);
     void upload(SDL_GPUCopyPass* copyPass);
     void dispatchCellGenerations(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUBuffer* terrainHeightmapBuffer);
     void attachSubmittedFence(
@@ -82,7 +87,8 @@ public:
         SDL_GPUCommandBuffer* commandBuffer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
-        SDL_GPUBuffer* terrainHeightmapBuffer) const;
+        SDL_GPUBuffer* terrainHeightmapBuffer,
+    const FoliageImposterRenderer::CanopyResources& captures, const FoliageLighting& lighting) const;
 
     [[nodiscard]] std::uint32_t drawCount() const { return m_drawCount; }
 

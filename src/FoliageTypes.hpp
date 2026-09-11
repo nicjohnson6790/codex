@@ -108,6 +108,8 @@ struct FoliageCanopyReadyCellInfo
     std::uint8_t residentFrameAge = 0;
 };
 
+// One ready-cell halo bounds capture sampling at patch borders; residency stays unchanged.
+inline constexpr unsigned kCanopyDrawCellCount = 100;
 struct FoliageCanopyDrawReference
 {
     Position patchOrigin{};
@@ -118,8 +120,8 @@ struct FoliageCanopyDrawReference
     std::uint32_t patchSeed = 0;
     std::uint8_t drawAgeFrames = 0;
     std::array<std::uint8_t, 4> edgeFadeStrengths{};
-    std::array<std::uint16_t, FoliageConfig::kCanopyCellCountPerNode> cellSlotIndices{};
-    std::array<std::uint32_t, FoliageConfig::kCanopyCellCountPerNode> cellSeeds{};
+    std::array<std::uint16_t, kCanopyDrawCellCount> cellSlotIndices{};
+    std::array<std::uint32_t, kCanopyDrawCellCount> cellSeeds{};
 };
 
 [[nodiscard]] inline FoliagePackedInstance packFoliageInstance(

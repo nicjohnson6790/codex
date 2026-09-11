@@ -70,6 +70,16 @@ The converter expects that pack to be arranged like this:
 
 Without that external source content, the repo still builds, but you cannot regenerate the nearby tree runtime assets.
 
+### Pine capture regeneration
+
+The foliage capture schema is now version 2. Old pine packs are rejected with a regeneration message; other pack schemas are unchanged. Run `tools\build.cmd Assets`, then explicitly run `build\Assets\Release\converter\converter.exe pinetreepack`, and rebuild the app to stage the results.
+
+Each class includes 32 registered imposter views (eight yaw views at 0/25/50/75 degrees above the horizon) and three registered 64x64 downward canopy captures: cumulative below local Y=10 m, cumulative below Y=20 m, and the entire tree. Canopy capture uses 128x128 sampling and shares loaded per-asset geometry/materials with imposters. The complete view is not clipped at 30 m. Y=0 in imported coordinates is runtime ground.
+
+A compact versioned extension in assetbin carries framing and canopy texture references; texture payloads remain in texbin. Captures contain linear albedo/coverage in BC3 UNORM and signed tree-local XYZ normals in linear BC3 (the same block byte size as BC5). Authored sRGB color is decoded once during capture. Filtering does not bake lighting or exposure. Alpha coverage is corrected independently at each output mip using the nearest attainable target; corrected alpha is never recursively filtered. Regeneration is required to obtain the corrected framing, elevations, normals, coverage and canopy layers.
+
+Performance inspection found repeated source texture decoding/uploads across shared material references, redundant repeated edge-dilation scans, synchronous per-view GPU waits, and CPU filtering/compression. These are follow-up opportunities, not evidence of measured phase bottlenecks; no asynchronous capture/compression framework was added. See rendering architecture section 5.4 for conventions and validation limits.
+
 ### Skybox pack
 
 The repo does include the skybox source textures under:
@@ -367,7 +377,7 @@ The pine converter currently uses these texture budgets:
 - the final stored imposter texture arrays are `512x512`
 - each imposter texture contains `32` layers in `pitchIndex * 8 + yawIndex` order
 - color/alpha imposter arrays use `BC3`
-- normal imposter arrays use `BC5`
+- normal imposter arrays use linear `BC3` with signed tree-local XYZ in RGB
 - both BC payloads are packed per-layer, per-mip and then LZ4-compressed inside `texbin`
 
 The pine imposter generation flow is:
@@ -378,7 +388,7 @@ The pine imposter generation flow is:
 - dilate RGB around alpha edges
 - downsample the supersampled captures to the final imposter resolution
 - build full mip chains with alpha-coverage preservation
-- compress color/alpha to `BC3` and normal to `BC5`
+- compress color/alpha and full signed normal XYZ to linear `BC3`
 - write the resulting array textures into `pinetreepack.texbin`
 - write imposter texture references into `pinetreepack.assetbin`
 - reopen the generated bins through the shared runtime reader and validate the metadata

@@ -243,6 +243,9 @@ void SDLRenderer::renderFrame(
     {
         HELLO_PROFILE_SCOPE("SDLRenderer::UploadGeometry");
         illuminationRenderer.prepare(quadtreeMeshRenderer.illuminationTiles(),m_activeCameraPosition,double(SDL_GetTicksNS())*1e-9);
+        foliageRenderer.prepareLighting(illuminationRenderer);
+        nearbyFoliageRenderer.prepareLighting(illuminationRenderer);
+        canopyRenderer.prepareLighting(illuminationRenderer);
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
         if (copyPass == nullptr)
         {
@@ -386,7 +389,7 @@ void SDLRenderer::renderFrame(
                     viewProjection,
                     lightingSystem,
                     skyboxRenderer,
-                    quadtreeMeshRenderer.heightmapBuffer());
+                    quadtreeMeshRenderer.heightmapBuffer(), FoliageLighting{cloudRenderer.samplingResources(),illuminationRenderer.samplingResources(),cloudRenderer.settings().terrainShadowSamples});
             }
         }
         {
@@ -398,7 +401,7 @@ void SDLRenderer::renderFrame(
                     commandBuffer,
                     viewProjection,
                     lightingSystem,
-                    quadtreeMeshRenderer.heightmapBuffer());
+                    quadtreeMeshRenderer.heightmapBuffer(), FoliageLighting{cloudRenderer.samplingResources(),illuminationRenderer.samplingResources(),cloudRenderer.settings().terrainShadowSamples});
             }
         }
         {
@@ -410,7 +413,7 @@ void SDLRenderer::renderFrame(
                     commandBuffer,
                     viewProjection,
                     lightingSystem,
-                    quadtreeMeshRenderer.heightmapBuffer());
+                    quadtreeMeshRenderer.heightmapBuffer(), foliageRenderer.canopyResources(), FoliageLighting{cloudRenderer.samplingResources(),illuminationRenderer.samplingResources(),cloudRenderer.settings().terrainShadowSamples});
             }
         }
         SDL_EndGPURenderPass(renderPass);

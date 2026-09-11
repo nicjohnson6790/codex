@@ -20,6 +20,8 @@ struct TreeClassData
 {
     vec4 centerAndHalfWidth;
     vec4 verticalExtentsAndLayerBase;
+    vec4 pitchHalfHeights;
+    vec4 canopyCenterAndHalfExtents;
 };
 
 layout(set=0, binding=0, std430) readonly buffer FoliageDrawMetadataBuffer
@@ -45,14 +47,19 @@ layout(set=0, binding=3, std430) readonly buffer FoliageTreeClassBuffer
 layout(location = 0) in vec2 inCorner;
 layout(location = 1) in vec2 inUv0;
 
+layout(location = 10) flat out uvec2 fragUpperLayers;
+layout(location = 11) out vec2 fragUv1;
+layout(location = 12) flat out float fragPitchBlend;
 layout(location = 0) out vec2 fragUv0;
 layout(location = 1) flat out uint fragLayerIndex0;
 layout(location = 2) flat out uint fragLayerIndex1;
 layout(location = 3) out float fragYawBlend;
-layout(location = 4) out vec3 fragCaptureRight;
-layout(location = 5) out vec3 fragCaptureUp;
-layout(location = 6) out vec3 fragCaptureForward;
+layout(location = 4) out vec3 fragTreeRight;
+layout(location = 5) out vec3 fragTreeUp;
+layout(location = 6) out vec3 fragTreeForward;
 layout(location = 7) out vec3 fragViewDirection;
+layout(location = 8) out vec3 fragPosition;
+layout(location = 9) flat out uint fragIlluminationRegion;
 
 const uint kCandidateGridResolution = 64u;
 const float kCandidateCellSizeMeters = 4.0;
@@ -62,7 +69,7 @@ const uint kImposterYawViewCount = 8u;
 const uint kImposterLayersPerClass = 32u;
 const float kTau = 6.28318530718;
 const float kNearbyRadiusMeters = 100.0;
-const float kPitchAngles[kImposterLayersPerClass / kImposterYawViewCount] = float[](radians(-5.0), radians(10.0), radians(25.0), radians(40.0));
+const float kPitchAngles[kImposterLayersPerClass / kImposterYawViewCount] = float[](radians(0.0), radians(25.0), radians(50.0), radians(75.0));
 
 float sampleHeight(uint sliceIndex, ivec2 sampleCoord)
 {
@@ -100,16 +107,6 @@ mat2 rotationMatrix(float radiansValue)
         sineValue, cosineValue);
 }
 
-vec3 captureForwardForLayer(uint yawIndex, uint pitchIndex)
-{
-    float yawRadians = (float(yawIndex) / float(kImposterYawViewCount)) * kTau;
-    float pitchRadians = kPitchAngles[pitchIndex];
-    return normalize(vec3(
-        cos(pitchRadians) * sin(yawRadians),
-        sin(pitchRadians),
-        cos(pitchRadians) * cos(yawRadians)));
-}
-
 void main()
 {
     FoliagePageData page = drawMetadataBuffer.draws[gl_DrawIDARB];
@@ -126,12 +123,17 @@ void main()
     {
         gl_Position = vec4(0.0);
         fragUv0 = inUv0;
+        fragUv1 = inUv0;
+        fragUpperLayers=uvec2(0);
+        fragPitchBlend=0;
+        fragPosition=vec3(0);
+        fragIlluminationRegion=65535u;
         fragLayerIndex0 = 0u;
         fragLayerIndex1 = 0u;
         fragYawBlend = 0.0;
-        fragCaptureRight = vec3(1.0, 0.0, 0.0);
-        fragCaptureUp = vec3(0.0, 1.0, 0.0);
-        fragCaptureForward = vec3(0.0, 0.0, 1.0);
+        fragTreeRight = vec3(1.0, 0.0, 0.0);
+        fragTreeUp = vec3(0.0, 1.0, 0.0);
+        fragTreeForward = vec3(0.0, 0.0, 1.0);
         fragViewDirection = vec3(0.0, 0.0, 1.0);
         return;
     }
@@ -163,12 +165,14 @@ void main()
         pageOrigin.z + localOffset.y + rotatedCenterXz.y);
 
     vec3 cameraPosition = foliage.cameraPositionAndTreeClassCount.xyz;
-    vec3 toCamera = normalize(cameraPosition - instanceCenter);
-    vec3 billboardForward = normalize(vec3(toCamera.x, 0.0, toCamera.z));
+    vec3 deltaCamera = cameraPosition - instanceCenter;
+    vec3 toCamera = length(deltaCamera)>0.0001 ? normalize(deltaCamera) : vec3(0,1,0);
+    vec3 billboardForward = vec3(toCamera.x, 0.0, toCamera.z);
     if (length(billboardForward.xz) < 0.0001)
     {
         billboardForward = vec3(0.0, 0.0, -1.0);
     }
+    billboardForward = normalize(billboardForward);
     vec3 billboardRight = normalize(vec3(billboardForward.z, 0.0, -billboardForward.x));
     vec3 billboardUp = vec3(0.0, 1.0, 0.0);
 
@@ -178,7 +182,7 @@ void main()
         (rotationMatrix(-instanceRotation) * toCamera.xz).y));
     vec3 captureForward = -localToCamera;
 
-    float yawRadians = atan(captureForward.x, captureForward.z);
+    float yawRadians = dot(captureForward.xz,captureForward.xz)>1e-8 ? atan(captureForward.x, captureForward.z) : 0.0;
     if (yawRadians < 0.0)
     {
         yawRadians += kTau;
@@ -188,56 +192,44 @@ void main()
     uint yawIndex1 = (yawIndex0 + 1u) % kImposterYawViewCount;
     fragYawBlend = fract(yawPosition);
 
-    float bestPitchDistance = 1.0e9;
-    uint pitchIndex = 0u;
-    for (uint candidatePitch = 0u; candidatePitch < 4u; ++candidatePitch)
-    {
-        vec3 candidateForward = captureForwardForLayer(yawIndex0, candidatePitch);
-        float candidateDistance = distance(candidateForward, captureForward);
-        if (candidateDistance < bestPitchDistance)
-        {
-            bestPitchDistance = candidateDistance;
-            pitchIndex = candidatePitch;
-        }
-    }
-
-    vec3 localCaptureForward = captureForwardForLayer(yawIndex0, pitchIndex);
-    vec3 localCaptureUpHint = vec3(0.0, 1.0, 0.0);
-    if (abs(dot(localCaptureForward, localCaptureUpHint)) > 0.98)
-    {
-        localCaptureUpHint = vec3(1.0, 0.0, 0.0);
-    }
-    vec3 localCaptureRight = normalize(cross(localCaptureForward, localCaptureUpHint));
-    vec3 localCaptureUp = normalize(cross(localCaptureRight, localCaptureForward));
-    vec2 worldCaptureRightXz = instanceRotationMatrix * localCaptureRight.xz;
-    vec2 worldCaptureForwardXz = instanceRotationMatrix * localCaptureForward.xz;
-    fragCaptureRight = normalize(vec3(worldCaptureRightXz.x, localCaptureRight.y, worldCaptureRightXz.y));
-    fragCaptureUp = normalize(vec3(
-        (instanceRotationMatrix * localCaptureUp.xz).x,
-        localCaptureUp.y,
-        (instanceRotationMatrix * localCaptureUp.xz).y));
-    fragCaptureForward = normalize(vec3(worldCaptureForwardXz.x, localCaptureForward.y, worldCaptureForwardXz.y));
+    float elevation = clamp(asin(clamp(toCamera.y,-1.0,1.0)),0.0,kPitchAngles[3]);
+    float pitchPosition=elevation/kPitchAngles[1];
+    uint pitchIndex0=min(uint(floor(pitchPosition)),3u);
+    uint pitchIndex1=min(pitchIndex0+1u,3u);
+    fragPitchBlend=pitchIndex0==pitchIndex1 ? 0.0 : fract(pitchPosition);
+    billboardUp=vec3(-billboardForward.x*sin(elevation),cos(elevation),-billboardForward.z*sin(elevation));
+    // Captured normals are tree-local at every pitch and yaw.
+    // Only instance rotation maps them to world space.
+    fragTreeRight=vec3(instanceRotationMatrix[0].x,0,instanceRotationMatrix[0].y);
+    fragTreeUp=vec3(0,1,0);
+    fragTreeForward=vec3(instanceRotationMatrix[1].x,0,instanceRotationMatrix[1].y);
     fragViewDirection = toCamera;
 
     float imposterScale = 1.0;
-    if (dot(instanceCenter.xz, instanceCenter.xz) < (kNearbyRadiusMeters * kNearbyRadiusMeters))
+    vec2 rootToCamera=pageOrigin.xz+localOffset-cameraPosition.xz;
+    if (dot(rootToCamera, rootToCamera) < (kNearbyRadiusMeters * kNearbyRadiusMeters))
     {
         imposterScale = 0.0;
     }
 
     float halfWidth = treeClass.centerAndHalfWidth.w;
-    float verticalOffset = mix(
-        treeClass.verticalExtentsAndLayerBase.x,
-        treeClass.verticalExtentsAndLayerBase.y,
-        inCorner.y);
+    // Enclose both capture rectangles. Map physical billboard coordinates back
+    // into each capture's own framing rather than stretching mismatched UVs.
+    float halfHeight=max(treeClass.pitchHalfHeights[pitchIndex0],treeClass.pitchHalfHeights[pitchIndex1]);
+    float verticalOffset=(inCorner.y*2.0-1.0)*halfHeight;
     vec3 worldPosition =
         instanceCenter +
         (billboardRight * (inCorner.x * halfWidth * imposterScale)) +
         (billboardUp * verticalOffset * imposterScale);
 
+    fragPosition=worldPosition;
+    fragIlluminationRegion=page.seedData.w;
     gl_Position = foliage.viewProjection * vec4(worldPosition, 1.0);
-    fragUv0 = inUv0;
-    uint layerBase = uint(treeClass.verticalExtentsAndLayerBase.z) + (pitchIndex * kImposterYawViewCount);
+    fragUv0=vec2(inUv0.x,0.5+(inUv0.y-0.5)*halfHeight/treeClass.pitchHalfHeights[pitchIndex0]);
+    fragUv1=vec2(inUv0.x,0.5+(inUv0.y-0.5)*halfHeight/treeClass.pitchHalfHeights[pitchIndex1]);
+    uint upperBase=uint(treeClass.verticalExtentsAndLayerBase.z)+pitchIndex1*kImposterYawViewCount;
+    fragUpperLayers=uvec2(upperBase+yawIndex0,upperBase+yawIndex1);
+    uint layerBase = uint(treeClass.verticalExtentsAndLayerBase.z) + (pitchIndex0 * kImposterYawViewCount);
     fragLayerIndex0 = layerBase + yawIndex0;
     fragLayerIndex1 = layerBase + yawIndex1;
 }

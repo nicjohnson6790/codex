@@ -3,6 +3,7 @@
 #include "BcTextureCompression.hpp"
 #include "TextureImport.hpp"
 #include "../../src/assets/RuntimeAssetFormat.hpp"
+#include "../../src/assets/FoliageNormalEncoding.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -38,10 +39,10 @@ static_assert(
     kImposterSupersampleResolution % kImposterResolution == 0u,
     "Imposter supersample resolution must divide evenly into the final resolution");
 constexpr std::array<float, kPitchViewCount> kPitchDegrees{
-    -5.0f,
-    10.0f,
+    0.0f,
     25.0f,
-    40.0f,
+    50.0f,
+    75.0f,
 };
 
 struct Float3
@@ -111,6 +112,8 @@ struct MaterialTextures
 
 struct CaptureView
 {
+    std::uint32_t resolution = kImposterSupersampleResolution;
+    float clipHeight = std::numeric_limits<float>::max();
     Mat4 viewProjection{};
     Float3 cameraPosition{};
     Float3 viewBasisRight{};
@@ -126,7 +129,7 @@ public:
 
     bool captureAsset(
         const ImportedPack& pack,
-        const ImportedAsset& asset,
+        ImportedAsset& asset,
         std::vector<std::vector<std::byte>>* outColorLayers,
         std::vector<std::vector<std::byte>>* outNormalLayers,
         std::vector<float>* outLayerCoverageTargets,
@@ -264,10 +267,8 @@ void encodeRgba(
 
 Float3 decodeNormal(const std::byte* pixel)
 {
-    const float nx = (static_cast<float>(std::to_integer<std::uint8_t>(pixel[0])) / 127.5f) - 1.0f;
-    const float ny = (static_cast<float>(std::to_integer<std::uint8_t>(pixel[1])) / 127.5f) - 1.0f;
-    const float nzSquared = std::max(1.0f - (nx * nx) - (ny * ny), 0.0f);
-    return { nx, ny, std::sqrt(nzSquared) };
+    const auto n = RuntimeAssets::DecodeFoliageNormal(pixel);
+    return { n[0], n[1], n[2] };
 }
 
 void encodeNormal(
@@ -360,42 +361,22 @@ void dilateRgbAroundAlphaEdges(
 }
 
 std::vector<std::byte> downsampleColorMip(
-    std::span<const std::byte> sourcePixels,
-    std::uint32_t sourceWidth,
-    std::uint32_t sourceHeight,
-    std::uint32_t targetWidth,
-    std::uint32_t targetHeight)
+    std::span<const std::byte> sourcePixels, std::uint32_t sourceWidth,
+    std::uint32_t sourceHeight, std::uint32_t targetWidth, std::uint32_t targetHeight)
 {
-    std::vector<std::byte> result(static_cast<std::size_t>(targetWidth) * targetHeight * 4u, std::byte{});
-    for (std::uint32_t y = 0; y < targetHeight; ++y)
-    {
-        for (std::uint32_t x = 0; x < targetWidth; ++x)
-        {
-            std::uint32_t rgba[4]{};
-            std::uint32_t sampleCount = 0u;
-            for (std::uint32_t sourceY = 0; sourceY < 2u; ++sourceY)
-            {
-                for (std::uint32_t sourceX = 0; sourceX < 2u; ++sourceX)
-                {
-                    const std::uint32_t sx = std::min((x * 2u) + sourceX, sourceWidth - 1u);
-                    const std::uint32_t sy = std::min((y * 2u) + sourceY, sourceHeight - 1u);
-                    const std::size_t sourceOffset = pixelOffset(sourceWidth, sx, sy);
-                    for (std::size_t channel = 0; channel < 4u; ++channel)
-                    {
-                        rgba[channel] += std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + channel]);
-                    }
-                    ++sampleCount;
-                }
-            }
-
-            const std::size_t destinationOffset = pixelOffset(targetWidth, x, y);
-            for (std::size_t channel = 0; channel < 4u; ++channel)
-            {
-                result[destinationOffset + channel] =
-                    std::byte{ static_cast<std::uint8_t>(rgba[channel] / sampleCount) };
-            }
+    std::vector<std::byte> result(static_cast<std::size_t>(targetWidth)*targetHeight*4u);
+    for(unsigned y=0;y<targetHeight;++y) for(unsigned x=0;x<targetWidth;++x) {
+        float rgb[3]{}, alpha=0;
+        for(unsigned dy=0;dy<2;++dy) for(unsigned dx=0;dx<2;++dx) {
+            const auto offset=pixelOffset(sourceWidth,std::min(x*2+dx,sourceWidth-1),std::min(y*2+dy,sourceHeight-1));
+            const float weight=float(std::to_integer<unsigned char>(sourcePixels[offset+3]))/255.0f;
+            alpha+=weight;
+            for(unsigned c=0;c<3;++c) rgb[c]+=float(std::to_integer<unsigned char>(sourcePixels[offset+c]))/255.0f*weight;
         }
+        encodeRgba(&result,targetWidth,x,y,rgb[0]/std::max(alpha,1e-6f),rgb[1]/std::max(alpha,1e-6f),
+            rgb[2]/std::max(alpha,1e-6f),alpha*0.25f);
     }
+    dilateRgbAroundAlphaEdges(&result,targetWidth,targetHeight);
     return result;
 }
 
@@ -409,43 +390,25 @@ void scaleAlphaToMatchCoverage(
     }
 
     targetCoverage = std::clamp(targetCoverage, 0.0f, 1.0f);
-    float minScale = 0.0f;
-    float maxScale = 8.0f;
-    for (std::uint32_t iteration = 0; iteration < 18u; ++iteration)
-    {
-        const float scale = (minScale + maxScale) * 0.5f;
-        std::size_t coveredPixelCount = 0u;
-        const std::size_t pixelCount = pixels->size() / 4u;
-        for (std::size_t pixelIndex = 0; pixelIndex < pixelCount; ++pixelIndex)
-        {
-            const float alpha = static_cast<float>(std::to_integer<std::uint8_t>((*pixels)[(pixelIndex * 4u) + 3u])) * scale;
-            if (alpha >= static_cast<float>(kAlphaCoverageCutoffByte))
-            {
-                ++coveredPixelCount;
-            }
-        }
-
-        const float scaledCoverage = static_cast<float>(coveredPixelCount) / static_cast<float>(pixelCount);
-        if (scaledCoverage < targetCoverage)
-        {
-            minScale = scale;
-        }
-        else
-        {
-            maxScale = scale;
+    std::array<std::size_t,256> histogram{};
+    const std::size_t count=pixels->size()/4;
+    for(std::size_t i=0;i<count;++i) ++histogram[std::to_integer<unsigned char>((*pixels)[i*4+3])];
+    float chosenScale=1.0f;
+    double bestError=std::numeric_limits<double>::max();
+    std::size_t covered=0;
+    // Coverage is a staircase. Choose the nearest attainable coverage, rather
+    // than always rounding upward and inflating holes when a target is impossible.
+    for(int threshold=256;threshold>=1;--threshold) {
+        if(threshold<256) covered+=histogram[threshold];
+        const float candidate=threshold==256 ? 0.0f : 128.0f/float(threshold);
+        const double delta=std::abs(double(covered)/double(count)-targetCoverage);
+        if(delta<bestError || (delta==bestError && std::abs(candidate-1)<std::abs(chosenScale-1))) {
+            bestError=delta; chosenScale=candidate;
         }
     }
-
-    const float chosenScale = maxScale;
-    const std::size_t pixelCount = pixels->size() / 4u;
-    for (std::size_t pixelIndex = 0; pixelIndex < pixelCount; ++pixelIndex)
-    {
-        const std::size_t alphaIndex = (pixelIndex * 4u) + 3u;
-        const float scaledAlpha =
-            static_cast<float>(std::to_integer<std::uint8_t>((*pixels)[alphaIndex])) * chosenScale;
-        (*pixels)[alphaIndex] = std::byte{
-            static_cast<std::uint8_t>(std::clamp(scaledAlpha, 0.0f, 255.0f))
-        };
+    for(std::size_t i=0;i<count;++i) {
+        const auto value=std::to_integer<unsigned char>((*pixels)[i*4+3]);
+        (*pixels)[i*4+3]=std::byte{static_cast<unsigned char>(std::clamp(float(value)*chosenScale,0.0f,255.0f))};
     }
 }
 
@@ -453,6 +416,8 @@ std::vector<std::byte> downsampleSupersampledColorLayer(
     std::span<const std::byte> sourcePixels,
     float* outCoverageTarget)
 {
+    const auto kImposterSupersampleResolution = static_cast<std::uint32_t>(std::sqrt(sourcePixels.size()/4u));
+    const auto kImposterResolution = kImposterSupersampleResolution / 2u;
     std::vector<std::byte> result(
         static_cast<std::size_t>(kImposterResolution) * kImposterResolution * 4u,
         std::byte{});
@@ -519,7 +484,7 @@ std::vector<std::byte> downsampleSupersampledColorLayer(
     const std::size_t supersamplePixelCount =
         static_cast<std::size_t>(kImposterSupersampleResolution) * kImposterSupersampleResolution;
     *outCoverageTarget = static_cast<float>(coveredSupersampleCount) / static_cast<float>(supersamplePixelCount);
-    scaleAlphaToMatchCoverage(&result, *outCoverageTarget);
+    // Keep fractional base coverage as the unadjusted mip-filter source.
     return result;
 }
 
@@ -527,6 +492,8 @@ std::vector<std::byte> downsampleSupersampledNormalLayer(
     std::span<const std::byte> sourcePixels,
     float targetCoverage)
 {
+    const auto kImposterSupersampleResolution = static_cast<std::uint32_t>(std::sqrt(sourcePixels.size()/4u));
+    const auto kImposterResolution = kImposterSupersampleResolution / 2u;
     std::vector<std::byte> result(
         static_cast<std::size_t>(kImposterResolution) * kImposterResolution * 4u,
         std::byte{});
@@ -594,10 +561,11 @@ std::vector<std::byte> downsampleNormalMip(
                     const std::uint32_t sy = std::min((y * 2u) + sourceY, sourceHeight - 1u);
                     const std::size_t sourceOffset = pixelOffset(sourceWidth, sx, sy);
                     const Float3 normal = decodeNormal(sourcePixels.data() + sourceOffset);
-                    accumulated.x += normal.x;
-                    accumulated.y += normal.y;
-                    accumulated.z += normal.z;
-                    alphaSum += static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 3])) / 255.0f;
+                    const float alpha=static_cast<float>(std::to_integer<std::uint8_t>(sourcePixels[sourceOffset + 3])) / 255.0f;
+                    accumulated.x += normal.x*alpha;
+                    accumulated.y += normal.y*alpha;
+                    accumulated.z += normal.z*alpha;
+                    alphaSum += alpha;
                     ++sampleCount;
                 }
             }
@@ -617,10 +585,13 @@ std::vector<std::vector<std::byte>> buildColorMipChain(
     std::span<const std::byte> baseLayerPixels,
     float targetCoverage)
 {
+    const auto kImposterResolution = static_cast<std::uint32_t>(std::sqrt(baseLayerPixels.size()/4u));
     std::vector<std::vector<std::byte>> mipChain;
     mipChain.reserve(fullMipCountForExtent(kImposterResolution, kImposterResolution));
     mipChain.emplace_back(baseLayerPixels.begin(), baseLayerPixels.end());
+    scaleAlphaToMatchCoverage(&mipChain.back(),targetCoverage);
 
+    std::vector<std::byte> filterSource(baseLayerPixels.begin(), baseLayerPixels.end());
     std::uint32_t sourceWidth = kImposterResolution;
     std::uint32_t sourceHeight = kImposterResolution;
     while (sourceWidth > 1u || sourceHeight > 1u)
@@ -628,11 +599,12 @@ std::vector<std::vector<std::byte>> buildColorMipChain(
         const std::uint32_t nextWidth = std::max(sourceWidth / 2u, 1u);
         const std::uint32_t nextHeight = std::max(sourceHeight / 2u, 1u);
         std::vector<std::byte> nextMip = downsampleColorMip(
-            mipChain.back(),
+            filterSource,
             sourceWidth,
             sourceHeight,
             nextWidth,
             nextHeight);
+        filterSource = nextMip;
         scaleAlphaToMatchCoverage(&nextMip, targetCoverage);
         mipChain.push_back(std::move(nextMip));
         sourceWidth = nextWidth;
@@ -646,10 +618,13 @@ std::vector<std::vector<std::byte>> buildNormalMipChain(
     std::span<const std::byte> baseLayerPixels,
     float targetCoverage)
 {
+    const auto kImposterResolution = static_cast<std::uint32_t>(std::sqrt(baseLayerPixels.size()/4u));
     std::vector<std::vector<std::byte>> mipChain;
     mipChain.reserve(fullMipCountForExtent(kImposterResolution, kImposterResolution));
     mipChain.emplace_back(baseLayerPixels.begin(), baseLayerPixels.end());
+    scaleAlphaToMatchCoverage(&mipChain.back(),targetCoverage);
 
+    std::vector<std::byte> filterSource(baseLayerPixels.begin(), baseLayerPixels.end());
     std::uint32_t sourceWidth = kImposterResolution;
     std::uint32_t sourceHeight = kImposterResolution;
     while (sourceWidth > 1u || sourceHeight > 1u)
@@ -657,11 +632,12 @@ std::vector<std::vector<std::byte>> buildNormalMipChain(
         const std::uint32_t nextWidth = std::max(sourceWidth / 2u, 1u);
         const std::uint32_t nextHeight = std::max(sourceHeight / 2u, 1u);
         std::vector<std::byte> nextMip = downsampleNormalMip(
-            mipChain.back(),
+            filterSource,
             sourceWidth,
             sourceHeight,
             nextWidth,
             nextHeight);
+        filterSource = nextMip;
         scaleAlphaToMatchCoverage(&nextMip, targetCoverage);
         mipChain.push_back(std::move(nextMip));
         sourceWidth = nextWidth;
@@ -851,7 +827,7 @@ CaptureView buildCaptureView(
 
     const Float3 viewDirection = normalize({
         std::cos(pitchRadians) * std::sin(yawRadians),
-        std::sin(pitchRadians),
+        -std::sin(pitchRadians),
         std::cos(pitchRadians) * std::cos(yawRadians),
     });
     Float3 upHint = { 0.0f, 1.0f, 0.0f };
@@ -883,16 +859,15 @@ CaptureView buildCaptureView(
         maxZ = std::max(maxZ, viewSpace.z);
     }
 
-    const float paddingX = std::max((maxX - minX) * 0.08f, 0.15f);
-    const float paddingY = std::max((maxY - minY) * 0.08f, 0.15f);
-    const float paddingZ = std::max((maxZ - minZ) * 0.25f, 1.0f);
-    const Mat4 projection = makeOrthoMatrix(
-        minX - paddingX,
-        maxX + paddingX,
-        minY - paddingY,
-        maxY + paddingY,
-        std::max(minZ - paddingZ, 0.01f),
-        maxZ + paddingZ);
+    // Shared yaw framing makes neighboring views use the same projection scale.
+    const float radius = std::hypot((geometry.boundsMax[0]-geometry.boundsMin[0])*0.5f,
+                                    (geometry.boundsMax[2]-geometry.boundsMin[2])*0.5f);
+    const float halfHeight = (geometry.boundsMax[1]-geometry.boundsMin[1])*0.5f;
+    const float extentX = radius + std::max(radius*0.16f,0.15f);
+    const float projectedHeight = halfHeight*std::cos(pitchRadians)+radius*std::sin(pitchRadians);
+    const float extentY = projectedHeight + std::max(projectedHeight*0.16f,0.15f);
+    const Mat4 projection = makeOrthoMatrix(-extentX, extentX, -extentY, extentY,
+        0.01f, cameraDistance + geometry.boundsRadius*2.0f);
 
     CaptureView result{};
     result.viewProjection = multiply(projection, viewMatrix);
@@ -917,16 +892,18 @@ ImportedTexture buildGeneratedTexture(
     std::string_view assetName,
     std::string_view suffix,
     RuntimeAssets::TextureFormat format,
-    std::vector<std::byte>&& payload)
+    std::vector<std::byte>&& payload,
+    std::uint32_t resolution = kImposterResolution,
+    std::uint32_t layers = kLayerCount)
 {
     ImportedTexture texture;
     texture.name = std::string(assetName) + "_" + std::string(suffix);
     texture.normalizedBasename = texture.name + ".generated";
     texture.sourcePath = "generated://pine_imposter_capture/" + std::string(assetName) + "/" + std::string(suffix);
-    texture.width = kImposterResolution;
-    texture.height = kImposterResolution;
-    texture.layerCount = kLayerCount;
-    texture.mipCount = fullMipCountForExtent(kImposterResolution, kImposterResolution);
+    texture.width = resolution;
+    texture.height = resolution;
+    texture.layerCount = layers;
+    texture.mipCount = fullMipCountForExtent(resolution, resolution);
     texture.format = format;
     texture.dimension = RuntimeAssets::TextureDimension::Texture2DArray;
     texture.flags = 0u;
@@ -936,11 +913,14 @@ ImportedTexture buildGeneratedTexture(
 
 bool buildCompressedTexturePayload(
     RuntimeAssets::TextureFormat format,
+    bool normalData,
     const std::vector<std::vector<std::byte>>& layers,
     const std::vector<float>& layerCoverageTargets,
     std::vector<std::byte>* outPayload,
     std::string* error)
 {
+    const auto kImposterResolution = static_cast<std::uint32_t>(std::sqrt(layers.front().size()/4u));
+    const auto kLayerCount = static_cast<std::uint32_t>(layers.size());
     outPayload->clear();
     const std::uint32_t mipCount = fullMipCountForExtent(kImposterResolution, kImposterResolution);
     const std::uint64_t expectedTotalBytes = RuntimeAssets::CalculateTextureDataSize(
@@ -967,9 +947,8 @@ bool buildCompressedTexturePayload(
         const std::vector<std::byte>& layerPixels = layers[layerIndex];
         const float layerCoverageTarget = std::clamp(layerCoverageTargets[layerIndex], 0.0f, 1.0f);
         const std::vector<std::vector<std::byte>> mipChain =
-            format == RuntimeAssets::TextureFormat::BC3_RGBA_UNORM
-                ? buildColorMipChain(layerPixels, layerCoverageTarget)
-                : buildNormalMipChain(layerPixels, layerCoverageTarget);
+            normalData ? buildNormalMipChain(layerPixels, layerCoverageTarget)
+                       : buildColorMipChain(layerPixels, layerCoverageTarget);
         std::uint32_t mipWidth = kImposterResolution;
         std::uint32_t mipHeight = kImposterResolution;
 
@@ -1842,9 +1821,6 @@ bool OffscreenImposterRenderer::downloadRenderTarget(
     std::vector<std::byte>* outPixels,
     std::string* error) const
 {
-    outPixels->assign(
-        static_cast<std::size_t>(kImposterSupersampleResolution) * kImposterSupersampleResolution * 4u,
-        std::byte{});
     void* mapped = SDL_MapGPUTransferBuffer(m_device, transferBuffer, false);
     if (mapped == nullptr)
     {
@@ -1874,6 +1850,7 @@ bool OffscreenImposterRenderer::renderLayer(
         return false;
     }
 
+    const auto kImposterSupersampleResolution = view.resolution;
     const SDL_GPUBufferBinding vertexBinding{ vertexBuffer, 0 };
     const SDL_GPUBufferBinding indexBinding{ indexBuffer, 0 };
     const SDL_GPUViewport viewport{
@@ -1941,7 +1918,7 @@ bool OffscreenImposterRenderer::renderLayer(
             fragmentUniforms.viewBasisForward = { view.viewBasisForward.x, view.viewBasisForward.y, view.viewBasisForward.z, 0.0f };
             fragmentUniforms.sunDirectionIntensity = { sunDirection.x, sunDirection.y, sunDirection.z, 1.0f };
             fragmentUniforms.sunColorAmbient = { 1.0f, 0.97f, 0.91f, 0.22f };
-            fragmentUniforms.shadingParams0 = { 0.04f, 1.0f, 0.45f, 0.0f };
+            fragmentUniforms.shadingParams0 = { 0.04f, 1.0f, 0.45f, view.clipHeight };
             fragmentUniforms.cameraPositionAlphaCutoff = {
                 view.cameraPosition.x,
                 view.cameraPosition.y,
@@ -2010,13 +1987,16 @@ bool OffscreenImposterRenderer::renderLayer(
         return false;
     }
 
-    return downloadRenderTarget(m_colorTarget, m_colorReadback, outColorPixels, error) &&
+    outColorPixels->resize(view.resolution*view.resolution*4u);
+    outNormalPixels->resize(view.resolution*view.resolution*4u);
+    const bool downloaded = downloadRenderTarget(m_colorTarget, m_colorReadback, outColorPixels, error) &&
         downloadRenderTarget(m_normalTarget, m_normalReadback, outNormalPixels, error);
+    return downloaded;
 }
 
 bool OffscreenImposterRenderer::captureAsset(
     const ImportedPack& pack,
-    const ImportedAsset& asset,
+    ImportedAsset& asset,
     std::vector<std::vector<std::byte>>* outColorLayers,
     std::vector<std::vector<std::byte>>* outNormalLayers,
     std::vector<float>* outLayerCoverageTargets,
@@ -2050,6 +2030,18 @@ bool OffscreenImposterRenderer::captureAsset(
     outNormalLayers->reserve(kLayerCount);
     outLayerCoverageTargets->reserve(kLayerCount);
 
+    const float radius = std::hypot((geometry.boundsMax[0]-geometry.boundsMin[0])*0.5f,
+                                    (geometry.boundsMax[2]-geometry.boundsMin[2])*0.5f);
+    const float halfHeight = (geometry.boundsMax[1]-geometry.boundsMin[1])*0.5f;
+    asset.capture.centerAndRadius = {geometry.boundsCenter[0],geometry.boundsCenter[1],geometry.boundsCenter[2],
+                                    radius+std::max(radius*0.16f,0.15f)};
+    for (unsigned p=0;p<4;++p) {
+        const float angle=kPitchDegrees[p]*3.14159265359f/180.0f;
+        const float extent=halfHeight*std::cos(angle)+radius*std::sin(angle);
+        asset.capture.pitchHalfHeights[p]=extent+std::max(extent*0.16f,0.15f);
+    }
+    asset.capture.canopyCenterAndHalfExtents = {geometry.boundsCenter[0],geometry.boundsCenter[2],
+        asset.capture.centerAndRadius[3],asset.capture.centerAndRadius[3]};
     bool success = true;
     for (std::uint32_t pitchIndex = 0; pitchIndex < kPitchViewCount && success; ++pitchIndex)
     {
@@ -2086,6 +2078,26 @@ bool OffscreenImposterRenderer::captureAsset(
                     downsampleSupersampledNormalLayer(normalPixels, coverageTarget));
                 outLayerCoverageTargets->push_back(coverageTarget);
             }
+        }
+    }
+
+    // Reuse the loaded tree and render targets, with a bounded 128-square viewport.
+    for (unsigned layer=0;layer<3 && success;++layer) {
+        CaptureView view{};
+        view.resolution=128;
+        view.clipHeight=layer<2 ? float((layer+1)*10) : std::numeric_limits<float>::max();
+        view.viewBasisRight={1,0,0}; view.viewBasisUp={0,0,-1}; view.viewBasisForward={0,-1,0};
+        view.cameraPosition={geometry.boundsCenter[0],geometry.boundsMax[1]+geometry.boundsRadius+1,geometry.boundsCenter[2]};
+        const float extent=asset.capture.centerAndRadius[3];
+        view.viewProjection=multiply(makeOrthoMatrix(-extent,extent,-extent,extent,0.01f,geometry.boundsRadius*4+2),
+            makeViewMatrix(view.viewBasisRight,view.viewBasisUp,view.viewBasisForward,view.cameraPosition));
+        std::vector<std::byte> color,normal;
+        success=renderLayer(geometry,vertexBuffer,indexBuffer,materials,view,&color,&normal,error);
+        if(success) {
+            float coverage=0;
+            outColorLayers->push_back(downsampleSupersampledColorLayer(color,&coverage));
+            outNormalLayers->push_back(downsampleSupersampledNormalLayer(normal,coverage));
+            outLayerCoverageTargets->push_back(coverage);
         }
     }
 
@@ -2154,10 +2166,25 @@ bool GeneratePineImposters(
             break;
         }
 
+        std::vector<std::vector<std::byte>> canopyColors(colorLayers.begin()+32,colorLayers.end());
+        std::vector<std::vector<std::byte>> canopyNormals(normalLayers.begin()+32,normalLayers.end());
+        std::vector<float> canopyCoverage(layerCoverageTargets.begin()+32,layerCoverageTargets.end());
+        colorLayers.resize(32); normalLayers.resize(32); layerCoverageTargets.resize(32);
+        for (unsigned channel=0;channel<2;++channel) {
+            const auto format=RuntimeAssets::TextureFormat::BC3_RGBA_UNORM;
+            std::vector<std::byte> payload;
+            if(!buildCompressedTexturePayload(format,channel!=0,channel==0?canopyColors:canopyNormals,canopyCoverage,&payload,error)) {
+                renderer.shutdown(); return false;
+            }
+            const auto index=static_cast<std::uint32_t>(pack->textures.size());
+            if(channel==0) asset.capture.canopyColorTextureIndex=index; else asset.capture.canopyNormalTextureIndex=index;
+            pack->textures.push_back(buildGeneratedTexture(asset.name,channel==0?"canopy_color":"canopy_normal",format,std::move(payload),64,3));
+        }
         std::cout << "[imposters]     Compressing color/alpha mip chain for " << asset.name << '\n';
         std::vector<std::byte> colorPayload;
         success = buildCompressedTexturePayload(
             RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
+            false,
             colorLayers,
             layerCoverageTargets,
             &colorPayload,
@@ -2170,7 +2197,8 @@ bool GeneratePineImposters(
         std::cout << "[imposters]     Compressing normal mip chain for " << asset.name << '\n';
         std::vector<std::byte> normalPayload;
         success = buildCompressedTexturePayload(
-            RuntimeAssets::TextureFormat::BC5_RG_UNORM,
+            RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
+            true,
             normalLayers,
             layerCoverageTargets,
             &normalPayload,
@@ -2192,7 +2220,7 @@ bool GeneratePineImposters(
         pack->textures.push_back(buildGeneratedTexture(
             asset.name,
             "imposter_normal",
-            RuntimeAssets::TextureFormat::BC5_RG_UNORM,
+            RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
             std::move(normalPayload)));
         pack->textureIndexByBasename[pack->textures.back().normalizedBasename] = normalTextureIndex;
 

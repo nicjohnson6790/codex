@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EngineRendererBase.hpp"
+#include "FoliageLighting.hpp"
 #include "FoliageTypes.hpp"
 #include "assets/RuntimeAssetReader.hpp"
 
@@ -43,7 +44,11 @@ public:
     {
         glm::vec4 centerAndHalfWidth{ 0.0f };
         glm::vec4 verticalExtentsAndLayerBase{ 0.0f };
+        glm::vec4 pitchHalfHeights{ 0.0f };
+        glm::vec4 canopyCenterAndHalfExtents{ 0.0f };
     };
+    static_assert(sizeof(TreeClassGpu)==64 && offsetof(TreeClassGpu,pitchHalfHeights)==32 &&
+                  offsetof(TreeClassGpu,canopyCenterAndHalfExtents)==48);
 
     struct FragmentUniforms
     {
@@ -68,14 +73,22 @@ public:
     void setActiveCamera(const Position& cameraPosition);
 
     void addPageDraw(const FoliagePageDrawReference& drawReference);
+    void prepareLighting(const SkyIlluminationRenderer& illumination);
     void upload(SDL_GPUCopyPass* copyPass);
     void render(
         SDL_GPURenderPass* renderPass,
         SDL_GPUCommandBuffer* commandBuffer,
         const glm::mat4& viewProjection,
         const LightingSystem& lightingSystem,
-        SDL_GPUBuffer* terrainHeightmapBuffer) const;
+        SDL_GPUBuffer* terrainHeightmapBuffer, const FoliageLighting& lighting) const;
 
+    struct CanopyResources {
+        SDL_GPUTextureSamplerBinding color, normal;
+        SDL_GPUBuffer* classes;
+        std::uint32_t classCount;
+    };
+    CanopyResources canopyResources() const { return {{m_canopyColor,m_materialSampler},
+        {m_canopyNormal,m_materialSampler},m_treeClassBuffer,m_activeTreeClassCount}; }
     [[nodiscard]] std::uint32_t drawCount() const { return m_drawCount; }
     [[nodiscard]] std::uint32_t emittedInstanceCount() const { return m_emittedInstanceCount; }
     [[nodiscard]] SDL_GPUBuffer* pagePoolBuffer() const { return m_pagePoolBuffer; }
@@ -102,6 +115,8 @@ private:
         const char* label) const;
     static SDL_GPUTextureFormat textureFormatFromRuntimeFormat(RuntimeAssets::TextureFormat format);
 
+    SDL_GPUTexture* m_canopyColor = nullptr;
+    SDL_GPUTexture* m_canopyNormal = nullptr;
     SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
     SDL_GPUGraphicsPipeline* m_depthPrepassPipeline = nullptr;
     SDL_GPUSampler* m_materialSampler = nullptr;

@@ -191,7 +191,7 @@ void WorldGridFoliageCanopyManager::emitCanopyDraw(
     std::uint32_t readyCellCount,
     std::uint8_t drawAgeFrames,
     const std::array<std::uint8_t, 4>& edgeFadeStrengths,
-    FoliageCanopyRenderer& renderer) const
+    FoliageCanopyRenderer& renderer)
 {
     FoliageCanopyDrawReference drawReference{};
     drawReference.patchOrigin = worldGridQuadtreeLeafBounds(nodeId).first;
@@ -205,16 +205,32 @@ void WorldGridFoliageCanopyManager::emitCanopyDraw(
     drawReference.cellSlotIndices.fill(UINT16_MAX);
     drawReference.cellSeeds.fill(0u);
 
-    for (std::uint32_t cellIndex = 0; cellIndex < cellCount; ++cellIndex)
-    {
-        if (residentIndices[cellIndex] == kUnavailable)
-        {
-            continue;
+    const int side=static_cast<int>(drawReference.patchSizeMeters/FoliageConfig::kPageSizeMeters);
+    for(int z=-1;z<=side;++z) for(int x=-1;x<=side;++x) {
+        const bool interior=x>=0 && z>=0 && x<side && z<side;
+        WorldGridQuadtreeLeafId id{};
+        CacheIndex slot=kUnavailable;
+        if(interior) {
+            const unsigned index=unsigned(z*side+x);
+            id=cellIds[index];
+            slot=isResident(id,residentIndices[index]);
+        } else {
+            const Position p=drawReference.patchOrigin.translated({double(x)*256+128,0,double(z)*256+128});
+            id={p.gridX(),p.gridY(),0};
+            double lx=p.localPosition().x,lz=p.localPosition().z;
+            for(double size=double(Position::kCellSize)/2;size>=256;size*=0.5) {
+                const bool east=lx>=size,north=lz>=size;
+                id.subdivisionPath=WorldGridQuadtreeLeafId::appendChild(id.subdivisionPath,east?(north?0u:2u):(north?1u:3u));
+                if(east) lx-=size;
+                if(north) lz-=size;
+            }
+            slot=isResident(id);
         }
-
-        const FoliageCanopyResidentCellEntry& entry = m_residentEntries[residentIndices[cellIndex]];
-        drawReference.cellSlotIndices[cellIndex] = entry.slotIndex;
-        drawReference.cellSeeds[cellIndex] = static_cast<std::uint32_t>(hashLeafId(entry.leafId));
+        if(slot==kUnavailable) continue;
+        m_cache.touch(slot); // Protect all borrowed ready payloads for this frame.
+        const unsigned index=unsigned((z+1)*10+x+1);
+        drawReference.cellSlotIndices[index]=slot;
+        drawReference.cellSeeds[index]=static_cast<std::uint32_t>(hashLeafId(id));
     }
 
     renderer.addCanopyDraw(drawReference);

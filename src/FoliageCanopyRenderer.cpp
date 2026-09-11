@@ -200,14 +200,14 @@ void FoliageCanopyRenderer::addCanopyDraw(const FoliageCanopyDrawReference& draw
         static_cast<std::uint32_t>(drawReference.drawAgeFrames),
         0u);
 
-    for (std::uint32_t packedIndex = 0; packedIndex < FoliageConfig::kCanopyCellCountPerNode / 4u; ++packedIndex)
+    for (std::uint32_t packedIndex = 0; packedIndex < kCanopyDrawCellCount / 4u; ++packedIndex)
     {
         glm::uvec4 slots(UINT32_MAX);
         glm::uvec4 seeds(0u);
         for (std::uint32_t lane = 0; lane < 4u; ++lane)
         {
             const std::uint32_t cellIndex = (packedIndex * 4u) + lane;
-            (&slots.x)[lane] = drawReference.cellSlotIndices[cellIndex];
+            (&slots.x)[lane] = drawReference.cellSlotIndices[cellIndex]==UINT16_MAX ? UINT32_MAX : drawReference.cellSlotIndices[cellIndex];
             (&seeds.x)[lane] = drawReference.cellSeeds[cellIndex];
         }
         draw.cellSlots[packedIndex] = slots;
@@ -327,7 +327,8 @@ void FoliageCanopyRenderer::render(
     SDL_GPUCommandBuffer* commandBuffer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
-    SDL_GPUBuffer* terrainHeightmapBuffer) const
+    SDL_GPUBuffer* terrainHeightmapBuffer,
+    const FoliageImposterRenderer::CanopyResources& captures, const FoliageLighting& lighting) const
 {
     HELLO_PROFILE_SCOPE("FoliageCanopyRenderer::Render");
 
@@ -339,7 +340,7 @@ void FoliageCanopyRenderer::render(
     Uniforms uniforms{};
     uniforms.viewProjection = viewProjection;
     uniforms.sunDirectionIntensity = glm::vec4(lightingSystem.sunDirection(), lightingSystem.sun().intensity);
-    uniforms.canopyShellParams = glm::vec4(AppConfig::Foliage::kCanopyShellHeightOffsetMeters, 0.0f, 0.0f, 0.0f);
+    uniforms.canopyShellParams = glm::vec4(AppConfig::Foliage::kCanopyShellHeightOffsetMeters, float(captures.classCount), 0.0f, 0.0f);
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
 
@@ -358,11 +359,15 @@ void FoliageCanopyRenderer::render(
     };
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, vertexStorageBuffers, 3);
 
+    SDL_GPUTextureSamplerBinding captureSamplers[]{captures.color,captures.normal};
+    SDL_BindGPUFragmentSamplers(renderPass,0,captureSamplers,2);
     SDL_GPUBuffer* fragmentStorageBuffers[]{
         m_drawMetadataBuffer,
         m_cellBitsetPoolBuffer,
+        captures.classes,
     };
-    SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 2);
+    SDL_BindGPUFragmentStorageBuffers(renderPass, 0, fragmentStorageBuffers, 3);
+    lighting.bind(renderPass,commandBuffer,2,3);
 
     SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
 }
@@ -419,8 +424,9 @@ void FoliageCanopyRenderer::createPipeline(const std::filesystem::path& shaderDi
     SDL_GPUShader* fragmentShader = createShader(
         shaderDirectory / "foliage_canopy.frag.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT,
-        1,
-        2);
+        2,
+        5,
+        4);
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -698,5 +704,13 @@ void FoliageCanopyRenderer::createMeshResources()
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
         throwSdlError("Failed to submit foliage canopy mesh upload.");
+    }
+}
+
+void FoliageCanopyRenderer::prepareLighting(const SkyIlluminationRenderer& illumination)
+{
+    for(unsigned i=0;i<m_drawCount;++i) {
+        auto& d=m_drawMetadata[i];
+        d.terrainSliceData.y=float(illumination.regionForPosition({d.patchOriginAndSize.x,d.patchOriginAndSize.z}));
     }
 }

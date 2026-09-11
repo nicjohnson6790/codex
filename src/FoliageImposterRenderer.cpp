@@ -21,16 +21,6 @@ constexpr std::uint32_t kPageByteSize = FoliageConfig::kCandidateSlotCount * kPa
 constexpr std::uint32_t kImposterYawViewCount = 8u;
 constexpr std::uint32_t kImposterPitchViewCount = 4u;
 constexpr std::uint32_t kImposterLayersPerClass = kImposterYawViewCount * kImposterPitchViewCount;
-constexpr float kImposterVerticalPaddingScale = 0.08f;
-constexpr float kImposterVerticalPaddingMinMeters = 0.15f;
-constexpr float kImposterGroundingBiasScale = 0.03f;
-constexpr float kImposterGroundingBiasMinMeters = 0.125f;
-constexpr std::array<float, kImposterPitchViewCount> kImposterPitchDegrees{
-    -5.0f,
-    10.0f,
-    25.0f,
-    40.0f,
-};
 constexpr float kTau = 6.28318530718f;
 
 bool containsInsensitive(std::string_view haystack, std::string_view needle)
@@ -58,26 +48,6 @@ std::filesystem::path executableRelativePath(const std::filesystem::path& relati
     }
 
     return std::filesystem::path(basePath) / relativePath;
-}
-
-float horizontalRadiusForBounds(const RuntimeAssets::MeshRecord& mesh)
-{
-    const float centerX = mesh.boundsSphereCenter[0];
-    const float centerZ = mesh.boundsSphereCenter[2];
-    const std::array<float, 2> xs{ mesh.boundsMin[0], mesh.boundsMax[0] };
-    const std::array<float, 2> zs{ mesh.boundsMin[2], mesh.boundsMax[2] };
-
-    float radius = 0.0f;
-    for (const float x : xs)
-    {
-        for (const float z : zs)
-        {
-            const float dx = x - centerX;
-            const float dz = z - centerZ;
-            radius = std::max(radius, std::sqrt((dx * dx) + (dz * dz)));
-        }
-    }
-    return radius;
 }
 
 std::uint32_t textureTransferStrideExtent(RuntimeAssets::TextureFormat format, std::uint32_t mipExtent)
@@ -117,6 +87,9 @@ void FoliageImposterRenderer::initialize(
 
 void FoliageImposterRenderer::shutdown()
 {
+    if(m_canopyColor) SDL_ReleaseGPUTexture(m_device,m_canopyColor);
+    if(m_canopyNormal) SDL_ReleaseGPUTexture(m_device,m_canopyNormal);
+    m_canopyColor=nullptr; m_canopyNormal=nullptr;
     if (m_pipeline != nullptr)
     {
         SDL_ReleaseGPUGraphicsPipeline(m_device, m_pipeline);
@@ -342,7 +315,7 @@ void FoliageImposterRenderer::render(
     SDL_GPUCommandBuffer* commandBuffer,
     const glm::mat4& viewProjection,
     const LightingSystem& lightingSystem,
-    SDL_GPUBuffer* terrainHeightmapBuffer) const
+    SDL_GPUBuffer* terrainHeightmapBuffer, const FoliageLighting& lighting) const
 {
     HELLO_PROFILE_SCOPE("FoliageImposterRenderer::Render");
 
@@ -402,6 +375,7 @@ void FoliageImposterRenderer::render(
     SDL_BindGPUFragmentSamplers(renderPass, 0, samplerBindings, 2);
 
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &fragmentUniforms, sizeof(fragmentUniforms));
+    lighting.bind(renderPass,commandBuffer,2,0);
     SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, m_drawCount);
 }
 
@@ -494,85 +468,39 @@ void FoliageImposterRenderer::loadRuntimeAssets()
     m_imposterColorTextureIndices.assign(m_activeTreeClassCount, 0u);
     m_imposterNormalTextureIndices.assign(m_activeTreeClassCount, 0u);
 
+    std::vector<std::uint32_t> canopyColors, canopyNormals;
     for (std::uint32_t treeClass = 0; treeClass < m_activeTreeClassCount; ++treeClass)
     {
         const RuntimeAssets::AssetRecord& assetRecord = assetBin.assets[selectedAssetIndices[treeClass]];
         m_imposterColorTextureIndices[treeClass] = assetRecord.imposterColorTextureIndex;
         m_imposterNormalTextureIndices[treeClass] = assetRecord.imposterNormalTextureIndex;
 
-        float minY = std::numeric_limits<float>::max();
-        float maxY = std::numeric_limits<float>::lowest();
-        float minX = std::numeric_limits<float>::max();
-        float maxX = std::numeric_limits<float>::lowest();
-        float minZ = std::numeric_limits<float>::max();
-        float maxZ = std::numeric_limits<float>::lowest();
-        float horizontalRadius = 0.0f;
-
-        for (std::uint32_t meshRefOffset = 0; meshRefOffset < assetRecord.meshRefCount; ++meshRefOffset)
-        {
-            const RuntimeAssets::MeshRefRecord& meshRef = assetBin.meshRefs[assetRecord.firstMeshRef + meshRefOffset];
-            if (meshRef.meshIndex >= meshBin.meshes.size())
-            {
-                continue;
-            }
-
-            const RuntimeAssets::MeshRecord& mesh = meshBin.meshes[meshRef.meshIndex];
-            bool billboardMesh = false;
-            for (std::uint32_t submeshOffset = 0; submeshOffset < mesh.submeshCount; ++submeshOffset)
-            {
-                const RuntimeAssets::SubmeshRecord& submesh = meshBin.submeshes[mesh.firstSubmesh + submeshOffset];
-                if (submesh.materialIndex >= assetBin.materials.size())
-                {
-                    continue;
-                }
-                const RuntimeAssets::MaterialRecord& material = assetBin.materials[submesh.materialIndex];
-                if (containsInsensitive(assetBin.stringAt(material.nameOffset), "billboard"))
-                {
-                    billboardMesh = true;
-                    break;
-                }
-            }
-            if (billboardMesh)
-            {
-                continue;
-            }
-
-            minY = std::min(minY, mesh.boundsMin[1]);
-            maxY = std::max(maxY, mesh.boundsMax[1]);
-            minX = std::min(minX, mesh.boundsMin[0]);
-            maxX = std::max(maxX, mesh.boundsMax[0]);
-            minZ = std::min(minZ, mesh.boundsMin[2]);
-            maxZ = std::max(maxZ, mesh.boundsMax[2]);
-            horizontalRadius = std::max(horizontalRadius, horizontalRadiusForBounds(mesh));
-        }
-
-        if (minY > maxY || minX > maxX || minZ > maxZ)
-        {
-            throw std::runtime_error(
-                std::string("Foliage imposter asset is missing drawable non-billboard geometry: ") +
-                assetBin.stringAt(assetRecord.nameOffset));
-        }
-
-        const float centerX = (minX + maxX) * 0.5f;
-        const float centerY = (minY + maxY) * 0.5f;
-        const float centerZ = (minZ + maxZ) * 0.5f;
-        const float assetHeight = maxY - minY;
-        const float verticalPadding = std::max(
-            assetHeight * kImposterVerticalPaddingScale,
-            kImposterVerticalPaddingMinMeters);
-        const float groundingBias = std::max(
-            assetHeight * kImposterGroundingBiasScale,
-            kImposterGroundingBiasMinMeters);
+        if(assetRecord.captureMetadataOffset==0) throw std::runtime_error("Old foliage pack: regenerate pinetreepack.");
+        const auto& capture = assetBin.foliageCapture(assetRecord);
+        const auto validateCaptureTexture=[&](std::uint32_t index,unsigned extent,unsigned layers,unsigned mips) {
+            if(index>=texBin.textures.size()) throw std::runtime_error("Missing foliage capture texture.");
+            const auto& texture=texBin.textures[index];
+            if(texture.width!=extent || texture.height!=extent || texture.layerCount!=layers || texture.mipCount!=mips)
+                throw std::runtime_error("Incompatible foliage capture layout; regenerate pinetreepack.");
+        };
+        validateCaptureTexture(assetRecord.imposterColorTextureIndex,512,32,10);
+        validateCaptureTexture(assetRecord.imposterNormalTextureIndex,512,32,10);
+        validateCaptureTexture(capture.canopyColorTextureIndex,64,3,7);
+        validateCaptureTexture(capture.canopyNormalTextureIndex,64,3,7);
+        canopyColors.push_back(capture.canopyColorTextureIndex);
+        canopyNormals.push_back(capture.canopyNormalTextureIndex);
         m_treeClassesGpu[treeClass] = {
-            .centerAndHalfWidth = glm::vec4(centerX, centerY, centerZ, std::max(horizontalRadius * 1.08f, 0.5f)),
-            .verticalExtentsAndLayerBase = glm::vec4(
-                (minY - centerY) - verticalPadding - groundingBias,
-                (maxY - centerY) + verticalPadding,
-                static_cast<float>(treeClass * kImposterLayersPerClass),
-                0.0f),
+            .centerAndHalfWidth = glm::vec4(capture.centerAndRadius[0],capture.centerAndRadius[1],
+                                          capture.centerAndRadius[2],capture.centerAndRadius[3]),
+            .verticalExtentsAndLayerBase = glm::vec4(0,0,float(treeClass*kImposterLayersPerClass),0),
+            .pitchHalfHeights = glm::vec4(capture.pitchHalfHeights[0],capture.pitchHalfHeights[1],
+                                        capture.pitchHalfHeights[2],capture.pitchHalfHeights[3]),
+            .canopyCenterAndHalfExtents = glm::vec4(capture.canopyCenterAndHalfExtents[0],capture.canopyCenterAndHalfExtents[1],capture.canopyCenterAndHalfExtents[2],capture.canopyCenterAndHalfExtents[3]),
         };
     }
 
+    m_canopyColor=createImposterTextureArray(texBin,canopyColors,RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,"canopy color");
+    m_canopyNormal=createImposterTextureArray(texBin,canopyNormals,RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,"canopy normal");
     // The offline capture samples sRGB base color into an ordinary UNORM target:
     // these generated BC3 pixels already contain linear albedo. Do not decode again.
     m_imposterColorTextureArray = createImposterTextureArray(
@@ -583,7 +511,7 @@ void FoliageImposterRenderer::loadRuntimeAssets()
     m_imposterNormalTextureArray = createImposterTextureArray(
         texBin,
         m_imposterNormalTextureIndices,
-        RuntimeAssets::TextureFormat::BC5_RG_UNORM,
+        RuntimeAssets::TextureFormat::BC3_RGBA_UNORM,
         "normal");
 }
 
@@ -740,9 +668,9 @@ void FoliageImposterRenderer::createPipeline(const std::filesystem::path& shader
     SDL_GPUShader* fragmentShader = createShader(
         shaderDirectory / "foliage_imposter.frag.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT,
-        1,
-        0,
-        2);
+        2,
+        2,
+        4);
 
     SDL_GPUVertexBufferDescription vertexBufferDescriptions[1]{};
     vertexBufferDescriptions[0].slot = 0;
@@ -1080,5 +1008,13 @@ void FoliageImposterRenderer::createQuadBuffers()
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer))
     {
         throwSdlError("Failed to submit foliage imposter quad upload.");
+    }
+}
+
+void FoliageImposterRenderer::prepareLighting(const SkyIlluminationRenderer& illumination)
+{
+    for(unsigned i=0;i<m_drawCount;++i) {
+        auto& d=m_drawMetadata[i];
+        d.seedData.w=illumination.regionForPosition({d.pageOriginAndTerrainSize.x,d.pageOriginAndTerrainSize.z});
     }
 }

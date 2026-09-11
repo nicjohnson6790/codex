@@ -121,7 +121,7 @@ bool WriteAssetBin(
         record.meshRefCount = static_cast<std::uint32_t>(asset.meshIndices.size());
         record.firstMaterial = asset.materialIndices.empty() ? 0u : asset.materialIndices.front();
         record.materialCount = static_cast<std::uint32_t>(asset.materialIndices.size());
-        record.flags = 0;
+        record.captureMetadataOffset = 0;
         record.imposterColorTextureIndex = asset.imposterColorTextureIndex;
         record.imposterNormalTextureIndex = asset.imposterNormalTextureIndex;
 
@@ -167,7 +167,18 @@ bool WriteAssetBin(
     writer.appendValue(header);
     writer.align(8);
     header.assetRecordOffset = writer.bytes.size();
+    std::uint32_t captureOffset=static_cast<std::uint32_t>(header.assetRecordOffset+assetRecords.size()*sizeof(RuntimeAssets::AssetRecord));
+    for (std::size_t i = 0; i < assetRecords.size(); ++i)
+    {
+        if (pack.assets[i].imposterColorTextureIndex != std::numeric_limits<std::uint32_t>::max())
+        {
+            assetRecords[i].captureMetadataOffset=captureOffset;
+            captureOffset+=sizeof(RuntimeAssets::FoliageCaptureRecord);
+        }
+    }
     writer.appendSpan(std::span<const RuntimeAssets::AssetRecord>(assetRecords));
+    for (const auto& asset : pack.assets)
+        if(asset.imposterColorTextureIndex!=std::numeric_limits<std::uint32_t>::max()) writer.appendValue(asset.capture);
     writer.align(8);
     header.materialRecordOffset = writer.bytes.size();
     writer.appendSpan(std::span<const RuntimeAssets::MaterialRecord>(materialRecords));

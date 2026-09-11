@@ -28,10 +28,11 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
+    if (fragWorldPosition.y > capture.shadingParams0.w) discard;
     vec4 albedoSample = texture(baseColorTexture, fragUv0);
     if (albedoSample.a < capture.cameraPositionAlphaCutoff.w)
     {
         discard;
     }
-    outColor = albedoSample;
+    outColor = vec4(albedoSample.rgb, 1.0);
 }

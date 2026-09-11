@@ -52,6 +52,11 @@ struct LoadedAssetBinView
     std::span<const FontGlyphRecord> fontGlyphs;
     std::span<const std::byte> stringTable;
 
+    [[nodiscard]] const FoliageCaptureRecord& foliageCapture(const AssetRecord& asset) const
+    {
+        return *reinterpret_cast<const FoliageCaptureRecord*>(bytes.data() + asset.captureMetadataOffset);
+    }
+
     [[nodiscard]] const char* stringAt(std::uint32_t offset) const;
 };
 

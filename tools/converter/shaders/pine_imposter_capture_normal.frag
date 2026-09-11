@@ -28,6 +28,7 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
+    if (fragWorldPosition.y > capture.shadingParams0.w) discard;
     vec4 albedoSample = texture(baseColorTexture, fragUv0);
     if (albedoSample.a < capture.cameraPositionAlphaCutoff.w)
     {
@@ -50,10 +51,8 @@ void main()
         normal = -normal;
     }
 
-    vec3 viewNormal = normalize(vec3(
-        dot(normal, capture.viewBasisRight.xyz),
-        dot(normal, capture.viewBasisUp.xyz),
-        dot(normal, capture.viewBasisForward.xyz)));
-
-    outColor = vec4((viewNormal * 0.5) + 0.5, albedoSample.a);
+    // Geometry is captured in imported tree-local coordinates. Keep all three
+    // signed components; view-space hemisphere reconstruction loses back-facing
+    // normal-map directions and makes the loss depend on capture elevation.
+    outColor = vec4((normal * 0.5) + 0.5, albedoSample.a);
 }

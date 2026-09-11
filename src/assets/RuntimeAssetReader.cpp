@@ -774,6 +774,21 @@ bool ValidateAssetBin(const void* data, std::size_t size, std::string* error)
             return false;
         }
 
+        if (asset.imposterColorTextureIndex != UINT32_MAX)
+        {
+            if (asset.captureMetadataOffset < header.assetRecordOffset + header.assetCount*sizeof(AssetRecord) ||
+                std::uint64_t(asset.captureMetadataOffset)+sizeof(FoliageCaptureRecord)>header.materialRecordOffset || !CheckRegion<FoliageCaptureRecord>(asset.captureMetadataOffset, 1, size, "foliage capture", error))
+            {
+                if (error) *error = "Foliage capture metadata is missing or invalid; regenerate pinetreepack.";
+                return false;
+            }
+            const auto capture = ReadStruct<FoliageCaptureRecord>(reinterpret_cast<const std::byte*>(data) + asset.captureMetadataOffset);
+            if (!ValidFoliageCapture(capture, header.textureBlobCount))
+            {
+                if (error) *error = "Unsupported foliage capture metadata; regenerate pinetreepack.";
+                return false;
+            }
+        }
         const std::uint32_t imposterTextureIndices[] = {
             asset.imposterColorTextureIndex,
             asset.imposterNormalTextureIndex,
