@@ -1,6 +1,5 @@
 #include "TerrainCornerNeighbor.hpp"
-#include "TerrainBridgeMetadata.hpp"
-#include "ParentMeshDescriptors.hpp"
+#include "TerrainBoundaryMetadata.hpp"
 
 #include <array>
 #include <cstdlib>
@@ -18,29 +17,6 @@ int main()
 {
     int failures = 0;
     const auto check = [&](bool success) { if (!success) ++failures; };
-    // Mixed types must preserve parent/edge identity across the coarse draw's
-    // first-instance offset, including sparse edges and maximum occupancy.
-    ParentMeshDescriptors<std::array<int, 4>, 3> descriptors{};
-    descriptors.parents = {{{0, 1, -1, 0}, {1, -1, 0, 1}, {-1, 0, 1, -1}}};
-    const auto classify = [](const auto& parent, std::uint32_t edge) { return parent[edge]; };
-    auto counts = descriptors.buildBridges(3, classify);
-    check(counts.normal == 4 && counts.coarse == 4);
-    const std::array<std::uint32_t, 8> expected{0, 3, 6, 9, 1, 4, 7, 10};
-    for (std::size_t i = 0; i < expected.size(); ++i)
-        check(descriptors.bridges[i] == expected[i]);
-    for (int type : {0, 1})
-    {
-        for (auto& parent : descriptors.parents) parent.fill(type);
-        counts = descriptors.buildBridges(3, classify);
-        check(counts.normal == (type == 0 ? 12u : 0u));
-        check(counts.coarse == (type == 1 ? 12u : 0u));
-        for (std::uint32_t i = 0; i < 12; ++i) check(descriptors.bridges[i] == i);
-    }
-    counts = descriptors.buildBridges(0, classify);
-    check(counts.normal == 0 && counts.coarse == 0);
-    for (auto& parent : descriptors.parents) parent.fill(-1);
-    counts = descriptors.buildBridges(3, classify);
-    check(counts.normal == 0 && counts.coarse == 0);
     // Exact neighbor sample positions, independent of world position or pitch.
     constexpr std::array<std::array<int, 2>, 8> samples{{
         {1, 1}, {129, 1}, {257, 1}, {1, 129},
@@ -53,7 +29,6 @@ int main()
     }
     constexpr std::uint8_t ownCorners[]{0, 2, 7, 5};
     constexpr std::uint8_t diagonalCorners[]{7, 5, 0, 2};
-    constexpr std::uint8_t edgeCorners[4][2]{{0, 3}, {1, 0}, {2, 1}, {3, 2}};
     constexpr std::uint8_t expectedEdgeSelectors[4][2][2]{
         {{2, 4}, {4, 7}}, {{6, 5}, {7, 6}},
         {{3, 0}, {5, 3}}, {{0, 1}, {1, 2}},
@@ -66,18 +41,17 @@ int main()
     for (std::uint8_t edge = 0; edge < 4; ++edge)
         for (std::uint8_t half = 0; half < 2; ++half)
             for (std::uint8_t endpoint = 0; endpoint < 2; ++endpoint)
-                check(terrainEdgeCornerSelector(edge, half, edgeCorners[edge][endpoint]) ==
+                check(terrainEdgeCornerSelector(edge, half, kBoundaryEdgeCorners[edge][endpoint]) ==
                     expectedEdgeSelectors[edge][half][endpoint]);
-    for (std::uint8_t edge = 0; edge < 4; ++edge)
-        for (std::uint8_t half = 0; half < 2; ++half)
-            for (std::uint8_t first = 0; first < 8; ++first)
-                for (std::uint8_t second = 0; second < 8; ++second)
-                {
-                    const auto metadata = terrainBridgeMetadata(11, edge, half, first, second);
-                    check((metadata & 7u) == first && ((metadata >> 3u) & 7u) == second);
-                    check(((metadata >> 16u) & 255u) == 11);
-                    check(((metadata >> 24u) & 3u) == edge && ((metadata >> 26u) & 1u) == half);
-                }
+    for (std::uint8_t half = 0; half < 2; ++half)
+        for (std::uint8_t first = 0; first < 8; ++first)
+            for (std::uint8_t second = 0; second < 8; ++second)
+            {
+                const auto metadata = terrainBoundaryMetadata(half, first, second);
+                check((metadata & 7u) == first && ((metadata >> 3u) & 7u) == second);
+                check(((metadata >> 26u) & 1u) == half);
+                check((metadata & ~0x0400003Fu) == 0);
+            }
     // Rotate the reported layout through every corner, including negative roots.
     for (const auto grid : {0LL, -3LL})
         for (std::uint8_t coarseQuadrant = 0; coarseQuadrant < 4; ++coarseQuadrant)

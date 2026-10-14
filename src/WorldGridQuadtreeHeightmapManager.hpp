@@ -100,7 +100,7 @@ class WorldGridQuadtreeHeightmapManager
                                             CacheIndex hint = kUnavailable);
     // Submit one complete parent, including topology resolved by the quadtree.
     [[nodiscard]] CacheIndex requestLeaf(const WorldGridQuadtreeLeafId &leafId, CacheIndex hint,
-        const std::array<glm::uvec4, 4>& bridges, QuadtreeMeshRenderer &meshRenderer);
+        const std::array<glm::uvec4, 4>& edges, QuadtreeMeshRenderer &meshRenderer);
     void scheduleQueuedGenerations(QuadtreeMeshRenderer &meshRenderer);
     void markSubmitted(GenerationJobHandle job, const std::shared_ptr<SubmittedGpuFence> &fence);
     void markSourceUploadsSubmitted(std::span<const std::uint16_t> slots, const std::shared_ptr<SubmittedGpuFence> &fence);

@@ -93,11 +93,26 @@ struct WaterSettings
     std::array<WaterCascadeSettings, AppConfig::Water::kMaxCascadeCount> cascades{};
 };
 
+// CPU transport only. GPU records contain explicit surface inputs, not node IDs.
+struct WaterBoundaryOwner
+{
+    Position origin{};
+    double sizeMeters = 0.0;
+    std::uint32_t bandMask = 0;
+    std::uint16_t terrainSliceIndex = 0;
+    bool hasTerrainSlice = false;
+};
+
+struct WaterBoundaryEdge
+{
+    WaterBoundaryOwner outer{}, firstCorner{}, secondCorner{};
+    std::uint32_t metadata = 0;
+};
+
 struct WaterLeafDrawRequest
 {
     // One request is one parent, including all four edge decisions.
-    std::uint32_t bridgeMask = 0;
-    std::uint32_t coarseBridgeMask = 0;
+    std::array<WaterBoundaryEdge, 4> edges{};
     WorldGridQuadtreeLeafId leafId{};
     Position origin{};
     double sizeMeters = 0.0;

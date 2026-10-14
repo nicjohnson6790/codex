@@ -26,32 +26,77 @@ layout(location = 6) out vec2 fragWaveDisplacementXZ;
 #define WATER_UNIFORM_BINDING 0
 #include "water_surface.glsl"
 
+vec2 cornerCoord(uint selector)
+{
+    uint position = selector < 4u ? selector : selector + 1u;
+    return vec2(position % 3u, position / 3u) * 0.5;
+}
+
+// Keep displaced depth/shore evaluation identical for interior and endpoints.
+void endpoint(WaterInstance instance, vec2 coord, out vec3 position, out vec3 displacement,
+    out float viewDistance, out float localDepth, out float shoreFactor)
+{
+    vec2 meters = coord * instance.leafParams.x;
+    evaluateWaterSurface(instance, meters, position, displacement, viewDistance, localDepth, shoreFactor);
+    if (instance.leafParams.w > 0.5)
+    {
+        float terrainHeight = sampleTerrainHeight(uint(max(instance.leafParams.z, 0.0)), meters, instance.leafParams.x);
+        localDepth = max(water.cameraAndTime.z + position.y - terrainHeight, 0.0);
+        shoreFactor = 1.0 - smoothstep(0.0, max(water.depthEffectParams.z, 0.001), localDepth);
+    }
+}
+
+void boundaryEndpoint(WaterBoundaryEdge edge, uint edgeIndex, float along,
+    out vec3 position, out vec3 displacement, out float viewDistance,
+    out float localDepth, out float shoreFactor)
+{
+    bool coarse = (edge.mapping.x & 0x80000000u) != 0u;
+    WaterInstance owner = edge.outer;
+    float ownerAlong = coarse ? (along + float((edge.mapping.x >> 26u) & 1u)) * 0.5 : along;
+    float side = coarse ? (edgeIndex < 2u ? 1.0 : 0.0) : (edgeIndex < 2u ? 0.0 : 1.0);
+    vec2 coord = edgeIndex == 0u || edgeIndex == 2u ? vec2(side, ownerAlong) : vec2(ownerAlong, side);
+    if (along == 0.0 || along == 1.0)
+    {
+        bool first = (edgeIndex == 0u || edgeIndex == 3u) ? along == 0.0 : along == 1.0;
+        owner = first ? edge.firstCorner : edge.secondCorner;
+        coord = cornerCoord(first ? edge.mapping.x & 7u : (edge.mapping.x >> 3u) & 7u);
+    }
+    endpoint(owner, coord, position, displacement, viewDistance, localDepth, shoreFactor);
+}
+
 void main()
 {
     WaterInstance instance = descriptors.parents[gl_InstanceIndex].body;
-    float leafSize = instance.leafParams.x;
-    float waterLevel = instance.leafParams.y;
-    uint terrainSliceIndex = uint(max(instance.leafParams.z, 0.0));
     bool hasTerrainSlice = instance.leafParams.w > 0.5;
     uint bandMask = (instance.packedMetadata >> 16u) & 0xFFFFu;
-    uint cascadeCount = uint(max(water.waterParams.w, 0.0));
-
-    vec2 localMeters = inLocalCoord * leafSize;
     vec3 position, displacement;
     float viewDistance, localDepth, shoreFactor;
-    evaluateWaterSurface(instance, localMeters, position, displacement,
-        viewDistance, localDepth, shoreFactor);
-    fragWaveDisplacementXZ = displacement.xz;
-
-    if (hasTerrainSlice)
+    if (inLocalCoord.x == 0.0 || inLocalCoord.y == 0.0 || inLocalCoord.x == 1.0 || inLocalCoord.y == 1.0)
     {
-        float terrainHeight = sampleTerrainHeight(terrainSliceIndex, localMeters, leafSize);
-        float displacedWaterHeight = water.cameraAndTime.z + position.y;
-        localDepth = max(displacedWaterHeight - terrainHeight, 0.0);
-
-        float shoreDepth = max(water.depthEffectParams.z, 0.001);
-        shoreFactor = 1.0 - smoothstep(0.0, shoreDepth, localDepth);
+        uint edgeIndex = inLocalCoord.x == 0.0 ? 0u : inLocalCoord.y == 0.0 ? 1u : inLocalCoord.x == 1.0 ? 2u : 3u;
+        WaterBoundaryEdge edge = descriptors.parents[gl_InstanceIndex].edges[edgeIndex];
+        float along = edgeIndex == 0u || edgeIndex == 2u ? inLocalCoord.y : inLocalCoord.x;
+        float intervals = float(edge.mapping.y);
+        int coordinate = int(round(along * intervals));
+        bool midpoint = (edge.mapping.x & 0x80000000u) != 0u && (coordinate & 1) != 0;
+        boundaryEndpoint(edge, edgeIndex, midpoint ? float(coordinate - 1) / intervals : along,
+            position, displacement, viewDistance, localDepth, shoreFactor);
+        if (midpoint)
+        {
+            vec3 nextPosition, nextDisplacement;
+            float nextDistance, nextDepth, nextShore;
+            boundaryEndpoint(edge, edgeIndex, float(coordinate + 1) / intervals,
+                nextPosition, nextDisplacement, nextDistance, nextDepth, nextShore);
+            position = (position + nextPosition) * 0.5;
+            displacement = (displacement + nextDisplacement) * 0.5;
+            viewDistance = (viewDistance + nextDistance) * 0.5;
+            localDepth = (localDepth + nextDepth) * 0.5;
+            shoreFactor = (shoreFactor + nextShore) * 0.5;
+        }
     }
+    else
+        endpoint(instance, inLocalCoord, position, displacement, viewDistance, localDepth, shoreFactor);
+    fragWaveDisplacementXZ = displacement.xz;
 
     fragWorldPosition = position;
     fragBandMask = bandMask;

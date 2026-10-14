@@ -53,7 +53,6 @@ inline constexpr std::uint32_t kHeightmapResolution = 259;
 inline constexpr std::uint32_t kHeightmapLeafResolution = kHeightmapResolution - 2;
 inline constexpr std::uint32_t kHeightmapLeafIntervalCount = kHeightmapLeafResolution - 1;
 inline constexpr std::uint32_t kHeightmapLeafHalo = 1;
-inline constexpr std::uint32_t kRenderedPatchInset = 1;
 inline constexpr std::uint32_t kHeightmapSliceCapacity = 512;
 inline constexpr std::uint32_t kCpuHeightmapCacheCapacity = 16;
 inline constexpr std::uint32_t kHeightmapReadbackCapacity = 8;

@@ -1,6 +1,5 @@
 #include "QuadtreeMeshRenderer.hpp"
 #include <glm/trigonometric.hpp>
-#include "TerrainBridgeMetadata.hpp"
 #include <cassert>
 #include "PeriodicWorldPhase.hpp"
 
@@ -28,11 +27,10 @@
 namespace
 {
 constexpr std::uint32_t kMainGridVertexResolution =
-    AppConfig::Terrain::kHeightmapLeafResolution - (AppConfig::Terrain::kRenderedPatchInset * 2);
+    AppConfig::Terrain::kHeightmapLeafResolution;
 constexpr std::uint32_t kMainGridQuadResolution = kMainGridVertexResolution - 1;
-constexpr float kRenderedLocalCoordOffset = static_cast<float>(AppConfig::Terrain::kRenderedPatchInset);
 constexpr float kRenderedSampleCoordOffset =
-    static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + AppConfig::Terrain::kRenderedPatchInset);
+    static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo);
 constexpr std::size_t kHeightmapSliceFloatCount =
     static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) * static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
 constexpr std::size_t kHeightmapExtentsCount = AppConfig::Terrain::kHeightmapSliceCapacity;
@@ -43,9 +41,6 @@ constexpr std::uint32_t kFoliageInstanceComputeThreadCountX = 8;
 constexpr std::uint32_t kFoliageInstanceComputeThreadCountY = 8;
 constexpr std::int32_t kInitialMinHeightCentimeters = std::numeric_limits<std::int32_t>::max();
 constexpr std::int32_t kInitialMaxHeightCentimeters = std::numeric_limits<std::int32_t>::lowest();
-constexpr std::uint32_t kBridgeOuterVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount + 1;
-constexpr std::uint32_t kBridgeInnerVertexCount = AppConfig::Terrain::kHeightmapLeafIntervalCount - 1;
-constexpr std::uint32_t kCoarseBridgeOuterVertexCount = (AppConfig::Terrain::kHeightmapLeafIntervalCount / 2) + 1;
 constexpr std::uint32_t kCausticsTextureResolution = 256;
 constexpr std::uint32_t kTerrainMaterialLayerCount = 5;
 
@@ -336,24 +331,6 @@ void QuadtreeMeshRenderer::initialize(SDL_GPUDevice *device, SDL_GPUTextureForma
         throwSdlError("Failed to create quadtree mesh indirect transfer buffer.");
     }
 
-    SDL_GPUBufferCreateInfo bridgeIndirectInfo{};
-    bridgeIndirectInfo.usage = SDL_GPU_BUFFERUSAGE_INDIRECT;
-    bridgeIndirectInfo.size = sizeof(SDL_GPUIndexedIndirectDrawCommand) * static_cast<Uint32>(m_bridgeIndirectCommands.size());
-    m_bridgeIndirectBuffer = SDL_CreateGPUBuffer(m_device, &bridgeIndirectInfo);
-    if (m_bridgeIndirectBuffer == nullptr)
-    {
-        throwSdlError("Failed to create quadtree bridge indirect buffer.");
-    }
-
-    SDL_GPUTransferBufferCreateInfo bridgeIndirectTransferInfo{};
-    bridgeIndirectTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    bridgeIndirectTransferInfo.size = bridgeIndirectInfo.size;
-    m_bridgeIndirectTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &bridgeIndirectTransferInfo);
-    if (m_bridgeIndirectTransferBuffer == nullptr)
-    {
-        throwSdlError("Failed to create quadtree bridge indirect transfer buffer.");
-    }
-
     SDL_GPUBufferCreateInfo heightmapInfo{};
     heightmapInfo.usage =
         SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
@@ -628,11 +605,6 @@ void QuadtreeMeshRenderer::shutdown()
         SDL_ReleaseGPUComputePipeline(m_device, m_heightmapComputePipeline);
         m_heightmapComputePipeline = nullptr;
     }
-    if (m_bridgePipeline != nullptr)
-    {
-        SDL_ReleaseGPUGraphicsPipeline(m_device, m_bridgePipeline);
-        m_bridgePipeline = nullptr;
-    }
     if (m_mainPipeline != nullptr)
     {
         SDL_ReleaseGPUGraphicsPipeline(m_device, m_mainPipeline);
@@ -652,16 +624,6 @@ void QuadtreeMeshRenderer::shutdown()
     {
         SDL_ReleaseGPUBuffer(m_device, m_indirectBuffer);
         m_indirectBuffer = nullptr;
-    }
-    if (m_bridgeIndirectTransferBuffer != nullptr)
-    {
-        SDL_ReleaseGPUTransferBuffer(m_device, m_bridgeIndirectTransferBuffer);
-        m_bridgeIndirectTransferBuffer = nullptr;
-    }
-    if (m_bridgeIndirectBuffer != nullptr)
-    {
-        SDL_ReleaseGPUBuffer(m_device, m_bridgeIndirectBuffer);
-        m_bridgeIndirectBuffer = nullptr;
     }
     auto releaseMeshResources = [this](MeshResources &meshResources) {
         if (meshResources.indexTransferBuffer != nullptr)
@@ -686,22 +648,17 @@ void QuadtreeMeshRenderer::shutdown()
         }
         meshResources.indexCount = 0;
     };
-    releaseMeshResources(m_bridgeMesh);
     releaseMeshResources(m_mainMesh);
-    m_bridgeMeshRange = {};
-    m_coarseBridgeMeshRange = {};
 
     clear();
     m_pendingHeightmapGenerationCount = 0;
     m_lastDispatchedGenerationCount = 0;
-    m_bridgeIndirectCommandCount = 0;
     m_pendingFenceReadbackSlot = UINT16_MAX;
 }
 
 void QuadtreeMeshRenderer::clear()
 {
     m_instanceCount = 0;
-    m_bridgeIndirectCommandCount = 0;
 }
 
 void QuadtreeMeshRenderer::setActiveCamera(const Position &cameraPosition)
@@ -760,7 +717,7 @@ bool QuadtreeMeshRenderer::queueHeightmapGeneration(const WorldGridQuadtreeLeafI
 }
 
 bool QuadtreeMeshRenderer::addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex,
-    const std::array<glm::uvec4, 4>& bridges)
+    const std::array<glm::uvec4, 4>& edges)
 {
     if (m_instanceCount >= m_descriptors.parents.size())
     {
@@ -773,7 +730,7 @@ bool QuadtreeMeshRenderer::addLeaf(const WorldGridQuadtreeLeafId &leafId, std::u
 
     m_descriptors.parents[m_instanceCount] = {};
     m_illuminationTiles[m_instanceCount]={leafId,sliceIndex,m_heightmapRevisions[sliceIndex]};
-    m_descriptors.parents[m_instanceCount].edges = bridges;
+    m_descriptors.parents[m_instanceCount].edges = edges;
     m_descriptors.parents[m_instanceCount++].body = {
         .position{
             localMinCorner.x,
@@ -856,10 +813,6 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
         }
     }
 
-    const auto counts = m_descriptors.buildBridges(m_instanceCount, [](const auto& parent, std::uint32_t edge) {
-        const auto metadata = parent.edges[edge].w;
-        return (metadata & 0x40000000u) == 0 ? -1 : int(metadata >> 31);
-    });
     const auto reset = [&](SDL_GPUTransferBuffer* staging, SDL_GPUBuffer* buffer, const void* data, Uint32 bytes) {
         void* mapped = SDL_MapGPUTransferBuffer(m_device, staging, true);
         if (!mapped) throwSdlError("Failed to reset terrain indirect commands.");
@@ -871,14 +824,9 @@ void QuadtreeMeshRenderer::upload(SDL_GPUCopyPass *copyPass)
     };
     if (m_instanceCount)
         reset(m_descriptorTransferBuffer, m_descriptorBuffer, &m_descriptors,
-            Uint32(offsetof(Descriptors, bridges) + sizeof(std::uint32_t) * (counts.normal + counts.coarse)));
+            Uint32(sizeof(ParentDescriptor) * m_instanceCount));
     const auto body = makeDrawCommand(m_mainMesh.indexCount, m_instanceCount, 0, 0, 0);
     reset(m_indirectTransferBuffer, m_indirectBuffer, &body, sizeof(body));
-    m_bridgeIndirectCommands[0] = makeDrawCommand(m_bridgeMeshRange.indexCount, counts.normal, m_bridgeMeshRange.firstIndex, 0, 0);
-    m_bridgeIndirectCommands[1] = makeDrawCommand(m_coarseBridgeMeshRange.indexCount, counts.coarse,
-        m_coarseBridgeMeshRange.firstIndex, 0, counts.normal);
-    reset(m_bridgeIndirectTransferBuffer, m_bridgeIndirectBuffer, m_bridgeIndirectCommands.data(), sizeof(m_bridgeIndirectCommands));
-    m_bridgeIndirectCommandCount = 2;
 }
 
 void QuadtreeMeshRenderer::dispatchHeightmapGenerations(SDL_GPUCommandBuffer *commandBuffer)
@@ -1439,33 +1387,6 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
         SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_indirectBuffer, 0, 1);
     }
 
-    if (m_bridgeIndirectCommandCount > 0)
-    {
-        SDL_BindGPUGraphicsPipeline(renderPass, m_bridgePipeline);
-
-        const SDL_GPUBufferBinding vertexBinding{m_bridgeMesh.vertexBuffer, 0};
-        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
-
-        const SDL_GPUBufferBinding indexBinding{m_bridgeMesh.indexBuffer, 0};
-        SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-        SDL_GPUBuffer *storageBuffers[2]{m_heightmapBuffer, m_descriptorBuffer};
-        SDL_BindGPUVertexStorageBuffers(renderPass, 0, storageBuffers, 2);
-        const SDL_GPUTextureSamplerBinding fragmentSamplerBindings[9]{
-            {waterRenderer.displacementTexture(), waterRenderer.waterSampler()},
-            {waterRenderer.slopeTexture(), waterRenderer.waterSampler()},
-            {m_causticsTextureA, m_causticsSampler},
-            {m_pbrAlbedoTextureArray, m_pbrSampler},
-            {m_pbrNormalTextureArray, m_pbrSampler},
-            {m_pbrRoughnessTextureArray, m_pbrSampler},
-            {m_pbrAoTextureArray, m_pbrSampler},
-            clouds.coverage, clouds.noise,
-        };
-        SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 9);
-        SDL_GPUBuffer* illuminationBuffers[]{illumination.coefficients,illumination.regions};
-        SDL_BindGPUFragmentStorageBuffers(renderPass,0,illuminationBuffers,2);
-        SDL_DrawGPUIndexedPrimitivesIndirect(renderPass, m_bridgeIndirectBuffer, 0, m_bridgeIndirectCommandCount);
-    }
 }
 
 void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path &shaderDirectory)
@@ -1536,11 +1457,6 @@ void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path &shaderDi
         throwSdlError("Failed to create quadtree mesh graphics pipeline.");
     }
 
-    m_bridgePipeline = createGraphicsPipeline("quadtree_mesh_bridge.vert.spv");
-    if (m_bridgePipeline == nullptr)
-    {
-        throwSdlError("Failed to create quadtree bridge graphics pipeline.");
-    }
 }
 
 void QuadtreeMeshRenderer::createHeightmapComputePipeline(const std::filesystem::path &shaderDirectory)
@@ -1598,8 +1514,8 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     {
         for (std::uint32_t x = 0; x < kMainGridVertexResolution; ++x)
         {
-            const float localX = static_cast<float>(x) + kRenderedLocalCoordOffset;
-            const float localZ = static_cast<float>(z) + kRenderedLocalCoordOffset;
+            const float localX = static_cast<float>(x);
+            const float localZ = static_cast<float>(z);
             const float sampleX = static_cast<float>(x) + kRenderedSampleCoordOffset;
             const float sampleZ = static_cast<float>(z) + kRenderedSampleCoordOffset;
             vertices.push_back({
@@ -1632,133 +1548,6 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
 
     createMeshResources(vertices, indices, m_mainMesh);
 
-    std::vector<Vertex> bridgeVertices;
-    bridgeVertices.reserve(kBridgeOuterVertexCount + kBridgeInnerVertexCount);
-    std::array<std::uint32_t, kBridgeOuterVertexCount> outerVertexIndices{};
-    std::array<std::uint32_t, kBridgeInnerVertexCount> innerVertexIndices{};
-
-    for (std::uint32_t z = 0; z < kBridgeOuterVertexCount; ++z)
-    {
-        outerVertexIndices[z] = static_cast<std::uint32_t>(bridgeVertices.size());
-        bridgeVertices.push_back({
-            {0.0f, static_cast<float>(z)},
-            {static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo), static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z)},
-        });
-    }
-
-    for (std::uint32_t z = 1; z < AppConfig::Terrain::kHeightmapLeafIntervalCount; ++z)
-    {
-        innerVertexIndices[z - 1] = static_cast<std::uint32_t>(bridgeVertices.size());
-        bridgeVertices.push_back({
-            {kRenderedLocalCoordOffset, static_cast<float>(z)},
-            {kRenderedSampleCoordOffset, static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo + z)},
-        });
-    }
-
-    std::vector<std::uint32_t> bridgeIndices;
-    bridgeIndices.reserve((AppConfig::Terrain::kHeightmapLeafIntervalCount * 6) - 6);
-
-    bridgeIndices.push_back(outerVertexIndices[0]);
-    bridgeIndices.push_back(outerVertexIndices[1]);
-    bridgeIndices.push_back(innerVertexIndices[0]);
-
-    for (std::uint32_t z = 1; z < AppConfig::Terrain::kHeightmapLeafIntervalCount - 1; ++z)
-    {
-        const std::uint32_t outerTop = outerVertexIndices[z];
-        const std::uint32_t outerBottom = outerVertexIndices[z + 1];
-        const std::uint32_t innerTop = innerVertexIndices[z - 1];
-        const std::uint32_t innerBottom = innerVertexIndices[z];
-
-        bridgeIndices.push_back(outerTop);
-        bridgeIndices.push_back(outerBottom);
-        bridgeIndices.push_back(innerTop);
-        bridgeIndices.push_back(innerTop);
-        bridgeIndices.push_back(outerBottom);
-        bridgeIndices.push_back(innerBottom);
-    }
-
-    bridgeIndices.push_back(outerVertexIndices[AppConfig::Terrain::kHeightmapLeafIntervalCount - 1]);
-    bridgeIndices.push_back(outerVertexIndices[AppConfig::Terrain::kHeightmapLeafIntervalCount]);
-    bridgeIndices.push_back(innerVertexIndices[kBridgeInnerVertexCount - 1]);
-
-    std::vector<Vertex> coarseBridgeVertices;
-    coarseBridgeVertices.reserve(kCoarseBridgeOuterVertexCount + kBridgeInnerVertexCount);
-    std::array<std::uint32_t, kCoarseBridgeOuterVertexCount> coarseOuterVertexIndices{};
-    std::array<std::uint32_t, kBridgeInnerVertexCount> coarseInnerVertexIndices{};
-
-    for (std::uint32_t z = 0; z < kCoarseBridgeOuterVertexCount; ++z)
-    {
-        const float localZ = static_cast<float>(z * 2u);
-        coarseOuterVertexIndices[z] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
-        coarseBridgeVertices.push_back({
-            {0.0f, localZ},
-            {static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo),
-             static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo) + localZ},
-        });
-    }
-
-    for (std::uint32_t innerIndex = 0; innerIndex < kBridgeInnerVertexCount; ++innerIndex)
-    {
-        coarseInnerVertexIndices[innerIndex] = static_cast<std::uint32_t>(coarseBridgeVertices.size());
-        coarseBridgeVertices.push_back(bridgeVertices[kBridgeOuterVertexCount + innerIndex]);
-    }
-
-    std::vector<std::uint32_t> coarseBridgeIndices;
-    coarseBridgeIndices.reserve((126u * 9u) + 12u);
-
-    coarseBridgeIndices.push_back(coarseOuterVertexIndices[0]);
-    coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[0]);
-
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[0]);
-    coarseBridgeIndices.push_back(coarseOuterVertexIndices[1]);
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[1]);
-
-    for (std::uint32_t coarseSegment = 1; coarseSegment < (kCoarseBridgeOuterVertexCount - 2); ++coarseSegment)
-    {
-        const std::uint32_t outerStart = coarseOuterVertexIndices[coarseSegment];
-        const std::uint32_t outerEnd = coarseOuterVertexIndices[coarseSegment + 1];
-        const std::uint32_t innerStart = coarseInnerVertexIndices[(coarseSegment * 2u) - 1u];
-        const std::uint32_t innerMid = coarseInnerVertexIndices[coarseSegment * 2u];
-        const std::uint32_t innerEnd = coarseInnerVertexIndices[(coarseSegment * 2u) + 1u];
-
-        coarseBridgeIndices.push_back(outerStart);
-        coarseBridgeIndices.push_back(outerEnd);
-        coarseBridgeIndices.push_back(innerMid);
-
-        coarseBridgeIndices.push_back(innerMid);
-        coarseBridgeIndices.push_back(outerEnd);
-        coarseBridgeIndices.push_back(innerEnd);
-
-        coarseBridgeIndices.push_back(outerStart);
-        coarseBridgeIndices.push_back(innerMid);
-        coarseBridgeIndices.push_back(innerStart);
-    }
-
-    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kCoarseBridgeOuterVertexCount - 2]);
-    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kCoarseBridgeOuterVertexCount - 1]);
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kBridgeInnerVertexCount - 1]);
-
-    coarseBridgeIndices.push_back(coarseOuterVertexIndices[kCoarseBridgeOuterVertexCount - 2]);
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kBridgeInnerVertexCount - 1]);
-    coarseBridgeIndices.push_back(coarseInnerVertexIndices[kBridgeInnerVertexCount - 2]);
-
-    std::vector<Vertex> combinedBridgeVertices = std::move(bridgeVertices);
-    std::vector<std::uint32_t> combinedBridgeIndices = std::move(bridgeIndices);
-    m_bridgeMeshRange.firstIndex = 0;
-    m_bridgeMeshRange.indexCount = static_cast<std::uint32_t>(combinedBridgeIndices.size());
-
-    const std::uint32_t coarseVertexBase = static_cast<std::uint32_t>(combinedBridgeVertices.size());
-    combinedBridgeVertices.insert(combinedBridgeVertices.end(), coarseBridgeVertices.begin(), coarseBridgeVertices.end());
-    m_coarseBridgeMeshRange.firstIndex = static_cast<std::uint32_t>(combinedBridgeIndices.size());
-    m_coarseBridgeMeshRange.indexCount = static_cast<std::uint32_t>(coarseBridgeIndices.size());
-    for (std::uint32_t &index : coarseBridgeIndices)
-    {
-        index += coarseVertexBase;
-    }
-    combinedBridgeIndices.insert(combinedBridgeIndices.end(), coarseBridgeIndices.begin(), coarseBridgeIndices.end());
-
-    createMeshResources(combinedBridgeVertices, combinedBridgeIndices, m_bridgeMesh);
 }
 
 void QuadtreeMeshRenderer::createMeshResources(const std::vector<Vertex> &vertices, const std::vector<std::uint32_t> &indices,
@@ -1846,7 +1635,6 @@ SDL_GPUIndexedIndirectDrawCommand QuadtreeMeshRenderer::makeDrawCommand(std::uin
     command.first_instance = firstInstance;
     return command;
 }
-
 
 void QuadtreeMeshRenderer::createCausticsTextures()
 {
@@ -2182,10 +1970,7 @@ void QuadtreeMeshRenderer::destroyPbrTextures()
     }
 }
 
-
-
-std::uint32_t QuadtreeMeshRenderer::packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow, std::uint8_t edgeIndex)
+std::uint32_t QuadtreeMeshRenderer::packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow)
 {
-    return static_cast<std::uint32_t>(sliceIndex) | (static_cast<std::uint32_t>(scalePow) << 16U) |
-           (static_cast<std::uint32_t>(edgeIndex & 0x3U) << 24U);
+    return static_cast<std::uint32_t>(sliceIndex) | (static_cast<std::uint32_t>(scalePow) << 16U);
 }

@@ -7,7 +7,7 @@
 #include "QuadtreeMeshRenderer.hpp"
 #include "RenderEngines.hpp"
 #include "TerrainCornerNeighbor.hpp"
-#include "TerrainBridgeMetadata.hpp"
+#include "TerrainBoundaryMetadata.hpp"
 #include "WorldGridFoliageCanopyManager.hpp"
 #include "WorldGridFoliageManager.hpp"
 #include "WorldGridNearbyFoliageManager.hpp"
@@ -699,7 +699,7 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
         ++treeData.terrainDrawCountByScalePow[scalePow];
     }
 
-    std::array<glm::uvec4, 4> bridges{};
+    std::array<glm::uvec4, 4> edges{};
 
     std::array<std::optional<CoarseTerrainNeighbor>, 4> coarseNeighbors{};
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
@@ -714,10 +714,9 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
     std::array<CornerOwner, 4> corners{}; // southwest, southeast, northeast, northwest
     for (std::uint8_t cornerIndex = 0; cornerIndex < 4u; ++cornerIndex)
         corners[cornerIndex] = {sliceIndex, terrainOwnCornerSelector(cornerIndex), false};
-    constexpr std::array<std::array<std::uint8_t, 2>, 4> edgeCorners{{{{0, 3}}, {{1, 0}}, {{2, 1}}, {{3, 2}}}};
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
         if (coarseNeighbors[edgeIndex])
-            for (const std::uint8_t cornerIndex : edgeCorners[edgeIndex])
+            for (const std::uint8_t cornerIndex : kBoundaryEdgeCorners[edgeIndex])
                 if (!corners[cornerIndex].coarse)
                     corners[cornerIndex] = {coarseNeighbors[edgeIndex]->sliceIndex,
                         terrainEdgeCornerSelector(edgeIndex, coarseNeighbors[edgeIndex]->half, cornerIndex), true};
@@ -739,18 +738,18 @@ void WorldGridQuadtree::emitTerrainDrawForNode(
 
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
     {
-        const auto cornerIds = edgeCorners[edgeIndex];
+        const auto cornerIds = kBoundaryEdgeCorners[edgeIndex];
         const auto coarse = coarseNeighbors[edgeIndex];
-        bridges[edgeIndex] = glm::uvec4(
+        edges[edgeIndex] = glm::uvec4(
             coarse ? coarse->sliceIndex : sliceIndex,
             corners[cornerIds[0]].sliceIndex,
             corners[cornerIds[1]].sliceIndex,
-            terrainBridgeMetadata(scalePow, edgeIndex, coarse ? coarse->half : 0u,
+            terrainBoundaryMetadata(coarse ? coarse->half : 0u,
                 corners[cornerIds[0]].selector, corners[cornerIds[1]].selector)
-                | 0x40000000u | (coarse ? 0x80000000u : 0u));
+                | (coarse ? 0x80000000u : 0u));
     }
     auto& hint = m_residencyHints[nodeIndex].heightmap;
-    hint = m_heightmapManager.requestLeaf(node.nodeId, hint, bridges, *renderEngines.quadtreeMeshRenderer);
+    hint = m_heightmapManager.requestLeaf(node.nodeId, hint, edges, *renderEngines.quadtreeMeshRenderer);
 }
 
 void WorldGridQuadtree::clearTerrainCache()
@@ -839,18 +838,62 @@ void WorldGridQuadtree::emitWaterDrawForNode(
     const bool hasTerrainSlice = terrainSliceIndex != kUnavailableCacheIndex;
     HeightmapExtents extents{};
     const bool hasExtents = m_heightmapManager.buildExtents(node.nodeId, terrainSliceIndex, extents);
-    std::uint32_t bridgeMask = 0, coarseBridgeMask = 0;
+    const auto ownerForNode = [&](std::uint16_t index) {
+        const auto& id = m_nodes[index].nodeId;
+        const auto origin = worldGridQuadtreeLeafBounds(id).first;
+        const double size = worldGridQuadtreeLeafSize(id);
+        const auto slice = residentHeightmap(index);
+        return WaterBoundaryOwner{origin, size, waterManager.computeBandMaskForLeaf(origin, size),
+            static_cast<std::uint16_t>(slice == kUnavailableCacheIndex ? 0 : slice),
+            slice != kUnavailableCacheIndex};
+    };
+    const auto own = ownerForNode(nodeIndex);
+    std::array<WaterBoundaryEdge, 4> edges{};
+    std::array<std::uint16_t, 4> coarseNodes{};
+    coarseNodes.fill(QuadtreeNode::NullNodeIndex);
+    std::array<std::uint8_t, 4> halves{};
+    struct Corner { WaterBoundaryOwner owner; std::uint8_t selector; bool coarse; };
+    std::array<Corner, 4> corners{};
+    for (std::uint8_t corner = 0; corner < 4; ++corner)
+        corners[corner] = {own, terrainOwnCornerSelector(corner), false};
     for (std::uint8_t edgeIndex = 0; edgeIndex < 4u; ++edgeIndex)
     {
-        if (edgeHasWaterNeighborCoverage(nodeIndex, edgeIndex))
-            bridgeMask |= 1u << edgeIndex;
-        else if (edgeHasWaterCoarserNeighbor(nodeIndex, edgeIndex))
-            coarseBridgeMask |= 1u << edgeIndex;
+        // Coverage previously selected an inset strip. The complete mesh always
+        // covers it; only the existing 2:1 topology decision changes sampling.
+        if (!edgeHasWaterNeighborCoverage(nodeIndex, edgeIndex) && edgeHasWaterCoarserNeighbor(nodeIndex, edgeIndex))
+        {
+            const auto neighbor = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
+            coarseNodes[edgeIndex] = neighbor;
+            const auto owner = ownerForNode(neighbor);
+            const auto offset = minCorner.localCoordinatesInCellOf(owner.origin);
+            const double along = edgeIndex == 0 || edgeIndex == 2 ? offset.z : offset.x;
+            halves[edgeIndex] = along >= owner.sizeMeters * 0.5 ? 1u : 0u;
+            for (auto corner : kBoundaryEdgeCorners[edgeIndex])
+                if (!corners[corner].coarse)
+                    corners[corner] = {owner, terrainEdgeCornerSelector(edgeIndex, halves[edgeIndex], corner), true};
+        }
+    }
+    for (std::uint8_t corner = 0; corner < 4; ++corner)
+    {
+        if (corners[corner].coarse) continue;
+        const auto diagonal = terrainCoarseDiagonalNeighbor(node.nodeId, corner, QuadtreeNode::NullNodeIndex,
+            [this](std::int64_t x, std::int64_t z) { return findBaseNode(x, z); },
+            [this](std::uint16_t index) -> const QuadtreeNode& { return m_nodes[index]; });
+        if (diagonal != QuadtreeNode::NullNodeIndex)
+            corners[corner] = {ownerForNode(diagonal), terrainDiagonalCornerSelector(corner), true};
+    }
+    for (std::uint8_t edge = 0; edge < 4; ++edge)
+    {
+        const auto ids = kBoundaryEdgeCorners[edge];
+        const bool coarse = coarseNodes[edge] != QuadtreeNode::NullNodeIndex;
+        edges[edge] = {coarse ? ownerForNode(coarseNodes[edge]) : own, corners[ids[0]].owner,
+            corners[ids[1]].owner, terrainBoundaryMetadata(
+                halves[edge], corners[ids[0]].selector, corners[ids[1]].selector) | (coarse ? 0x80000000u : 0u)};
     }
     (void)waterManager.requestLeaf(
         node.nodeId, minCorner, leafSizeMeters, hasExtents, extents.minHeight,
         hasTerrainSlice, hasTerrainSlice ? terrainSliceIndex : 0, quadtreeLodHint,
-        bridgeMask, coarseBridgeMask);
+        edges);
 }
 
 CacheIndex WorldGridQuadtree::residentHeightmap(std::uint16_t nodeIndex) const
@@ -1479,18 +1522,6 @@ std::uint16_t WorldGridQuadtree::findBaseNode(std::int64_t gridX, std::int64_t g
     return m_baseNodes[(row * sideLength) + column];
 }
 
-bool WorldGridQuadtree::subtreeEdgeCoveredByTerrain(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
-{
-    return subtreeEdgeCoveredBy(
-        m_nodes,
-        nodeIndex,
-        edgeIndex,
-        [this](std::uint16_t index)
-        {
-            return residentHeightmap(index) != kUnavailableCacheIndex;
-        });
-}
-
 bool WorldGridQuadtree::subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
 {
     return subtreeEdgeCoveredBy(
@@ -1498,24 +1529,6 @@ bool WorldGridQuadtree::subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::
         nodeIndex,
         edgeIndex,
         [](std::uint16_t) { return true; });
-}
-
-bool WorldGridQuadtree::edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const
-{
-    const std::uint16_t neighborRootIndex = findNeighborSubtreeRoot(nodeIndex, edgeIndex);
-    if (neighborRootIndex == QuadtreeNode::NullNodeIndex)
-    {
-        return false;
-    }
-
-    const QuadtreeNode& node = m_nodes[nodeIndex];
-    const QuadtreeNode& neighborRoot = m_nodes[neighborRootIndex];
-    if (worldGridQuadtreeLeafSize(neighborRoot.nodeId) > worldGridQuadtreeLeafSize(node.nodeId) + kEdgeCoverageEpsilon)
-    {
-        return false;
-    }
-
-    return subtreeEdgeCoveredByTerrain(neighborRootIndex, oppositeEdge(edgeIndex));
 }
 
 std::optional<WorldGridQuadtree::CoarseTerrainNeighbor> WorldGridQuadtree::drawableCoarserNeighbor(

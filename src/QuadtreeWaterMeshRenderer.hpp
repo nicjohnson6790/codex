@@ -95,7 +95,7 @@ public:
         std::uint8_t quadtreeLodHint,
         bool hasTerrainSlice,
         std::uint16_t terrainSliceIndex,
-        std::uint32_t bandMask, std::uint32_t bridgeMask, std::uint32_t coarseBridgeMask);
+        std::uint32_t bandMask, const std::array<WaterBoundaryEdge, 4>& edges);
     void upload(SDL_GPUCopyPass* copyPass);
     void dispatchWaterSimulation(
         SDL_GPUCommandBuffer* commandBuffer,
@@ -129,17 +129,26 @@ private:
 
     struct alignas(16) InstanceData
     {
-        float position[3]{};
-        std::uint32_t packedMetadata = 0;
-        glm::vec4 leafParams{ 0.0f };
+        float position[3];
+        std::uint32_t packedMetadata;
+        glm::vec4 leafParams;
     };
 
+    struct alignas(16) BoundaryEdge
+    {
+        InstanceData outer, firstCorner, secondCorner;
+        glm::uvec4 mapping; // metadata, mesh intervals, reserved zero words
+    };
+    static_assert(sizeof(BoundaryEdge) == 112);
+    static_assert(offsetof(BoundaryEdge, firstCorner) == 32);
+    static_assert(offsetof(BoundaryEdge, secondCorner) == 64);
+    static_assert(offsetof(BoundaryEdge, mapping) == 96);
     struct alignas(16) ParentDescriptor
     {
-        InstanceData body{};
-        glm::uvec4 edges{}; // normal mask, coarse mask; remaining fields reserved
+        InstanceData body;
+        std::array<BoundaryEdge, 4> edges;
     };
-    static_assert(sizeof(ParentDescriptor) == 48);
+    static_assert(sizeof(ParentDescriptor) == 480);
     static_assert(offsetof(ParentDescriptor, edges) == 32);
     static_assert(sizeof(InstanceData) == 32);
     static_assert(sizeof(SDL_GPUIndexedIndirectDrawCommand) == 20);
@@ -154,13 +163,6 @@ private:
         std::uint32_t vertexResolution = 0;
         std::uint32_t indexCount = 0;
     };
-
-    struct MeshRange
-    {
-        std::uint32_t firstIndex = 0;
-        std::uint32_t indexCount = 0;
-    };
-
 
     struct WorkingBufferResources
     {
@@ -209,8 +211,7 @@ private:
 
     [[nodiscard]] static std::uint32_t packMetadata(
         std::uint8_t quadtreeLodHint,
-        std::uint32_t bandMask,
-        std::uint8_t edgeIndex = 0);
+        std::uint32_t bandMask);
 
     void createPipelines(const std::filesystem::path& shaderDirectory);
     void createWaterComputePipelines(const std::filesystem::path& shaderDirectory);
@@ -246,27 +247,23 @@ private:
     void dispatchBuildMaps(SDL_GPUCommandBuffer* commandBuffer, const WaterSimulationUniforms& uniforms);
 
     SDL_GPUGraphicsPipeline* m_mainPipeline = nullptr;
-    SDL_GPUGraphicsPipeline* m_bridgePipeline = nullptr;
     SDL_GPUComputePipeline* m_initializeSpectrumPipeline = nullptr;
     SDL_GPUComputePipeline* m_spectrumUpdatePipeline = nullptr;
     SDL_GPUComputePipeline* m_fftStagePipeline = nullptr;
     SDL_GPUComputePipeline* m_buildMapsPipeline = nullptr;
     MeshResources m_mesh{};
-    MeshResources m_bridgeMesh{};
-    MeshRange m_bridgeMeshRange{};
-    MeshRange m_coarseBridgeMeshRange{};
     using Descriptors = ParentMeshDescriptors<ParentDescriptor, AppConfig::Water::kMaxWaterInstances>;
-    static_assert(offsetof(Descriptors, bridges) == 48 * 4096);
-    Descriptors m_descriptors{};
+    static_assert(AppConfig::Water::kMaxWaterInstances == 4096);
+    static_assert(offsetof(Descriptors, parents) == 0);
+    static_assert(sizeof(Descriptors) == 480 * 4096);
+    // Every admitted record is fully assigned before upload; leave unused slots
+    // uninitialized rather than expanding thousands of GLM initializers.
+    Descriptors m_descriptors;
     std::uint32_t m_instanceCount = 0;
     SDL_GPUBuffer* m_descriptorBuffer = nullptr;
     SDL_GPUTransferBuffer* m_descriptorTransferBuffer = nullptr;
     SDL_GPUBuffer* m_indirectBuffer = nullptr;
     SDL_GPUTransferBuffer* m_indirectTransferBuffer = nullptr;
-    SDL_GPUBuffer* m_bridgeIndirectBuffer = nullptr;
-    SDL_GPUTransferBuffer* m_bridgeIndirectTransferBuffer = nullptr;
-    std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
-    std::uint32_t m_bridgeIndirectCommandCount = 0;
     WorkingBufferResources m_workingBuffers{};
     SDL_GPUTexture* m_displacementTexture = nullptr;
     SDL_GPUTexture* m_slopeTexture = nullptr;

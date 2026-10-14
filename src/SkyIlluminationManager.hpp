@@ -144,7 +144,7 @@ public:
             for(unsigned j=0;j<tiles.size();++j)
             {
                 const auto& b=m_regions[j]; if(b.lookup.x==kUnavailableCacheIndex) continue;
-                const double pad=std::max(1.0f,a.domain.z*1e-5f); // Includes bridge edge roundoff.
+                const double pad=std::max(1.0f,a.domain.z*1e-5f); // Includes tile edge roundoff.
                 if(double(b.domain.x)-b.domain.w>double(a.domain.x)+a.domain.z+pad ||
                    double(b.domain.y)-b.domain.w>double(a.domain.y)+a.domain.z+pad ||
                    double(b.domain.x)+b.domain.z+b.domain.w<double(a.domain.x)-pad ||

@@ -47,7 +47,7 @@ bool WorldGridQuadtreeWaterManager::requestLeaf(
     float terrainMinHeight,
     bool hasTerrainSlice,
     std::uint16_t terrainSliceIndex,
-    std::uint8_t quadtreeLodHint, std::uint32_t bridgeMask, std::uint32_t coarseBridgeMask)
+    std::uint8_t quadtreeLodHint, const std::array<WaterBoundaryEdge, 4>& edges)
 {
     if (!m_settings.enabled || m_requestCount >= AppConfig::Water::kMaxWaterInstances)
     {
@@ -62,8 +62,7 @@ bool WorldGridQuadtreeWaterManager::requestLeaf(
     const std::uint32_t bandMask = computeBandMaskForLeaf(leafOrigin, leafSizeMeters);
 
     WaterLeafDrawRequest& request = m_requests[m_requestCount++];
-    request.bridgeMask = bridgeMask;
-    request.coarseBridgeMask = coarseBridgeMask;
+    request.edges = edges;
     request.leafId = leafId;
     request.origin = leafOrigin;
     request.sizeMeters = leafSizeMeters;
@@ -91,7 +90,7 @@ void WorldGridQuadtreeWaterManager::flushToRenderer(QuadtreeWaterMeshRenderer& r
         const WaterLeafDrawRequest& request = m_requests[index];
         renderer.addLeaf(request.leafId, request.origin, request.sizeMeters, request.quadtreeLodHint,
             request.hasTerrainSlice, request.terrainSliceIndex, request.bandMask,
-            request.bridgeMask, request.coarseBridgeMask);
+            request.edges);
     }
 }
 

@@ -666,11 +666,11 @@ CacheIndex WorldGridQuadtreeHeightmapManager::requestCpuAsset(
     return kUnavailable;
 }
 CacheIndex WorldGridQuadtreeHeightmapManager::requestLeaf(const WorldGridQuadtreeLeafId &id, CacheIndex hint,
-    const std::array<glm::uvec4, 4>& bridges, QuadtreeMeshRenderer &renderer)
+    const std::array<glm::uvec4, 4>& edges, QuadtreeMeshRenderer &renderer)
 {
     const auto slot = requestAsset(id, hint);
     if (slot != kUnavailable)
-        (void)renderer.addLeaf(id, slot, bridges);
+        (void)renderer.addLeaf(id, slot, edges);
     return slot;
 }
 CacheIndex WorldGridQuadtreeHeightmapManager::isResident(const WorldGridQuadtreeLeafId &id, CacheIndex hint) const

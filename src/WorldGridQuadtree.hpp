@@ -189,14 +189,12 @@ private:
     [[nodiscard]] std::uint8_t canopyEdgeFadeStrength(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     void emitTerrainDrawForNode(std::uint16_t nodeIndex, const QuadtreeNode& node, RenderEngines& renderEngines);
     void emitWaterDrawForNode(std::uint16_t nodeIndex, const QuadtreeNode& node, WorldGridQuadtreeWaterManager& waterManager) const;
-    [[nodiscard]] bool edgeHasDrawableNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] std::optional<CoarseTerrainNeighbor> drawableCoarserNeighbor(std::uint16_t nodeIndex,
                                                                                 std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasWaterNeighborCoverage(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool edgeHasWaterCoarserNeighbor(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] std::uint16_t findBaseNode(std::int64_t gridX, std::int64_t gridY) const;
     [[nodiscard]] std::uint16_t findNeighborSubtreeRoot(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
-    [[nodiscard]] bool subtreeEdgeCoveredByTerrain(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     [[nodiscard]] bool subtreeEdgeCoveredByWater(std::uint16_t nodeIndex, std::uint8_t edgeIndex) const;
     void recordTerrainLeafCount(const QuadtreeNode& node);
     [[nodiscard]] static double distanceSquaredToBounds(

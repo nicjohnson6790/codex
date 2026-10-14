@@ -29,7 +29,7 @@ std::uint16_t terrainCoarseDiagonalNeighbor(
         if (std::none_of(node.children.begin(), node.children.end(),
                          [unavailable](std::uint16_t child) { return child != unavailable; }))
         {
-            // Bridge corner normals currently support the same 2:1 pitch as edges.
+            // Boundary corner normals support the same 2:1 pitch as edges.
             return candidateSize == size * 2.0 ? index : unavailable;
         }
         const bool childEast = probe.localPosition().x >= x + candidateSize * 0.5;

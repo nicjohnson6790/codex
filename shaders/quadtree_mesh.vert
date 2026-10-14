@@ -72,6 +72,34 @@ vec3 computeNormal(uint sliceIndex, ivec2 sampleCoord, float sampleSpacing)
     return normalize(cross(tangentZ, tangentX));
 }
 
+ivec2 cornerSampleCoord(uint selector)
+{
+    uint position = selector < 4u ? selector : selector + 1u;
+    return ivec2(position % 3u, position / 3u) * 128 + ivec2(1);
+}
+
+// Evaluate an exact endpoint first, including independently resolved corners.
+void boundaryEndpoint(uvec4 edge, uint ownSlice, uint edgeIndex, int along,
+    float spacing, out float height, out vec3 normal)
+{
+    bool coarse = (edge.w & 0x80000000u) != 0u;
+    uint slice = edge.x;
+    int ownerAlong = coarse ? along / 2 + int((edge.w >> 26u) & 1u) * 128 : along;
+    int side = coarse ? (edgeIndex < 2u ? 257 : 1) : (edgeIndex < 2u ? 1 : 257);
+    ivec2 coord = (edgeIndex == 0u || edgeIndex == 2u)
+        ? ivec2(side, 1 + ownerAlong) : ivec2(1 + ownerAlong, side);
+    float pitch = coarse ? spacing * 2.0 : spacing;
+    if (along == 0 || along == 256)
+    {
+        bool first = (edgeIndex == 0u || edgeIndex == 3u) ? along == 0 : along == 256;
+        slice = first ? edge.y : edge.z;
+        coord = cornerSampleCoord(first ? edge.w & 7u : (edge.w >> 3u) & 7u);
+        pitch = slice == ownSlice ? spacing : spacing * 2.0;
+    }
+    height = sampleHeight(slice, coord);
+    normal = computeNormal(slice, coord, pitch);
+}
+
 void main()
 {
     TerrainInstance instance = descriptors.parents[gl_InstanceIndex].body;
@@ -82,7 +110,33 @@ void main()
     vec2 localOffset = vec2(inLocalCoord.x * sampleSpacing, inLocalCoord.y * sampleSpacing);
     ivec2 sampleCoord = ivec2(inSampleCoord);
 
-    float height = sampleHeight(sliceIndex, sampleCoord);
+    float height;
+    vec3 normal;
+    if (inLocalCoord.x == 0.0 || inLocalCoord.y == 0.0 ||
+        inLocalCoord.x == 256.0 || inLocalCoord.y == 256.0)
+    {
+        uint edgeIndex = inLocalCoord.x == 0.0 ? 0u : inLocalCoord.y == 0.0 ? 1u :
+            inLocalCoord.x == 256.0 ? 2u : 3u;
+        int along = int(edgeIndex == 0u || edgeIndex == 2u ? inLocalCoord.y : inLocalCoord.x);
+        uvec4 edge = descriptors.parents[gl_InstanceIndex].edges[edgeIndex];
+        bool midpoint = (edge.w & 0x80000000u) != 0u && (along & 1) != 0;
+        boundaryEndpoint(edge, sliceIndex, edgeIndex, midpoint ? along - 1 : along, sampleSpacing, height, normal);
+        if (midpoint)
+        {
+            float nextHeight;
+            vec3 nextNormal;
+            boundaryEndpoint(edge, sliceIndex, edgeIndex, along + 1, sampleSpacing, nextHeight, nextNormal);
+            height = (height + nextHeight) * 0.5;
+            // Preserve the coarse edge's linear varying; the fragment shader
+            // normalizes after interpolation, just as it does for the owner.
+            normal = (normal + nextNormal) * 0.5;
+        }
+    }
+    else
+    {
+        height = sampleHeight(sliceIndex, sampleCoord);
+        normal = computeNormal(sliceIndex, sampleCoord, sampleSpacing);
+    }
 
     vec3 worldPosition = vec3(
         instance.position.x + localOffset.x,
@@ -93,6 +147,6 @@ void main()
     gl_Position = terrain.viewProjection * vec4(worldPosition, 1.0);
     fragLocalPosition = worldPosition;
     fragIlluminationRegion = gl_InstanceIndex;
-    fragWorldNormal = computeNormal(sliceIndex, sampleCoord, sampleSpacing);
+    fragWorldNormal = normal;
     fragAllowCaustics = scalePow == 0u ? 1u : 0u;
 }

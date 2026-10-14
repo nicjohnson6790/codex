@@ -110,7 +110,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     // Queues one quadtree leaf instance for drawing, using the given heightmap
     // slice.
     [[nodiscard]] bool addLeaf(const WorldGridQuadtreeLeafId &leafId, std::uint16_t sliceIndex,
-        const std::array<glm::uvec4, 4>& bridges);
+        const std::array<glm::uvec4, 4>& edges);
 
     // Uploads staged instance and indirect draw data into GPU buffers.
     void upload(SDL_GPUCopyPass *copyPass);
@@ -166,7 +166,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     struct alignas(16) ParentDescriptor
     {
         InstanceData body{};
-        // outer, first corner, second corner, original bridge metadata + required bit 30 + coarse bit 31
+        // outer/first/second corner slices; selectors, half, coarse bit 31
         std::array<glm::uvec4, 4> edges{};
     };
     static_assert(sizeof(ParentDescriptor) == 80);
@@ -175,7 +175,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     static_assert(offsetof(SDL_GPUIndexedIndirectDrawCommand, num_instances) == 4);
     static_assert(AppConfig::Terrain::kHeightmapLeafIntervalCount == 256);
     static_assert(AppConfig::Terrain::kHeightmapLeafHalo == 1);
-    static_assert(AppConfig::Terrain::kRenderedPatchInset == 1);
 
     struct MeshResources
     {
@@ -183,12 +182,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         SDL_GPUTransferBuffer *vertexTransferBuffer = nullptr;
         SDL_GPUBuffer *indexBuffer = nullptr;
         SDL_GPUTransferBuffer *indexTransferBuffer = nullptr;
-        std::uint32_t indexCount = 0;
-    };
-
-    struct MeshRange
-    {
-        std::uint32_t firstIndex = 0;
         std::uint32_t indexCount = 0;
     };
 
@@ -247,7 +240,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     static_assert(sizeof(HeightmapGenerationDescriptor) == 16);
     static_assert(sizeof(HeightmapSourceGpuDescriptor) == 80);
 
-    [[nodiscard]] static std::uint32_t packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow, std::uint8_t edgeIndex = 0);
+    [[nodiscard]] static std::uint32_t packMetadata(std::uint16_t sliceIndex, std::uint8_t scalePow);
 
     // Creates the terrain graphics pipelines and loads the terrain shaders.
     void createPipelines(const std::filesystem::path &shaderDirectory);
@@ -273,7 +266,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
 
     // Pipeline objects for the terrain pass.
     SDL_GPUGraphicsPipeline *m_mainPipeline = nullptr;
-    SDL_GPUGraphicsPipeline *m_bridgePipeline = nullptr;
     SDL_GPUComputePipeline *m_heightmapComputePipeline = nullptr;
     SDL_GPUComputePipeline *m_foliageInstanceComputePipeline = nullptr;
     SDL_GPUTexture *m_causticsTextureA = nullptr;
@@ -287,9 +279,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
 
     // Static reusable terrain meshes plus their one-time upload buffers.
     MeshResources m_mainMesh{};
-    MeshResources m_bridgeMesh{};
-    MeshRange m_bridgeMeshRange{};
-    MeshRange m_coarseBridgeMeshRange{};
 
     // Per-frame instance data buffer plus staging buffer.
 
@@ -298,8 +287,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     SDL_GPUTransferBuffer *m_indirectTransferBuffer = nullptr;
     SDL_GPUBuffer* m_descriptorBuffer = nullptr;
     SDL_GPUTransferBuffer* m_descriptorTransferBuffer = nullptr;
-    SDL_GPUBuffer *m_bridgeIndirectBuffer = nullptr;
-    SDL_GPUTransferBuffer *m_bridgeIndirectTransferBuffer = nullptr;
 
     // GPU heightmap slice storage written directly by the compute shader.
     SDL_GPUBuffer *m_heightmapGenerationBuffer = nullptr;
@@ -318,9 +305,10 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     SDL_GPUTransferBuffer *m_foliageInstanceLiveCountInitTransferBuffer = nullptr;
 
     using Descriptors = ParentMeshDescriptors<ParentDescriptor, AppConfig::Terrain::kHeightmapSliceCapacity>;
-    static_assert(offsetof(Descriptors, bridges) == 80 * 512);
+    static_assert(AppConfig::Terrain::kHeightmapSliceCapacity == 512);
+    static_assert(offsetof(Descriptors, parents) == 0);
+    static_assert(sizeof(Descriptors) == 80 * 512);
     Descriptors m_descriptors{};
-    std::array<SDL_GPUIndexedIndirectDrawCommand, 2> m_bridgeIndirectCommands{};
     std::array<HeightmapGenerationDescriptor, WorldGridQuadtreeHeightmapManager::kMaxFinalHeightmapsPerDispatch>
         m_pendingHeightmapGenerations{};
     std::array<HeightmapSourceGpuDescriptor, WorldGridQuadtreeHeightmapManager::kSourceDescriptorCapacity>
@@ -346,7 +334,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     std::array<SkyIlluminationManager::Tile,AppConfig::Terrain::kHeightmapSliceCapacity> m_illuminationTiles{};
     std::array<std::uint64_t,AppConfig::Terrain::kHeightmapSliceCapacity> m_heightmapRevisions{};
     std::uint64_t m_nextHeightmapRevision=0;
-    std::uint16_t m_bridgeIndirectCommandCount = 0;
     std::uint16_t m_pendingHeightmapGenerationCount = 0;
     std::uint32_t m_pendingHeightmapSourceDescriptorCount = 0;
     std::uint16_t m_pendingSourceUploadCount = 0;

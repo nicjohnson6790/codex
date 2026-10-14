@@ -156,7 +156,6 @@ set(LINE_FRAG_SPV ${SHADER_OUTPUT_DIR}/line.frag.spv)
 set(WORLD_TEXT_VERT_SPV ${SHADER_OUTPUT_DIR}/world_text.vert.spv)
 set(WORLD_TEXT_FRAG_SPV ${SHADER_OUTPUT_DIR}/world_text.frag.spv)
 set(QUADTREE_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.vert.spv)
-set(QUADTREE_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh_bridge.vert.spv)
 set(QUADTREE_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/quadtree_mesh.frag.spv)
 set(HEIGHTMAP_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/heightmap_generate.comp.spv)
 set(FOLIAGE_GENERATE_COMP_SPV ${SHADER_OUTPUT_DIR}/foliage_generate.comp.spv)
@@ -173,7 +172,6 @@ set(NEARBY_FOLIAGE_DEPTH_PREPASS_FRAG_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage_de
 set(NEARBY_FOLIAGE_FRAG_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage.frag.spv)
 set(NEARBY_FOLIAGE_DECODE_COMP_SPV ${SHADER_OUTPUT_DIR}/nearby_foliage_decode.comp.spv)
 set(WATER_MESH_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh.vert.spv)
-set(WATER_MESH_BRIDGE_VERT_SPV ${SHADER_OUTPUT_DIR}/water_mesh_bridge.vert.spv)
 set(WATER_MESH_FRAG_SPV ${SHADER_OUTPUT_DIR}/water_mesh.frag.spv)
 set(WATER_INITIALIZE_SPECTRUM_COMP_SPV ${SHADER_OUTPUT_DIR}/water_initialize_spectrum.comp.spv)
 set(WATER_SPECTRUM_UPDATE_COMP_SPV ${SHADER_OUTPUT_DIR}/water_spectrum_update.comp.spv)
@@ -187,7 +185,6 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/line.frag ${LINE_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/world_text.vert ${WORLD_TEXT_VERT_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/world_text.frag ${WORLD_TEXT_FRAG_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.vert ${QUADTREE_MESH_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/terrain_mesh_descriptors.glsl)
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh_bridge.vert ${QUADTREE_MESH_BRIDGE_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/terrain_mesh_descriptors.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/quadtree_mesh.frag ${QUADTREE_MESH_FRAG_SPV}
     ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl
     ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl
@@ -225,7 +222,6 @@ compile_shader(
     ${NEARBY_FOLIAGE_DECODE_COMP_SPV}
     ${CMAKE_SOURCE_DIR}/shaders/foliage_common.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.vert ${WATER_MESH_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl ${CMAKE_SOURCE_DIR}/shaders/water_surface.glsl ${CMAKE_SOURCE_DIR}/shaders/water_mesh_descriptors.glsl)
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh_bridge.vert ${WATER_MESH_BRIDGE_VERT_SPV} ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl ${CMAKE_SOURCE_DIR}/shaders/water_surface.glsl ${CMAKE_SOURCE_DIR}/shaders/water_mesh_descriptors.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_mesh.frag ${WATER_MESH_FRAG_SPV} ${CMAKE_SOURCE_DIR}/shaders/authored_color.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/water_displacement.glsl ${CMAKE_SOURCE_DIR}/shaders/water_medium.glsl ${CMAKE_SOURCE_DIR}/shaders/water_interface.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_initialize_spectrum.comp ${WATER_INITIALIZE_SPECTRUM_COMP_SPV})
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_spectrum_update.comp ${WATER_SPECTRUM_UPDATE_COMP_SPV})
@@ -262,7 +258,6 @@ add_custom_target(shaders ALL
         ${WORLD_TEXT_VERT_SPV}
         ${WORLD_TEXT_FRAG_SPV}
         ${QUADTREE_MESH_VERT_SPV}
-        ${QUADTREE_MESH_BRIDGE_VERT_SPV}
         ${QUADTREE_MESH_FRAG_SPV}
         ${HEIGHTMAP_GENERATE_COMP_SPV}
         ${FOLIAGE_GENERATE_COMP_SPV}
@@ -279,7 +274,6 @@ add_custom_target(shaders ALL
         ${NEARBY_FOLIAGE_FRAG_SPV}
         ${NEARBY_FOLIAGE_DECODE_COMP_SPV}
         ${WATER_MESH_VERT_SPV}
-        ${WATER_MESH_BRIDGE_VERT_SPV}
         ${WATER_MESH_FRAG_SPV}
         ${WATER_INITIALIZE_SPECTRUM_COMP_SPV}
         ${WATER_SPECTRUM_UPDATE_COMP_SPV}

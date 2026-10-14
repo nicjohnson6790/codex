@@ -12,5 +12,4 @@ struct TerrainParent
 layout(set=0, binding=1, std430) readonly buffer DescriptorBuffer
 {
     TerrainParent parents[512];
-    uint bridges[];
 } descriptors;
