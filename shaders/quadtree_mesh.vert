@@ -30,8 +30,6 @@ layout(set=0, binding=0, std430) readonly buffer HeightmapBuffer
 
 #include "terrain_mesh_descriptors.glsl"
 
-layout(location = 0) in vec2 inLocalCoord;
-layout(location = 1) in vec2 inSampleCoord;
 
 layout(location = 0) out vec3 fragLocalPosition;
 layout(location = 1) out vec3 fragWorldNormal;
@@ -102,13 +100,17 @@ void boundaryEndpoint(uvec4 edge, uint ownSlice, uint edgeIndex, int along,
 
 void main()
 {
+    // Indexed draws retain vertex reuse with the original row-major vertex IDs.
+    uint vertexIndex = uint(gl_VertexIndex);
+    ivec2 gridCoord = ivec2(vertexIndex % 257u, vertexIndex / 257u);
+    vec2 inLocalCoord = vec2(gridCoord);
     TerrainInstance instance = descriptors.parents[gl_InstanceIndex].body;
     uint sliceIndex = instance.packedMetadata & 0xFFFFu;
     uint scalePow = (instance.packedMetadata >> 16u) & 0xFFu;
     float leafSize = kMinimumQuadSize * exp2(float(scalePow));
     float sampleSpacing = leafSize / kHeightmapLeafIntervalCount;
     vec2 localOffset = vec2(inLocalCoord.x * sampleSpacing, inLocalCoord.y * sampleSpacing);
-    ivec2 sampleCoord = ivec2(inSampleCoord);
+    ivec2 sampleCoord = gridCoord + ivec2(1);
 
     float height;
     vec3 normal;

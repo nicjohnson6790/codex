@@ -29,8 +29,6 @@ namespace
 constexpr std::uint32_t kMainGridVertexResolution =
     AppConfig::Terrain::kHeightmapLeafResolution;
 constexpr std::uint32_t kMainGridQuadResolution = kMainGridVertexResolution - 1;
-constexpr float kRenderedSampleCoordOffset =
-    static_cast<float>(AppConfig::Terrain::kHeightmapLeafHalo);
 constexpr std::size_t kHeightmapSliceFloatCount =
     static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution) * static_cast<std::size_t>(AppConfig::Terrain::kHeightmapResolution);
 constexpr std::size_t kHeightmapExtentsCount = AppConfig::Terrain::kHeightmapSliceCapacity;
@@ -635,16 +633,6 @@ void QuadtreeMeshRenderer::shutdown()
         {
             SDL_ReleaseGPUBuffer(m_device, meshResources.indexBuffer);
             meshResources.indexBuffer = nullptr;
-        }
-        if (meshResources.vertexTransferBuffer != nullptr)
-        {
-            SDL_ReleaseGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer);
-            meshResources.vertexTransferBuffer = nullptr;
-        }
-        if (meshResources.vertexBuffer != nullptr)
-        {
-            SDL_ReleaseGPUBuffer(m_device, meshResources.vertexBuffer);
-            meshResources.vertexBuffer = nullptr;
         }
         meshResources.indexCount = 0;
     };
@@ -1363,9 +1351,6 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
     {
         SDL_BindGPUGraphicsPipeline(renderPass, m_mainPipeline);
 
-        const SDL_GPUBufferBinding vertexBinding{m_mainMesh.vertexBuffer, 0};
-        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
-
         const SDL_GPUBufferBinding indexBinding{m_mainMesh.indexBuffer, 0};
         SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
@@ -1391,21 +1376,6 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
 
 void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path &shaderDirectory)
 {
-    SDL_GPUVertexBufferDescription vertexBufferDescription{};
-    vertexBufferDescription.slot = 0;
-    vertexBufferDescription.pitch = sizeof(Vertex);
-    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-
-    SDL_GPUVertexAttribute vertexAttributes[2]{};
-    vertexAttributes[0].location = 0;
-    vertexAttributes[0].buffer_slot = 0;
-    vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
-    vertexAttributes[0].offset = offsetof(Vertex, localCoord);
-    vertexAttributes[1].location = 1;
-    vertexAttributes[1].buffer_slot = 0;
-    vertexAttributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
-    vertexAttributes[1].offset = offsetof(Vertex, sampleCoord);
-
     SDL_GPUColorTargetBlendState blendState{};
     blendState.enable_blend = true;
     blendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
@@ -1434,10 +1404,6 @@ void QuadtreeMeshRenderer::createPipelines(const std::filesystem::path &shaderDi
     pipelineInfo.target_info.color_target_descriptions = &colorTargetDescription;
     pipelineInfo.target_info.has_depth_stencil_target = true;
     pipelineInfo.target_info.depth_stencil_format = m_depthFormat;
-    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
-    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = &vertexBufferDescription;
-    pipelineInfo.vertex_input_state.num_vertex_attributes = 2;
-    pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
     auto createGraphicsPipeline = [this, &pipelineInfo, &shaderDirectory](const char *vertexShaderName) {
         SDL_GPUShader *vertexShader = createShader(shaderDirectory / vertexShaderName, SDL_GPU_SHADERSTAGE_VERTEX, 1, 2);
@@ -1507,24 +1473,6 @@ void QuadtreeMeshRenderer::createFoliageInstanceComputePipeline(const std::files
 
 void QuadtreeMeshRenderer::createStaticMeshResources()
 {
-    std::vector<Vertex> vertices;
-    vertices.reserve(kMainGridVertexResolution * kMainGridVertexResolution);
-
-    for (std::uint32_t z = 0; z < kMainGridVertexResolution; ++z)
-    {
-        for (std::uint32_t x = 0; x < kMainGridVertexResolution; ++x)
-        {
-            const float localX = static_cast<float>(x);
-            const float localZ = static_cast<float>(z);
-            const float sampleX = static_cast<float>(x) + kRenderedSampleCoordOffset;
-            const float sampleZ = static_cast<float>(z) + kRenderedSampleCoordOffset;
-            vertices.push_back({
-                {localX, localZ},
-                {sampleX, sampleZ},
-            });
-        }
-    }
-
     std::vector<std::uint32_t> indices;
     indices.reserve(kMainGridQuadResolution * kMainGridQuadResolution * 6);
 
@@ -1555,35 +1503,13 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
         }
     }
 
-    createMeshResources(vertices, indices, m_mainMesh);
+    createMeshResources(indices, m_mainMesh);
 
 }
 
-void QuadtreeMeshRenderer::createMeshResources(const std::vector<Vertex> &vertices, const std::vector<std::uint32_t> &indices,
+void QuadtreeMeshRenderer::createMeshResources(const std::vector<std::uint32_t> &indices,
                                                MeshResources &meshResources)
 {
-    SDL_GPUBufferCreateInfo vertexInfo{};
-    vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-    vertexInfo.size = static_cast<Uint32>(sizeof(Vertex) * vertices.size());
-    meshResources.vertexBuffer = SDL_CreateGPUBuffer(m_device, &vertexInfo);
-    if (meshResources.vertexBuffer == nullptr)
-    {
-        throwSdlError("Failed to create quadtree mesh vertex buffer.");
-    }
-
-    SDL_GPUTransferBufferCreateInfo vertexTransferInfo{};
-    vertexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    vertexTransferInfo.size = vertexInfo.size;
-    meshResources.vertexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &vertexTransferInfo);
-    if (meshResources.vertexTransferBuffer == nullptr)
-    {
-        throwSdlError("Failed to create quadtree mesh vertex transfer buffer.");
-    }
-
-    void *mappedVertices = SDL_MapGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer, false);
-    std::memcpy(mappedVertices, vertices.data(), sizeof(Vertex) * vertices.size());
-    SDL_UnmapGPUTransferBuffer(m_device, meshResources.vertexTransferBuffer);
-
     SDL_GPUBufferCreateInfo indexInfo{};
     indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
     indexInfo.size = static_cast<Uint32>(sizeof(std::uint32_t) * indices.size());
@@ -1608,13 +1534,6 @@ void QuadtreeMeshRenderer::createMeshResources(const std::vector<Vertex> &vertic
 
     SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
     SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
-
-    SDL_GPUTransferBufferLocation vertexSource{};
-    vertexSource.transfer_buffer = meshResources.vertexTransferBuffer;
-    SDL_GPUBufferRegion vertexDestination{};
-    vertexDestination.buffer = meshResources.vertexBuffer;
-    vertexDestination.size = vertexInfo.size;
-    SDL_UploadToGPUBuffer(copyPass, &vertexSource, &vertexDestination, false);
 
     SDL_GPUTransferBufferLocation indexSource{};
     indexSource.transfer_buffer = meshResources.indexTransferBuffer;

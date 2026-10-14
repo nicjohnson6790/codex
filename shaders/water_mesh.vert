@@ -12,7 +12,6 @@ layout(set=0, binding=1, std430) readonly buffer HeightmapBuffer
 
 #include "water_mesh_descriptors.glsl"
 
-layout(location = 0) in vec2 inLocalCoord;
 
 layout(location = 0) out vec3 fragWorldPosition;
 layout(location = 1) flat out uint fragBandMask;
@@ -66,6 +65,9 @@ void boundaryEndpoint(WaterBoundaryEdge edge, uint edgeIndex, float along,
 
 void main()
 {
+    // Match the original 129x129 normalized grid without vertex attribute fetches.
+    uint vertexIndex = uint(gl_VertexIndex);
+    vec2 inLocalCoord = vec2(vertexIndex % 129u, vertexIndex / 129u) / 128.0;
     WaterInstance instance = descriptors.parents[gl_InstanceIndex].body;
     bool hasTerrainSlice = instance.leafParams.w > 0.5;
     uint bandMask = (instance.packedMetadata >> 16u) & 0xFFFFu;

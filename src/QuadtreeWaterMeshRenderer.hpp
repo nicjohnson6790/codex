@@ -122,11 +122,6 @@ public:
     [[nodiscard]] SDL_GPUSampler* waterSampler() const { return m_waterSampler; }
 
 private:
-    struct Vertex
-    {
-        float localCoord[2]{};
-    };
-
     struct alignas(16) InstanceData
     {
         float position[3];
@@ -156,8 +151,6 @@ private:
 
     struct MeshResources
     {
-        SDL_GPUBuffer* vertexBuffer = nullptr;
-        SDL_GPUTransferBuffer* vertexTransferBuffer = nullptr;
         SDL_GPUBuffer* indexBuffer = nullptr;
         SDL_GPUTransferBuffer* indexTransferBuffer = nullptr;
         std::uint32_t vertexResolution = 0;
@@ -219,7 +212,6 @@ private:
     void createMeshGeometry(std::uint32_t vertexResolution);
     void destroyMesh();
     void createMeshResources(
-        const std::vector<Vertex>& vertices,
         const std::vector<std::uint32_t>& indices,
         MeshResources& resources);
     void createWorkingBuffers();

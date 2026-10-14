@@ -35,6 +35,9 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 
 ## Session handoff notes
 
+- Grouped-index work is committed as `69d1023`, with 4×4 selected. Subsequent procedural terrain/water coordinates derive from `gl_VertexIndex` on the original 257×257/129×129 vertex numbering. Both renderers retain grouped indices but remove vertex attributes and vertex-buffer allocation/upload/binding; preserve zero base-vertex offsets and matching C++/shader resolutions. 4xProc capture preserves exact 4×4 VS counts; exported terrain/water durations are 11.565/15.155 ms, 0.105/0.225 ms below ordinary 4×4 (combined 1.22%). One capture and replay anomalies do not establish a repeatable ~1% gain. See ignored `rd_perf/grouped_index_comparison.md`.
+- Procedural-coordinate validation passed Debug/Release builds, all seven tests per configuration, both vertex SPIR-V modules in both configurations, inspection confirming no vertex attribute inputs, and a 120-frame Debug GPU smoke run (exit 0, clean shutdown). User accepted retaining the procedural result after the 4xProc capture comparison.
+
 - Terrain/water static index generation groups quads spatially using `AppConfig::Quadtree::kMeshQuadGroupSize` (4 or 8 after rebuild; selected 4). Matched base/4×4/8×8 exports have identical 100 terrain/98 water instances and triangle counts. 4×4 reduces VS invocations 23.42%/23.72%; 8×8 increases them 10.28%/9.84% versus base. Exported combined draw durations are 28.900/27.051/29.100 ms; repeated water timings on subsequent foliage events limit attribution. See ignored `rd_perf/grouped_index_comparison.md`. Geometry/winding and one indexed draw each are unchanged.
 - Grouped-index validation at 4×4 passed canonical Debug/Release builds, all seven existing tests per configuration, quad coverage checks for both group sizes/resolutions, and a 120-frame Debug GPU smoke run (exit 0, clean shutdown).
 

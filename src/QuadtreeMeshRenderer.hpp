@@ -148,14 +148,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     }
 
   private:
-    // Static grid vertex data for one terrain patch. localCoord is patch space;
-    // sampleCoord is height lookup space.
-    struct Vertex
-    {
-        float localCoord[2];
-        float sampleCoord[2];
-    };
-
     // Per-instance data consumed by the vertex shader for one leaf draw.
     struct alignas(16) InstanceData
     {
@@ -178,8 +170,6 @@ class QuadtreeMeshRenderer : private EngineRendererBase
 
     struct MeshResources
     {
-        SDL_GPUBuffer *vertexBuffer = nullptr;
-        SDL_GPUTransferBuffer *vertexTransferBuffer = nullptr;
         SDL_GPUBuffer *indexBuffer = nullptr;
         SDL_GPUTransferBuffer *indexTransferBuffer = nullptr;
         std::uint32_t indexCount = 0;
@@ -257,7 +247,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
 
     // Builds the static mesh buffers for the reusable terrain meshes.
     void createStaticMeshResources();
-    void createMeshResources(const std::vector<Vertex> &vertices, const std::vector<std::uint32_t> &indices, MeshResources &meshResources);
+    void createMeshResources(const std::vector<std::uint32_t> &indices, MeshResources &meshResources);
 
     // Convenience helper for filling SDL's indexed-indirect draw struct.
     [[nodiscard]] static SDL_GPUIndexedIndirectDrawCommand makeDrawCommand(std::uint32_t indexCount, std::uint32_t instanceCount,

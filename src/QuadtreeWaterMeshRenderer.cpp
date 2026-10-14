@@ -24,6 +24,7 @@ constexpr std::uint32_t kWaterFftThreadCountX = 256;
 constexpr std::uint32_t kWaterFftThreadCountY = 1;
 constexpr std::uint32_t kWaterFftThreadCountZ = 1;
 constexpr SDL_GPUTextureFormat kWaterTextureFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+static_assert(AppConfig::Water::kMeshVertexResolution == 129, "Keep water_mesh.vert grid resolution aligned.");
 constexpr std::uint32_t kWaterMeshIntervalCount = AppConfig::Water::kMeshVertexResolution - 1u;
 constexpr std::uint32_t kWaterBaseMeshVertexResolution = AppConfig::Water::kMeshVertexResolution;
 constexpr std::uint32_t kFoamDetailTextureResolution = 256u;
@@ -231,11 +232,6 @@ GeneratedImage buildFoamNoiseTexture()
     }
 
     return image;
-}
-
-float normalizedWaterCoord(std::uint32_t index)
-{
-    return static_cast<float>(index) / static_cast<float>(kWaterMeshIntervalCount);
 }
 
 std::uint32_t fftStageCountForResolution(std::uint32_t resolution)
@@ -523,7 +519,6 @@ void QuadtreeWaterMeshRenderer::render(
     const auto drawMeshInstances = [&](SDL_GPUGraphicsPipeline* pipeline, const MeshResources& mesh)
     {
         if (pipeline == nullptr ||
-            mesh.vertexBuffer == nullptr ||
             mesh.indexBuffer == nullptr ||
             m_descriptorBuffer == nullptr ||
             m_instanceCount == 0)
@@ -551,9 +546,6 @@ void QuadtreeWaterMeshRenderer::render(
             clouds.coverage, clouds.noise,
         };
         SDL_BindGPUFragmentSamplers(renderPass, 0, fragmentSamplerBindings, 8);
-
-        const SDL_GPUBufferBinding vertexBinding{ mesh.vertexBuffer, 0 };
-        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
 
         const SDL_GPUBufferBinding indexBinding{ mesh.indexBuffer, 0 };
         SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -588,17 +580,6 @@ std::uint32_t QuadtreeWaterMeshRenderer::packMetadata(
 
 void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& shaderDirectory)
 {
-    SDL_GPUVertexBufferDescription vertexBufferDescription{};
-    vertexBufferDescription.slot = 0;
-    vertexBufferDescription.pitch = sizeof(Vertex);
-    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-
-    SDL_GPUVertexAttribute vertexAttribute{};
-    vertexAttribute.location = 0;
-    vertexAttribute.buffer_slot = 0;
-    vertexAttribute.format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
-    vertexAttribute.offset = offsetof(Vertex, localCoord);
-
     SDL_GPUColorTargetBlendState blendState{};
     blendState.enable_blend = true;
     blendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
@@ -631,10 +612,6 @@ void QuadtreeWaterMeshRenderer::createPipelines(const std::filesystem::path& sha
     pipelineInfo.target_info.color_target_descriptions = &colorTargetDescription;
     pipelineInfo.target_info.has_depth_stencil_target = true;
     pipelineInfo.target_info.depth_stencil_format = m_depthFormat;
-    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
-    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = &vertexBufferDescription;
-    pipelineInfo.vertex_input_state.num_vertex_attributes = 1;
-    pipelineInfo.vertex_input_state.vertex_attributes = &vertexAttribute;
 
     auto createGraphicsPipeline = [this, &pipelineInfo, &shaderDirectory](const char* vertexShaderName)
     {
@@ -736,18 +713,6 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
     const std::uint32_t n = resources.vertexResolution;
     const std::uint32_t quadCount = n - 1;
 
-    std::vector<Vertex> vertices;
-    vertices.reserve(static_cast<std::size_t>(n) * static_cast<std::size_t>(n));
-    for (std::uint32_t y = 0; y < n; ++y)
-    {
-        for (std::uint32_t x = 0; x < n; ++x)
-        {
-            vertices.push_back(Vertex{
-                { normalizedWaterCoord(x), normalizedWaterCoord(y) }
-            });
-        }
-    }
-
     std::vector<std::uint32_t> indices;
     indices.reserve(static_cast<std::size_t>(quadCount) * static_cast<std::size_t>(quadCount) * 6u);
     constexpr std::uint32_t groupSize = AppConfig::Quadtree::kMeshQuadGroupSize;
@@ -776,7 +741,7 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
         }
     }
 
-    createMeshResources(vertices, indices, resources);
+    createMeshResources(indices, resources);
 }
 
 void QuadtreeWaterMeshRenderer::destroyMesh()
@@ -793,16 +758,6 @@ void QuadtreeWaterMeshRenderer::destroyMesh()
             SDL_ReleaseGPUBuffer(m_device, resources.indexBuffer);
             resources.indexBuffer = nullptr;
         }
-        if (resources.vertexTransferBuffer != nullptr)
-        {
-            SDL_ReleaseGPUTransferBuffer(m_device, resources.vertexTransferBuffer);
-            resources.vertexTransferBuffer = nullptr;
-        }
-        if (resources.vertexBuffer != nullptr)
-        {
-            SDL_ReleaseGPUBuffer(m_device, resources.vertexBuffer);
-            resources.vertexBuffer = nullptr;
-        }
         resources.vertexResolution = 0;
         resources.indexCount = 0;
     };
@@ -811,33 +766,10 @@ void QuadtreeWaterMeshRenderer::destroyMesh()
 }
 
 void QuadtreeWaterMeshRenderer::createMeshResources(
-    const std::vector<Vertex>& vertices,
     const std::vector<std::uint32_t>& indices,
     MeshResources& resources)
 {
     resources.indexCount = static_cast<std::uint32_t>(indices.size());
-
-    SDL_GPUBufferCreateInfo vertexInfo{};
-    vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-    vertexInfo.size = static_cast<Uint32>(sizeof(Vertex) * vertices.size());
-    resources.vertexBuffer = SDL_CreateGPUBuffer(m_device, &vertexInfo);
-    if (resources.vertexBuffer == nullptr)
-    {
-        throwSdlError("Failed to create water vertex buffer.");
-    }
-
-    SDL_GPUTransferBufferCreateInfo vertexTransferInfo{};
-    vertexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    vertexTransferInfo.size = vertexInfo.size;
-    resources.vertexTransferBuffer = SDL_CreateGPUTransferBuffer(m_device, &vertexTransferInfo);
-    if (resources.vertexTransferBuffer == nullptr)
-    {
-        throwSdlError("Failed to create water vertex transfer buffer.");
-    }
-
-    void* mappedVertices = SDL_MapGPUTransferBuffer(m_device, resources.vertexTransferBuffer, false);
-    std::memcpy(mappedVertices, vertices.data(), sizeof(Vertex) * vertices.size());
-    SDL_UnmapGPUTransferBuffer(m_device, resources.vertexTransferBuffer);
 
     SDL_GPUBufferCreateInfo indexInfo{};
     indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
@@ -863,13 +795,6 @@ void QuadtreeWaterMeshRenderer::createMeshResources(
 
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(m_device);
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
-
-    SDL_GPUTransferBufferLocation vertexSource{};
-    vertexSource.transfer_buffer = resources.vertexTransferBuffer;
-    SDL_GPUBufferRegion vertexDestination{};
-    vertexDestination.buffer = resources.vertexBuffer;
-    vertexDestination.size = vertexInfo.size;
-    SDL_UploadToGPUBuffer(copyPass, &vertexSource, &vertexDestination, false);
 
     SDL_GPUTransferBufferLocation indexSource{};
     indexSource.transfer_buffer = resources.indexTransferBuffer;
