@@ -452,8 +452,9 @@ void SDLRenderer::renderFrame(
                 quadtreeMeshRenderer.heightmapBuffer(),
                 static_cast<float>(m_viewportExtent.height));
         }
-        cloudRenderer.render(skyRenderPass, commandBuffer, glm::inverse(viewProjection), m_viewportDepthTexture);
         SDL_EndGPURenderPass(skyRenderPass);
+        cloudRenderer.render(commandBuffer, glm::inverse(viewProjection), m_viewportDepthTexture,
+            m_sceneColorTexture, m_viewportExtent);
 
         m_displayTransform.meter(commandBuffer,m_sceneColorTexture,m_viewportExtent.width,m_viewportExtent.height);
 

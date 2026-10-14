@@ -6,11 +6,11 @@ Codex is an experimental large-world terrain sandbox and editor built in C++20 w
 
 ## Highlights
 
-- Large-world terrain with GPU-composed tiled ETOPO heightmaps and quadtree LOD
+- Large-world terrain with GPU-composed ETOPO heightmaps, optional Japan DEM10 detail, and complete tile meshes with quadtree LOD
 - Near-detail trees, mid-distance imposters, and far-field canopy shells from offline tree captures
 - Cascaded FFT water with shoreline foam and terrain interaction
-- Skybox, atmosphere, time-of-day lighting, debug drawing, and profiling tools
-- Procedural volumetric clouds with world-grid coverage, GPU-generated tileable noise, and sun scattering
+- HDR sky and atmosphere, automatic exposure, terrain-following sky illumination, time-of-day lighting, and profiling tools
+- Procedural volumetric clouds with world-grid coverage, GPU-generated noise, shared cloud lighting, and quarter-resolution fullscreen rendering
 - Offline runtime-asset conversion for meshes, textures, fonts, and global elevation data
 - Optional Steamworks lobbies, networking, and Steam Input support
 
@@ -64,6 +64,14 @@ tools\build.cmd Release
 
 The canonical build directories are `build/Debug`, `build/Release`, and `build/Assets/<Config>`. Application runtime files are isolated under `build/<Config>/app`, tests under `build/<Config>/tests`, and the offline converter under `build/Assets/<Config>/converter`.
 When `STEAMWORKS_APP_ID` is set, CMake generates `steam_appid.txt` directly beside the application executable in `build/<Config>/app`, including configurations where Steamworks support itself is disabled.
+
+## Rendering controls
+
+Controls / Clouds enables clouds and adjusts their density, motion, lighting, and sampling budgets. **Quarter-resolution fullscreen clouds** defaults on: clouds march at half the viewport width and height, then upscale with bilinear filtering. Disable it for a full-resolution comparison. The simpler upscale can show subtle artifacts at foreground edges; its appearance has been accepted.
+
+The resolution checkbox affects only fullscreen clouds. The Clouds master switch also changes cloud shadows, water reflection/transmission, and sky-illumination inputs, so the two controls measure different work. No matched GPU timing has been recorded for the accepted upscale.
+
+Controls / Sky illumination sets the terrain-probe refresh budget (four tiles per frame by default); foliage shares this lighting. Automatic camera exposure applies after HDR atmosphere and clouds, before display overlays. Detailed ownership, pass order, and resource layouts are in the [rendering architecture](docs/codex_rendering_architecture.md).
 
 ## Runtime assets
 

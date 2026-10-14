@@ -23,6 +23,7 @@ inline float smoothstep(double a,double b,float c) { return glm::smoothstep(floa
 #include "../shaders/cloud_optics.glsl"
 #include "../shaders/cloud_noise.glsl"
 #include "../shaders/cloud_slab.glsl"
+#include "../shaders/cloud_coordinates.glsl"
 #include "../shaders/terrain_lighting.glsl"
 // Constant density isolates the actual shadow march from texture generation.
 struct CloudDensityField { vec4 layer, macro; };
@@ -37,6 +38,19 @@ float sampleCloudDensity(vec3, CloudDensityField field, sampler2D, sampler3D)
 
 int main()
 {
+    assert(cloudHalfResolutionDimension(0)==0);
+    assert(cloudHalfResolutionDimension(1)==1);
+    assert(cloudHalfResolutionDimension(2)==1);
+    assert(cloudHalfResolutionDimension(3)==2);
+    assert(cloudHalfResolutionDimension(1921)==961);
+    assert(cloudHalfResolutionDimension(std::numeric_limits<std::uint32_t>::max())==0x80000000u);
+    // Match the existing fullscreen vertex varying under SDL's flipped Vulkan
+    // viewport: upper pixels must unproject above the camera, not below it.
+    const glm::vec2 screenExtent{8,6};
+    assert(glm::length(Shader::cloudPixelToNdc({0,0},screenExtent)-glm::vec2(-1,1))<1e-6f);
+    assert(glm::length(Shader::cloudPixelToNdc(screenExtent,screenExtent)-glm::vec2(1,-1))<1e-6f);
+    assert(glm::length(Shader::cloudPixelToNdc({4,3},screenExtent))<1e-6f);
+    assert(glm::length(Shader::cloudPixelToNdc({1,1},screenExtent)-glm::vec2(-0.75f,2.0f/3.0f))<1e-6f);
     testSkyIllumination();
     const float horizon=std::sin(glm::radians(AppConfig::Terrain::kSolarHorizonFadeDegrees));
     float previousSolar=0;

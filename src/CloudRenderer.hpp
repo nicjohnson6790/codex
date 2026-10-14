@@ -1,6 +1,7 @@
 #pragma once
 #include "CloudManager.hpp"
 #include "SkyboxRenderer.hpp"
+#include "RenderTypes.hpp"
 #include <cstddef>
 
 class CloudRenderer : private EngineRendererBase
@@ -9,6 +10,7 @@ public:
     struct Settings
     {
         bool enabled=true;
+        bool quarterResolution=true; // Half width/height for the fullscreen march only.
         std::uint32_t seed=173;
         int noiseDimensions[3]{32,32,64}; // Applied on initialization; no CPU volume.
         float baseAltitude=1800, thickness=6500, coverage=0.15f, density=3.5f;
@@ -54,6 +56,7 @@ public:
     {
         glm::mat4 inverseViewProjection;
         SamplingState cloud;
+        glm::uvec4 extent; // Full width/height, march width/height.
     };
     struct SamplingResources
     {
@@ -64,8 +67,9 @@ public:
     static_assert(offsetof(SamplingState,optics)==160);
     static_assert(offsetof(SamplingState,scattering)==240);
     static_assert(offsetof(SamplingState,march)==272);
-    static_assert(sizeof(Uniforms)==368);
+    static_assert(sizeof(Uniforms)==384);
     static_assert(offsetof(Uniforms,cloud)==64);
+    static_assert(offsetof(Uniforms,extent)==368);
     SamplingResources waterSamplingResources() const;
     SamplingResources samplingResources() const;
     Settings& settings() { return m_settings; }
@@ -73,15 +77,20 @@ public:
     void initialize(SDL_GPUDevice*,SDL_GPUTextureFormat,SDL_GPUTextureFormat,const std::filesystem::path&);
     void shutdown();
     void upload(SDL_GPUCopyPass*,const Position&,double timeSeconds,const SkyboxRenderer&,const LightingSystem&);
-    void render(SDL_GPURenderPass*,SDL_GPUCommandBuffer*,const glm::mat4&,SDL_GPUTexture*);
+    void render(SDL_GPUCommandBuffer*,const glm::mat4&,SDL_GPUTexture* depth,
+        SDL_GPUTexture* scene,Extent2D viewport);
     CloudManager& manager() { return m_manager; }
 private:
+    void ensureScreenTargets(Extent2D march);
     Settings m_settings;
     CloudManager m_manager;
     SDL_GPUTexture *m_macro=nullptr,*m_noise=nullptr;
     SDL_GPUTransferBuffer* m_upload=nullptr;
     SDL_GPUSampler *m_linear=nullptr,*m_repeat=nullptr,*m_depth=nullptr;
     SDL_GPUGraphicsPipeline* m_pipeline=nullptr;
+    SDL_GPUGraphicsPipeline* m_compositePipeline=nullptr;
+    SDL_GPUTexture* m_screenColor=nullptr;
+    Extent2D m_screenExtent{};
     DensityUniforms m_field{};
     SamplingState m_prepared{};
     glm::vec2 m_waterSteps{1.0f};

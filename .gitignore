@@ -3,3 +3,4 @@ assets
 !src/assets/
 !src/assets/**
 launch.log
+/rd_perf/

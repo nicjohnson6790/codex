@@ -230,7 +230,18 @@ compile_shader(${CMAKE_SOURCE_DIR}/shaders/water_build_maps.comp ${WATER_BUILD_M
 
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/display_transform.frag ${SHADER_OUTPUT_DIR}/display_transform.frag.spv ${CMAKE_SOURCE_DIR}/shaders/display_transfer.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.vert ${SHADER_OUTPUT_DIR}/cloud.vert.spv)
-compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.frag ${SHADER_OUTPUT_DIR}/cloud.frag.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl)
+set(CLOUD_SCREEN_SHADER_DEPENDENCIES
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_screen.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_coordinates.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_density.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_shape.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_optics.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/atmosphere_math.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_slab.glsl
+    ${CMAKE_SOURCE_DIR}/shaders/cloud_integration.glsl)
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud.frag ${SHADER_OUTPUT_DIR}/cloud.frag.spv ${CLOUD_SCREEN_SHADER_DEPENDENCIES})
+compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud_composite.frag ${SHADER_OUTPUT_DIR}/cloud_composite.frag.spv ${CLOUD_SCREEN_SHADER_DEPENDENCIES} ${CMAKE_SOURCE_DIR}/shaders/cloud_coordinates.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/cloud_noise.comp ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv ${CMAKE_SOURCE_DIR}/shaders/cloud_noise.glsl)
 compile_shader(${CMAKE_SOURCE_DIR}/shaders/sky_illumination.comp ${SHADER_OUTPUT_DIR}/sky_illumination.comp.spv
     ${CMAKE_SOURCE_DIR}/shaders/sky_illumination_math.glsl ${CMAKE_SOURCE_DIR}/shaders/atmosphere.glsl
@@ -249,6 +260,7 @@ add_custom_target(shaders ALL
         ${SHADER_OUTPUT_DIR}/display_transform.frag.spv
         ${SHADER_OUTPUT_DIR}/cloud.vert.spv
         ${SHADER_OUTPUT_DIR}/cloud.frag.spv
+        ${SHADER_OUTPUT_DIR}/cloud_composite.frag.spv
         ${SHADER_OUTPUT_DIR}/cloud_noise.comp.spv
         ${SHADER_OUTPUT_DIR}/sky_illumination.comp.spv
         ${TRIANGLE_VERT_SPV}

@@ -1,7 +1,14 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include "PeriodicWorldPhase.hpp"
+
+// Round up so odd viewport dimensions retain their final row/column.
+constexpr std::uint32_t cloudHalfResolutionDimension(std::uint32_t full)
+{
+    return full / 2u + full % 2u;
+}
 
 // Rows are the front normal and its stretched perpendicular. Round once to the
 // uploaded float coefficients before evaluating any universe-scale origin phase.
