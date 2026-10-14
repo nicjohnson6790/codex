@@ -526,6 +526,8 @@ Terrain lighting validation: canonical Debug/Release builds and all six tests in
 
 ## 18. Complete tile meshes and boundary descriptors
 
+Both static index buffers emit quads in square spatial groups, row-major within each group and across groups. `AppConfig::Quadtree::kMeshQuadGroupSize` supports 4 or 8 after rebuilding both terrain and water; 4 is selected. Matched captures with identical geometry showed 4×4 reducing terrain/water vertex invocations by 23.42%/23.72%, while 8×8 increased them by 10.28%/9.84% over row-major baseline. Combined exported draw durations were 28.900/27.051/29.100 ms for base/4×4/8×8; replay timing anomalies prevent treating these as whole-frame savings. Triangle winding, geometry and one draw per surface are preserved.
+
 Terrain and water remain separate renderers with one complete base mesh, one surface graphics pipeline, and one instanced indexed indirect command each. No bridge geometry, references, partitions, or separate draws remain. CPU traversal, frustum/LOD decisions, ready-only residency, manager scheduling and renderer resource ownership are unchanged. No visibility history or seam lifecycle is introduced.
 
 `ParentMeshDescriptors` contains only its fixed-capacity parent array. Each upload copies the populated prefix (`count × stride`) and refreshes the single 20-byte indirect command, including zero counts. There is no owner table, inter-parent reference, GPU expansion, or dynamic descriptor storage. Boundary data is embedded in each parent's record; a water owner need not emit a water draw.

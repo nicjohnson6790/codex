@@ -1528,21 +1528,30 @@ void QuadtreeMeshRenderer::createStaticMeshResources()
     std::vector<std::uint32_t> indices;
     indices.reserve(kMainGridQuadResolution * kMainGridQuadResolution * 6);
 
-    for (std::uint32_t z = 0; z < kMainGridQuadResolution; ++z)
+    constexpr std::uint32_t groupSize = AppConfig::Quadtree::kMeshQuadGroupSize;
+    static_assert(kMainGridQuadResolution % groupSize == 0);
+    // Keep each block's shared vertices close together in the index stream.
+    for (std::uint32_t groupZ = 0; groupZ < kMainGridQuadResolution; groupZ += groupSize)
     {
-        for (std::uint32_t x = 0; x < kMainGridQuadResolution; ++x)
+        for (std::uint32_t groupX = 0; groupX < kMainGridQuadResolution; groupX += groupSize)
         {
-            const std::uint32_t topLeft = (z * kMainGridVertexResolution) + x;
-            const std::uint32_t topRight = topLeft + 1;
-            const std::uint32_t bottomLeft = topLeft + kMainGridVertexResolution;
-            const std::uint32_t bottomRight = bottomLeft + 1;
+            for (std::uint32_t z = groupZ; z < groupZ + groupSize; ++z)
+            {
+                for (std::uint32_t x = groupX; x < groupX + groupSize; ++x)
+                {
+                    const std::uint32_t topLeft = (z * kMainGridVertexResolution) + x;
+                    const std::uint32_t topRight = topLeft + 1;
+                    const std::uint32_t bottomLeft = topLeft + kMainGridVertexResolution;
+                    const std::uint32_t bottomRight = bottomLeft + 1;
 
-            indices.push_back(topLeft);
-            indices.push_back(bottomLeft);
-            indices.push_back(topRight);
-            indices.push_back(topRight);
-            indices.push_back(bottomLeft);
-            indices.push_back(bottomRight);
+                    indices.push_back(topLeft);
+                    indices.push_back(bottomLeft);
+                    indices.push_back(topRight);
+                    indices.push_back(topRight);
+                    indices.push_back(bottomLeft);
+                    indices.push_back(bottomRight);
+                }
+            }
         }
     }
 

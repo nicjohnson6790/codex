@@ -750,21 +750,29 @@ void QuadtreeWaterMeshRenderer::createMeshGeometry(std::uint32_t vertexResolutio
 
     std::vector<std::uint32_t> indices;
     indices.reserve(static_cast<std::size_t>(quadCount) * static_cast<std::size_t>(quadCount) * 6u);
-    for (std::uint32_t y = 0; y < quadCount; ++y)
+    constexpr std::uint32_t groupSize = AppConfig::Quadtree::kMeshQuadGroupSize;
+    // Clamp the last block so this also supports non-divisible grid resolutions.
+    for (std::uint32_t groupY = 0; groupY < quadCount; groupY += groupSize)
     {
-        for (std::uint32_t x = 0; x < quadCount; ++x)
+        for (std::uint32_t groupX = 0; groupX < quadCount; groupX += groupSize)
         {
-            const std::uint32_t i0 = y * n + x;
-            const std::uint32_t i1 = y * n + x + 1;
-            const std::uint32_t i2 = (y + 1) * n + x;
-            const std::uint32_t i3 = (y + 1) * n + x + 1;
+            for (std::uint32_t y = groupY; y < std::min(groupY + groupSize, quadCount); ++y)
+            {
+                for (std::uint32_t x = groupX; x < std::min(groupX + groupSize, quadCount); ++x)
+                {
+                    const std::uint32_t i0 = y * n + x;
+                    const std::uint32_t i1 = y * n + x + 1;
+                    const std::uint32_t i2 = (y + 1) * n + x;
+                    const std::uint32_t i3 = (y + 1) * n + x + 1;
 
-            indices.push_back(i0);
-            indices.push_back(i2);
-            indices.push_back(i1);
-            indices.push_back(i1);
-            indices.push_back(i2);
-            indices.push_back(i3);
+                    indices.push_back(i0);
+                    indices.push_back(i2);
+                    indices.push_back(i1);
+                    indices.push_back(i1);
+                    indices.push_back(i2);
+                    indices.push_back(i3);
+                }
+            }
         }
     }
 

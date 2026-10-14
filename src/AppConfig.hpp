@@ -40,6 +40,9 @@ inline constexpr float kTriggerDeadzone = 0.08f;
 
 namespace Quadtree
 {
+// Quad blocks used by both surface index buffers. Set to 4 or 8 and rebuild for comparison.
+inline constexpr std::uint32_t kMeshQuadGroupSize = 4;
+static_assert(kMeshQuadGroupSize == 4 || kMeshQuadGroupSize == 8);
 inline constexpr std::int64_t kNeighborRadius = 1;
 inline constexpr double kMinimumQuadSize = 256.0;
 inline constexpr double kSubdivisionDistanceFactor = 1.1;
