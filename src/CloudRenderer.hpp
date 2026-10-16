@@ -90,6 +90,7 @@ private:
     SDL_GPUGraphicsPipeline* m_pipeline=nullptr;
     SDL_GPUGraphicsPipeline* m_compositePipeline=nullptr;
     SDL_GPUTexture* m_screenColor=nullptr;
+    SDL_GPUTexture* m_screenDepth=nullptr; // R32_FLOAT scene depth used to bound each march.
     Extent2D m_screenExtent{};
     DensityUniforms m_field{};
     SamplingState m_prepared{};

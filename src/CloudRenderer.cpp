@@ -58,17 +58,18 @@ void CloudRenderer::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat color,
 
         vs=createShader(shaders/"cloud.vert.spv",SDL_GPU_SHADERSTAGE_VERTEX,0);
         fs=createShader(shaders/"cloud.frag.spv",SDL_GPU_SHADERSTAGE_FRAGMENT,1,0,3);
-        SDL_GPUColorTargetDescription marchTargets[1]{};
+        SDL_GPUColorTargetDescription marchTargets[2]{};
         marchTargets[0].format=color;
+        marchTargets[1].format=SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
         SDL_GPUGraphicsPipelineCreateInfo pi{};
         pi.vertex_shader=vs; pi.fragment_shader=fs; pi.primitive_type=SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
         pi.rasterizer_state.fill_mode=SDL_GPU_FILLMODE_FILL; pi.rasterizer_state.cull_mode=SDL_GPU_CULLMODE_NONE;
         pi.multisample_state.sample_count=SDL_GPU_SAMPLECOUNT_1;
-        pi.target_info.num_color_targets=1; pi.target_info.color_target_descriptions=marchTargets;
+        pi.target_info.num_color_targets=2; pi.target_info.color_target_descriptions=marchTargets;
         m_pipeline=SDL_CreateGPUGraphicsPipeline(device,&pi);
         if(!m_pipeline) throwSdlError("Cloud march pipeline");
         SDL_ReleaseGPUShader(device,fs); fs=nullptr;
-        fs=createShader(shaders/"cloud_composite.frag.spv",SDL_GPU_SHADERSTAGE_FRAGMENT,1,0,1);
+        fs=createShader(shaders/"cloud_composite.frag.spv",SDL_GPU_SHADERSTAGE_FRAGMENT,1,0,3);
         SDL_GPUColorTargetDescription compositeTargets[1]{};
         compositeTargets[0].format=color;
         auto& blend=compositeTargets[0].blend_state;
@@ -95,11 +96,11 @@ void CloudRenderer::shutdown()
     if(m_pipeline) SDL_ReleaseGPUGraphicsPipeline(m_device,m_pipeline);
     if(m_compositePipeline) SDL_ReleaseGPUGraphicsPipeline(m_device,m_compositePipeline);
     if(m_upload) SDL_ReleaseGPUTransferBuffer(m_device,m_upload);
-    for(auto* texture:{m_macro,m_noise,m_screenColor}) if(texture) SDL_ReleaseGPUTexture(m_device,texture);
+    for(auto* texture:{m_macro,m_noise,m_screenColor,m_screenDepth}) if(texture) SDL_ReleaseGPUTexture(m_device,texture);
     for(auto* sampler:{m_linear,m_repeat,m_depth}) if(sampler) SDL_ReleaseGPUSampler(m_device,sampler);
     m_pipeline=nullptr; m_upload=nullptr; m_macro=m_noise=nullptr; m_linear=m_repeat=m_depth=nullptr;
     m_compositePipeline=nullptr;
-    m_screenColor=nullptr; m_screenExtent={};
+    m_screenColor=m_screenDepth=nullptr; m_screenExtent={};
     m_uploadedRevision=0;
 }
 
@@ -208,9 +209,18 @@ void CloudRenderer::ensureScreenTargets(Extent2D extent)
     info.num_levels=1; info.sample_count=SDL_GPU_SAMPLECOUNT_1;
     auto* color=SDL_CreateGPUTexture(m_device,&info);
     if(!color) throwSdlError("Cloud screen color target");
+    info.format=SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+    auto* depth=SDL_CreateGPUTexture(m_device,&info);
+    if(!depth)
+    {
+        SDL_ReleaseGPUTexture(m_device,color);
+        throwSdlError("Cloud screen march depth target");
+    }
     SDL_SetGPUTextureName(m_device,color,"Cloud radiance and opacity");
+    SDL_SetGPUTextureName(m_device,depth,"Cloud march scene depth");
     if(m_screenColor) SDL_ReleaseGPUTexture(m_device,m_screenColor);
-    m_screenColor=color; m_screenExtent=extent;
+    if(m_screenDepth) SDL_ReleaseGPUTexture(m_device,m_screenDepth);
+    m_screenColor=color; m_screenDepth=depth; m_screenExtent=extent;
 }
 
 void CloudRenderer::render(SDL_GPUCommandBuffer* command,const glm::mat4& inverse,
@@ -231,9 +241,12 @@ void CloudRenderer::render(SDL_GPUCommandBuffer* command,const glm::mat4& invers
     };
     {
         HELLO_PROFILE_SCOPE_GROUPS("CloudRenderer::March", ProfileScopeGroup::Renderer);
-        SDL_GPUColorTargetInfo target{}; target.texture=m_screenColor;
-        target.load_op=SDL_GPU_LOADOP_DONT_CARE; target.store_op=SDL_GPU_STOREOP_STORE;
-        auto* pass=SDL_BeginGPURenderPass(command,&target,1,nullptr);
+        SDL_GPUColorTargetInfo targets[2]{};
+        targets[0].texture=m_screenColor; targets[1].texture=m_screenDepth;
+        for(auto& target:targets) {
+            target.load_op=SDL_GPU_LOADOP_DONT_CARE; target.store_op=SDL_GPU_STOREOP_STORE;
+        }
+        auto* pass=SDL_BeginGPURenderPass(command,targets,2,nullptr);
         if(!pass) throwSdlError("Cloud march pass");
         setViewport(pass,marchExtent);
         SDL_BindGPUGraphicsPipeline(pass,m_pipeline);
@@ -251,8 +264,8 @@ void CloudRenderer::render(SDL_GPUCommandBuffer* command,const glm::mat4& invers
         if(!pass) throwSdlError("Cloud composite pass");
         setViewport(pass,viewportExtent);
         SDL_BindGPUGraphicsPipeline(pass,m_compositePipeline);
-        SDL_GPUTextureSamplerBinding sampler{m_screenColor,m_linear};
-        SDL_BindGPUFragmentSamplers(pass,0,&sampler,1);
+        SDL_GPUTextureSamplerBinding samplers[]{{m_screenColor,m_linear},{m_screenDepth,m_depth},{depth,m_depth}};
+        SDL_BindGPUFragmentSamplers(pass,0,samplers,3);
         SDL_PushGPUFragmentUniformData(command,0,&u,sizeof(u));
         SDL_DrawGPUPrimitives(pass,3,1,0,0);
         SDL_EndGPURenderPass(pass);

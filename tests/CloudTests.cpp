@@ -51,6 +51,25 @@ int main()
     assert(glm::length(Shader::cloudPixelToNdc(screenExtent,screenExtent)-glm::vec2(1,-1))<1e-6f);
     assert(glm::length(Shader::cloudPixelToNdc({4,3},screenExtent))<1e-6f);
     assert(glm::length(Shader::cloudPixelToNdc({1,1},screenExtent)-glm::vec2(-0.75f,2.0f/3.0f))<1e-6f);
+    // Actual shader helpers: sky must win a farthest-depth reduction, and
+    // foreground taps must retain the existing scene rather than cloud color.
+    assert(Shader::cloudFarthestDepth({0.8f,0.2f,0.6f,0.4f})==0.2f);
+    assert(Shader::cloudFarthestDepth({0.8f,0.0f,0.6f,0.4f})==0.0f);
+    assert(Shader::cloudDepthAccept(0.2f,0.2f));
+    assert(Shader::cloudDepthAccept(0.1f,0.2f));
+    assert(!Shader::cloudDepthAccept(0.4f,0.2f));
+    assert(!Shader::cloudDepthAccept(0.000001f,0.0f));
+    assert(Shader::cloudDepthAccept(0.0f,0.0f));
+    assert(Shader::cloudDepthAccept(1e-8f,1e-8f));
+    assert(!Shader::cloudDepthAccept(2e-8f,1e-8f));
+    assert(glm::length(Shader::cloudMarchPixelCenter({0,0},{5,3},true)-glm::vec2(1,1))<1e-6f);
+    assert(glm::length(Shader::cloudMarchPixelCenter({2,1},{5,3},true)-glm::vec2(4.5f,2.5f))<1e-6f);
+    assert(glm::length(Shader::cloudMarchPixelCenter({0,0},{1,1},true)-glm::vec2(0.5f))<1e-6f);
+    assert(glm::length(Shader::cloudMarchPixelCenter({2,1},{5,3},false)-glm::vec2(2.5f,1.5f))<1e-6f);
+    assert(std::abs(Shader::cloudReconstructionAxis(1.0f,6))<1e-6f);
+    assert(std::abs(Shader::cloudReconstructionAxis(5.0f,6)-2.0f)<1e-6f);
+    assert(std::abs(Shader::cloudReconstructionAxis(3.0f,5)-1.0f)<1e-6f);
+    assert(std::abs(Shader::cloudReconstructionAxis(4.5f,5)-2.0f)<1e-6f);
     testSkyIllumination();
     const float horizon=std::sin(glm::radians(AppConfig::Terrain::kSolarHorizonFadeDegrees));
     float previousSolar=0;
