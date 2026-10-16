@@ -46,6 +46,7 @@ static_assert(kMeshQuadGroupSize == 4 || kMeshQuadGroupSize == 8);
 inline constexpr std::int64_t kNeighborRadius = 1;
 inline constexpr double kMinimumQuadSize = 256.0;
 inline constexpr double kSubdivisionDistanceFactor = 1.1;
+inline constexpr double kVisibilityHeightPaddingMeters = 100.0;
 inline constexpr double kDebugDepthHeightOffset = 0.05;
 inline constexpr double kDebugBaseHeightOffset = 0.02;
 } // namespace Quadtree

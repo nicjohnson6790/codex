@@ -35,6 +35,12 @@ Keep notes concise and current. Do not append command transcripts or routine pro
 
 ## Session handoff notes
 
+- Cloud reconstruction tolerance fix: raw reversed-depth epsilon was too tight for neighboring sloped-ground samples, producing alternate cloud scanlines from above. Composite now unprojects both depths on the same full-resolution ray and uses a max(1 m, 0.5% of scene distance) floor plus slope-aware tolerance derived from four adjacent scene depths (smoother side per axis, three-pixel support), capped at 5% of scene distance. This addresses the remaining glancing-ground scanline bands reported with the fixed 0.5% tolerance. Actual shader helpers are tested from 10 m to 100 km and preserve sky/foreground rejection. Full-resolution mode and shared marcher are unchanged. Visual confirmation remains pending; changes are uncommitted.
+- Cloud-tolerance validation passed Debug/Release builds, cloud_tests in both, both cloud fragment SPIR-V modules in both and a 120-frame Debug GPU smoke run (exit 0, clean shutdown).
+
+- Tile frustum bounds extend terrain maximum height upward by `AppConfig::Quadtree::kVisibilityHeightPaddingMeters` (100 m), before union with water visibility bounds. This keeps foliage emission alive when a flat tile's ground is below the view frustum but its trees remain visible. Height data, lower bounds and distance-based LOD decisions are unchanged. User confirmed the edge-of-tile/upward-look popping is fixed.
+- Visibility-padding validation passed canonical Debug/Release builds and terrain corner-neighbor tests in both. The user confirmed the visual fix; changes remain uncommitted.
+
 - Water foam/night-lighting fix: `water_mesh.frag` foam and direct specular use shared `surfaceSunIrradiance` and terrain's 0–1° horizon fade. Foam direct diffuse uses N·L/pi, removing the raw-sun 30% floor. `WaterUniforms.opticalParams.x` now carries the horizon sine in the previously reserved lane; layouts/bindings remain unchanged. Clear-sky ambient, underwater paths and foam motion/history are unchanged. User reviewed and accepted the foam-lighting result on October 16, 2026; 64×64-quad water mesh is accepted.
 - Foam-lighting validation passed Debug/Release builds, both water SPIR-V modules in each, atmosphere math and periodic-coordinate tests in each, and a 120-frame Debug GPU smoke run (exit 0, clean shutdown). User reviewed and accepted the fix.
 

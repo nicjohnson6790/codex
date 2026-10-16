@@ -55,13 +55,29 @@ int main()
     // foreground taps must retain the existing scene rather than cloud color.
     assert(Shader::cloudFarthestDepth({0.8f,0.2f,0.6f,0.4f})==0.2f);
     assert(Shader::cloudFarthestDepth({0.8f,0.0f,0.6f,0.4f})==0.0f);
-    assert(Shader::cloudDepthAccept(0.2f,0.2f));
-    assert(Shader::cloudDepthAccept(0.1f,0.2f));
-    assert(!Shader::cloudDepthAccept(0.4f,0.2f));
-    assert(!Shader::cloudDepthAccept(0.000001f,0.0f));
-    assert(Shader::cloudDepthAccept(0.0f,0.0f));
-    assert(Shader::cloudDepthAccept(1e-8f,1e-8f));
-    assert(!Shader::cloudDepthAccept(2e-8f,1e-8f));
+    assert(Shader::cloudDepthAccept(0.2f,0.2f,1000.0f,1000.0f));
+    assert(Shader::cloudDepthAccept(0.1f,0.2f,2000.0f,1000.0f));
+    assert(!Shader::cloudDepthAccept(0.4f,0.2f,500.0f,1000.0f));
+    assert(!Shader::cloudDepthAccept(0.000001f,0.0f,10000.0f,1e30f));
+    assert(Shader::cloudDepthAccept(0.0f,0.0f,1e30f,1e30f));
+    assert(Shader::cloudDepthAccept(0.0f,0.2f,1e30f,1000.0f));
+    // Gentle ground differences are accepted at both near and far distances;
+    // actual foreground discontinuities remain rejected at the same scales.
+    for(float distance:{10.0f,1000.0f,10000.0f,100000.0f})
+    {
+        float tolerance=Shader::cloudDepthTolerance(distance);
+        assert(tolerance>=1.0f);
+        assert(Shader::cloudDepthAccept(0.2f,0.19f,distance,distance+tolerance*0.9f));
+        assert(!Shader::cloudDepthAccept(0.2f,0.19f,distance,distance+tolerance*1.1f));
+    }
+    assert(Shader::cloudDepthTolerance(1000.0f)==5.0f);
+    assert(Shader::cloudDepthTolerance(10000.0f)==50.0f);
+    assert(Shader::cloudSlopeTolerance(1000.0f,0.0f)==5.0f);
+    assert(Shader::cloudSlopeTolerance(1000.0f,30.0f)==30.0f);
+    assert(Shader::cloudSlopeTolerance(1000.0f,10000.0f)==50.0f);
+    assert(Shader::cloudDepthAccept(0.2f,0.19f,1000.0f,1025.0f,30.0f));
+    assert(!Shader::cloudDepthAccept(0.2f,0.19f,1000.0f,1060.0f,10000.0f));
+    assert(!Shader::cloudDepthAccept(0.2f,0.0f,1000.0f,1e30f,10000.0f));
     assert(glm::length(Shader::cloudMarchPixelCenter({0,0},{5,3},true)-glm::vec2(1,1))<1e-6f);
     assert(glm::length(Shader::cloudMarchPixelCenter({2,1},{5,3},true)-glm::vec2(4.5f,2.5f))<1e-6f);
     assert(glm::length(Shader::cloudMarchPixelCenter({0,0},{1,1},true)-glm::vec2(0.5f))<1e-6f);

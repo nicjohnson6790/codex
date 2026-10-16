@@ -12,10 +12,30 @@ float cloudFarthestDepth(vec4 depths)
     return min(min(depths.x,depths.y),min(depths.z,depths.w));
 }
 
-bool cloudDepthAccept(float sceneDepth,float marchDepth)
+float cloudDepthTolerance(float sceneDistance)
 {
-    // Relative tolerance absorbs depth roundoff without a distance-dependent halo.
-    return sceneDepth <= marchDepth + max(abs(marchDepth)*1e-5f,1e-12f);
+    // Metres: neighboring rays on continuous ground need geometric tolerance,
+    // not just floating-point epsilon in nonlinear reversed depth.
+    return max(1.0f,sceneDistance*0.005f);
+}
+
+float cloudSlopeTolerance(float sceneDistance,float footprintDifference)
+{
+    // Bound slope-driven relaxation at silhouettes; 0.5% remains the floor.
+    return max(cloudDepthTolerance(sceneDistance),min(max(footprintDifference,0.0f),sceneDistance*0.05f));
+}
+
+bool cloudDepthAccept(float sceneDepth,float marchDepth,float sceneDistance,float marchDistance,float footprintDifference)
+{
+    if(sceneDepth<=0.0f) return true;
+    // A sky-bounded march must never bleed over finite foreground geometry.
+    if(marchDepth<=0.0f) return false;
+    return marchDistance <= sceneDistance+cloudSlopeTolerance(sceneDistance,footprintDifference);
+}
+
+bool cloudDepthAccept(float sceneDepth,float marchDepth,float sceneDistance,float marchDistance)
+{
+    return cloudDepthAccept(sceneDepth,marchDepth,sceneDistance,marchDistance,0.0f);
 }
 
 vec2 cloudMarchPixelCenter(ivec2 pixel,ivec2 fullSize,bool quarter)

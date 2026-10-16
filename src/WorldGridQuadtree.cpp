@@ -1282,6 +1282,8 @@ bool WorldGridQuadtree::nodeIsVisible(
 {
     double minHeight = extents != nullptr ? static_cast<double>(extents->minHeight) : -kVisibilityBoundsHalfHeight;
     double maxHeight = extents != nullptr ? static_cast<double>(extents->maxHeight) : kVisibilityBoundsHalfHeight;
+    // Tile visibility also gates foliage emission above the terrain surface.
+    maxHeight += AppConfig::Quadtree::kVisibilityHeightPaddingMeters;
     if (m_waterVisibilityBoundsEnabled)
     {
         minHeight = std::min(minHeight, static_cast<double>(m_waterVisibilityMinHeight));
