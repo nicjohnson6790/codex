@@ -262,7 +262,8 @@ inline constexpr float kDefaultShoreFoamDecayDepthStart = -0.25f;
 inline constexpr float kDefaultShoreFoamDecayDepthEnd = 0.80f;
 inline constexpr glm::vec3 kCrestFoamColor{0.92f, 0.97f, 1.0f};
 
-inline constexpr std::uint32_t kMeshVertexResolution = 129;
+// 64x64 quads; keep the procedural water shader resolution aligned.
+inline constexpr std::uint32_t kMeshVertexResolution = 65;
 inline constexpr std::uint32_t kMaxWaterInstances = 4096;
 } // namespace Water
 

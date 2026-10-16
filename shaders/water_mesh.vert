@@ -65,9 +65,9 @@ void boundaryEndpoint(WaterBoundaryEdge edge, uint edgeIndex, float along,
 
 void main()
 {
-    // Match the original 129x129 normalized grid without vertex attribute fetches.
+    // 64x64-quad grid; keep AppConfig::Water aligned.
     uint vertexIndex = uint(gl_VertexIndex);
-    vec2 inLocalCoord = vec2(vertexIndex % 129u, vertexIndex / 129u) / 128.0;
+    vec2 inLocalCoord = vec2(vertexIndex % 65u, vertexIndex / 65u) / 64.0;
     WaterInstance instance = descriptors.parents[gl_InstanceIndex].body;
     bool hasTerrainSlice = instance.leafParams.w > 0.5;
     uint bandMask = (instance.packedMetadata >> 16u) & 0xFFFFu;

@@ -24,7 +24,7 @@ constexpr std::uint32_t kWaterFftThreadCountX = 256;
 constexpr std::uint32_t kWaterFftThreadCountY = 1;
 constexpr std::uint32_t kWaterFftThreadCountZ = 1;
 constexpr SDL_GPUTextureFormat kWaterTextureFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-static_assert(AppConfig::Water::kMeshVertexResolution == 129, "Keep water_mesh.vert grid resolution aligned.");
+static_assert(AppConfig::Water::kMeshVertexResolution == 65, "Keep water_mesh.vert grid resolution aligned.");
 constexpr std::uint32_t kWaterMeshIntervalCount = AppConfig::Water::kMeshVertexResolution - 1u;
 constexpr std::uint32_t kWaterBaseMeshVertexResolution = AppConfig::Water::kMeshVertexResolution;
 constexpr std::uint32_t kFoamDetailTextureResolution = 256u;

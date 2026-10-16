@@ -8,7 +8,7 @@ Codex is an experimental large-world terrain sandbox and editor built in C++20 w
 
 - Large-world terrain with GPU-composed ETOPO heightmaps, optional Japan DEM10 detail, and complete tile meshes with quadtree LOD
 - Near-detail trees, mid-distance imposters, and far-field canopy shells from offline tree captures
-- Cascaded FFT water with shoreline foam and terrain interaction
+- Cascaded FFT water with 64×64-quad tile meshes, shoreline foam, and terrain interaction
 - HDR sky and atmosphere, automatic exposure, terrain-following sky illumination, time-of-day lighting, and profiling tools
 - Procedural volumetric clouds with world-grid coverage, GPU-generated noise, shared cloud lighting, and quarter-resolution fullscreen rendering
 - Offline runtime-asset conversion for meshes, textures, fonts, and global elevation data
