@@ -43,6 +43,11 @@
 					"input_mode"		"joystick_move"
 				}
 			}
+			"AnalogTrigger"
+			{
+				"ascend_analog" "#Ascend"
+				"descend_analog" "#Descend"
+			}
 			"Button"
 			{
 				"ascend"		"#Ascend"

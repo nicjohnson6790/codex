@@ -67,6 +67,8 @@ When `STEAMWORKS_APP_ID` is set, CMake generates `steam_appid.txt` directly besi
 
 ## Rendering controls
 
+Controls / Camera / Mode selects Free Flight, Player Follow, or City Builder. City Builder uses the left stick to pan horizontally relative to heading, the right stick to yaw and tilt between horizontal and straight down, and RT/LT to raise/lower the camera proportionally to trigger pressure. Movement speeds up with world altitude, using the existing free-flight speed curve; panning holds altitude rather than following terrain. Switching between Free Flight and City Builder preserves position and heading, with City Builder removing roll and clamping upward tilt. Player Follow retains its existing orbit and collision behavior.
+
 Controls / Clouds enables clouds and adjusts their density, motion, lighting, and sampling budgets. **Quarter-resolution fullscreen clouds** defaults on: clouds march at half the viewport width and height to the farthest scene depth in each 2×2 block. Reconstruction rejects cloud samples behind closer foreground, retaining the existing atmosphere-treated scene without extra cloud marches. This fallback can leave cloud-free fringes; its appearance has been accepted. Disable the checkbox for a full-resolution comparison.
 
 The resolution checkbox affects only fullscreen clouds. The Clouds master switch also changes cloud shadows, water reflection/transmission, and sky-illumination inputs, so the two controls measure different work. The supplied capture comparison showed approximately 0.2 ms additional reconstruction cost; exact whole-frame impact remains unverified.

@@ -163,11 +163,17 @@ void AppPanels::drawControlsTab(Context &context)
     const CameraManager::Camera &activeCamera = context.cameraManager.activeCamera();
     if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        int cameraMode = static_cast<int>(context.cameraMode);
+        if (ImGui::Combo("Mode", &cameraMode, "Free Flight\0Player Follow\0City Builder\0"))
+        {
+            context.cameraMode = static_cast<CameraControlMode>(cameraMode);
+        }
         ImGui::Text("Active: %s", activeCamera.name.c_str());
         ImGui::Text("Camera Cell: (%lld, %lld)", static_cast<long long>(activeCamera.position.gridX()),
                     static_cast<long long>(activeCamera.position.gridY()));
         const glm::dvec3 &cameraLocal = activeCamera.position.localPosition();
         ImGui::Text("Camera Local: (%.3f, %.3f, %.3f)", cameraLocal.x, cameraLocal.y, cameraLocal.z);
+        ImGui::BeginDisabled(context.cameraMode == CameraControlMode::PlayerFollow);
         if (ImGui::Button("Add Camera"))
         {
             const std::size_t newCameraIndex = context.cameraManager.cameraCount() + 1;
@@ -177,20 +183,37 @@ void AppPanels::drawControlsTab(Context &context)
         ImGui::SameLine();
         if (ImGui::Button("Next Camera") && context.cameraManager.cameraCount() > 0)
         {
-            context.cameraManager.setActiveCamera((context.cameraManager.activeCameraIndex() + 1) % context.cameraManager.cameraCount());
+            std::size_t next = (context.cameraManager.activeCameraIndex() + 1) % context.cameraManager.cameraCount();
+            if (next == context.playerCameraIndex)
+            {
+                next = (next + 1) % context.cameraManager.cameraCount();
+            }
+            context.cameraManager.setActiveCamera(next);
         }
+        ImGui::EndDisabled();
 
         ImGui::SeparatorText("Gamepad");
         ImGui::BulletText("Left stick: strafe / move forward-back");
         ImGui::BulletText("Right stick: yaw / pitch");
-        ImGui::BulletText("Triggers: move up / down");
-        ImGui::BulletText("LB / RB: roll");
-        ImGui::BulletText("Press right stick: align camera up to world up");
+        if (context.cameraMode == CameraControlMode::FreeFlight)
+        {
+            ImGui::BulletText("Triggers: move up / down");
+        }
+        if (context.cameraMode == CameraControlMode::CityBuilder)
+        {
+            ImGui::BulletText("Panning holds altitude; speed increases with altitude");
+            ImGui::BulletText("Pitch: horizontal to straight down; no roll");
+            ImGui::BulletText("RT: raise / LT: lower (analog)");
+        }
+        else if (context.cameraMode == CameraControlMode::FreeFlight)
+        {
+            ImGui::BulletText("LB / RB: roll");
+            ImGui::BulletText("Press right stick: align camera up to world up");
+        }
     }
 
     if (ImGui::CollapsingHeader("Player", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::Checkbox("Use player follow camera", &context.playerFollowCameraEnabled);
         const glm::dvec3 playerWorld = context.playerPawn.position.worldPosition();
         ImGui::Text("Player world: (%.2f, %.2f, %.2f)", playerWorld.x, playerWorld.y, playerWorld.z);
         ImGui::Text("Grounded: %s", context.playerPawn.grounded ? "yes" : "no");

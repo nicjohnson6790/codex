@@ -10,6 +10,13 @@
 #include <string>
 #include <vector>
 
+enum class CameraControlMode
+{
+    FreeFlight,
+    PlayerFollow,
+    CityBuilder,
+};
+
 class CameraManager
 {
 public:

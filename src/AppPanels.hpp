@@ -49,7 +49,8 @@ public:
         MultiplayerManager& multiplayerManager;
         PlayerPawn& playerPawn;
         CollisionManager& collisionManager;
-        bool& playerFollowCameraEnabled;
+        CameraControlMode& cameraMode;
+        std::size_t playerCameraIndex;
         const std::vector<std::string>& gpuDrivers;
         std::string_view gamepadName;
         LightingSystem& lightingSystem;

@@ -2,6 +2,7 @@
 
 #include "AppPanels.hpp"
 #include "CameraManager.hpp"
+#include "CityBuilderCameraController.hpp"
 #include "FoliageCanopyRenderer.hpp"
 #include "FoliageImposterRenderer.hpp"
 #include "FreeFlightCameraController.hpp"
@@ -121,6 +122,7 @@ class App
     MultiplayerRenderManager m_multiplayerRenderManager;
     CameraManager m_cameraManager;
     FreeFlightCameraController m_cameraController;
+    CityBuilderCameraController m_cityBuilderCameraController;
     PlayerPawn m_playerPawn;
     PlayerController m_playerController;
     CharacterMotor m_characterMotor;
@@ -145,8 +147,8 @@ class App
     Options m_options{};
     std::size_t m_freeCameraIndex = 0;
     std::size_t m_playerCameraIndex = 0;
-    bool m_playerFollowCameraEnabled = false;
-    bool m_previousPlayerFollowCameraEnabled = false;
+    CameraControlMode m_cameraMode = CameraControlMode::FreeFlight;
+    CameraControlMode m_previousCameraMode = CameraControlMode::FreeFlight;
     bool m_hasPreviousMultiplayerSnapshot = false;
     bool m_firstFramePresented = false;
     std::uint64_t m_lastFrameTsc = 0;

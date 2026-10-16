@@ -340,7 +340,7 @@ GamepadState App::updateInputState()
         gamepadState = m_gamepadInput.pollState();
     }
     m_playerMoveIntent = m_playerController.poll(gamepadState);
-    if (!m_playerFollowCameraEnabled && m_cameraManager.hasActiveCamera() && m_cameraManager.activeCameraIndex() == m_playerCameraIndex)
+    if (m_cameraMode != CameraControlMode::PlayerFollow && m_cameraManager.hasActiveCamera() && m_cameraManager.activeCameraIndex() == m_playerCameraIndex)
     {
         m_cameraManager.setActiveCamera(m_freeCameraIndex);
     }
@@ -351,9 +351,16 @@ GamepadState App::updateInputState()
 void App::updateFreeCamera(const GamepadState &gamepadState)
 {
     HELLO_PROFILE_SCOPE("App::UpdateCamera");
-    if (!m_panels.viewportPaused() && m_cameraManager.hasActiveCamera() && !m_playerFollowCameraEnabled)
+    if (!m_panels.viewportPaused() && m_cameraManager.hasActiveCamera() && m_cameraMode != CameraControlMode::PlayerFollow)
     {
-        m_cameraController.update(m_cameraManager.activeCamera(), gamepadState, m_deltaTimeSeconds);
+        if (m_cameraMode == CameraControlMode::CityBuilder)
+        {
+            m_cityBuilderCameraController.update(m_cameraManager.activeCamera(), gamepadState, m_deltaTimeSeconds);
+        }
+        else
+        {
+            m_cameraController.update(m_cameraManager.activeCamera(), gamepadState, m_deltaTimeSeconds);
+        }
     }
 }
 
@@ -383,7 +390,8 @@ void App::buildUi()
         .multiplayerManager = m_multiplayerManager,
         .playerPawn = m_playerPawn,
         .collisionManager = m_collisionManager,
-        .playerFollowCameraEnabled = m_playerFollowCameraEnabled,
+        .cameraMode = m_cameraMode,
+        .playerCameraIndex = m_playerCameraIndex,
         .gpuDrivers = m_gpuDrivers,
         .gamepadName = m_gamepadInput.gamepadName(),
         .lightingSystem = m_lightingSystem,
@@ -426,25 +434,46 @@ void App::handleMultiplayerPanelCommands()
 
 void App::syncCameraModeTransition()
 {
-    if (m_playerFollowCameraEnabled == m_previousPlayerFollowCameraEnabled || !m_cameraManager.hasActiveCamera())
+    if (!m_cameraManager.hasActiveCamera())
     {
         return;
     }
-
-    if (m_playerFollowCameraEnabled)
+    if (m_cameraMode == m_previousCameraMode)
     {
-        const CameraManager::Camera &freeCamera = m_cameraManager.camera(m_freeCameraIndex);
+        // Camera selection can change without changing its control mode.
+        if (m_cameraMode == CameraControlMode::CityBuilder)
+        {
+            m_cityBuilderCameraController.constrain(m_cameraManager.activeCamera());
+        }
+        return;
+    }
+
+    if (m_cameraMode == CameraControlMode::PlayerFollow)
+    {
+        const CameraManager::Camera freeCamera = m_cameraManager.activeCamera();
+        m_freeCameraIndex = m_cameraManager.activeCameraIndex();
         m_followCameraController.snapToCamera(freeCamera, m_playerPawn);
-        m_cameraManager.camera(m_playerCameraIndex) = freeCamera;
+        auto& playerCamera = m_cameraManager.camera(m_playerCameraIndex);
+        playerCamera.position = freeCamera.position;
+        playerCamera.forward = freeCamera.forward;
+        playerCamera.up = freeCamera.up;
         m_cameraManager.setActiveCamera(m_playerCameraIndex);
     }
-    else
+    else if (m_previousCameraMode == CameraControlMode::PlayerFollow)
     {
-        m_cameraManager.camera(m_freeCameraIndex) = m_cameraManager.camera(m_playerCameraIndex);
+        const auto& playerCamera = m_cameraManager.camera(m_playerCameraIndex);
+        auto& freeCamera = m_cameraManager.camera(m_freeCameraIndex);
+        freeCamera.position = playerCamera.position;
+        freeCamera.forward = playerCamera.forward;
+        freeCamera.up = playerCamera.up;
         m_cameraManager.setActiveCamera(m_freeCameraIndex);
     }
 
-    m_previousPlayerFollowCameraEnabled = m_playerFollowCameraEnabled;
+    if (m_cameraMode == CameraControlMode::CityBuilder)
+    {
+        m_cityBuilderCameraController.constrain(m_cameraManager.activeCamera());
+    }
+    m_previousCameraMode = m_cameraMode;
 }
 
 void App::updateSceneForFrame()
@@ -477,12 +506,12 @@ void App::updateSceneForFrame()
         collectFoliageReadbacks();
     }
 
-    if (m_playerFollowCameraEnabled)
+    if (m_cameraMode == CameraControlMode::PlayerFollow)
     {
         updateGameplayForFrame();
     }
 
-    if (m_playerFollowCameraEnabled)
+    if (m_cameraMode == CameraControlMode::PlayerFollow)
     {
         syncFollowCameraRenderState(viewportExtent);
     }
@@ -523,7 +552,7 @@ void App::updateMultiplayerForFrame()
 
 PlayerPawn App::buildMultiplayerLocalPawnSnapshot()
 {
-    if (m_playerFollowCameraEnabled || !m_cameraManager.hasActiveCamera())
+    if (m_cameraMode == CameraControlMode::PlayerFollow || !m_cameraManager.hasActiveCamera())
     {
         m_hasPreviousMultiplayerSnapshot = false;
         return m_playerPawn;
@@ -557,7 +586,7 @@ void App::syncRenderStateForActiveCamera(Extent2D viewportExtent)
     HELLO_PROFILE_SCOPE("App::UpdateSceneForFrame::SyncRenderState");
     if (m_options.verifyClouds)
     {
-        m_playerFollowCameraEnabled = false;
+        m_cameraMode = CameraControlMode::FreeFlight;
         const auto stage = (m_frameIndex / 60) % 12;
         if (m_frameIndex % 60 == 0)
             SDL_Log("Cloud validation stage %llu/12", (unsigned long long)(stage + 1));
@@ -573,7 +602,7 @@ void App::syncRenderStateForActiveCamera(Extent2D viewportExtent)
     }
     if (m_options.stressHeightmapPipeline)
     {
-        m_playerFollowCameraEnabled = false;
+        m_cameraMode = CameraControlMode::FreeFlight;
         // Visit indexed ETOPO and DEM10 coverage, settling before each move.
         m_cameraManager.activeCamera().position =
             m_worldGridQuadtree.heightmapManager().traversalPositionForValidation((m_frameIndex / 90) % 80);
@@ -705,7 +734,7 @@ void App::buildPrimitiveDraws()
     {
         m_triangleRenderer.addTriangle(instance.position);
     }
-    if (m_playerFollowCameraEnabled)
+    if (m_cameraMode == CameraControlMode::PlayerFollow)
     {
         m_triangleRenderer.addTriangle(m_playerPawn.position.translated({0.0, 1.0, 0.0}), static_cast<float>(m_playerPawn.yawRadians));
     }

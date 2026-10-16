@@ -89,6 +89,8 @@ private:
     std::uint64_t m_lookAction = 0;
     std::uint64_t m_ascendAction = 0;
     std::uint64_t m_descendAction = 0;
+    std::uint64_t m_ascendAnalogAction = 0;
+    std::uint64_t m_descendAnalogAction = 0;
     std::uint64_t m_rollLeftAction = 0;
     std::uint64_t m_rollRightAction = 0;
     std::uint64_t m_sprintAction = 0;

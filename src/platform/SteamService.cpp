@@ -107,6 +107,8 @@ void SteamService::shutdown()
     m_lookAction = 0;
     m_ascendAction = 0;
     m_descendAction = 0;
+    m_ascendAnalogAction = 0;
+    m_descendAnalogAction = 0;
     m_rollLeftAction = 0;
     m_rollRightAction = 0;
     m_sprintAction = 0;
@@ -194,6 +196,8 @@ GamepadState SteamService::pollGamepadState()
             m_lookAction);
         const bool ascend = digitalAction(inputHandle, m_ascendAction);
         const bool descend = digitalAction(inputHandle, m_descendAction);
+        const InputAnalogActionData_t ascendAnalog = SteamInput()->GetAnalogActionData(inputHandle, m_ascendAnalogAction);
+        const InputAnalogActionData_t descendAnalog = SteamInput()->GetAnalogActionData(inputHandle, m_descendAnalogAction);
         const bool rollLeft = digitalAction(inputHandle, m_rollLeftAction);
         const bool rollRight = digitalAction(inputHandle, m_rollRightAction);
         const bool sprint = digitalAction(inputHandle, m_sprintAction);
@@ -201,6 +205,8 @@ GamepadState SteamService::pollGamepadState()
 
         m_lastSteamInputStateActive = move.bActive ||
             look.bActive ||
+            ascendAnalog.bActive ||
+            descendAnalog.bActive ||
             ascend ||
             descend ||
             rollLeft ||
@@ -217,8 +223,8 @@ GamepadState SteamService::pollGamepadState()
             .leftY = -m_lastMoveY,
             .rightX = m_lastLookX,
             .rightY = -m_lastLookY,
-            .leftTrigger = descend ? 1.0f : 0.0f,
-            .rightTrigger = ascend ? 1.0f : 0.0f,
+            .leftTrigger = descend ? 1.0f : (descendAnalog.bActive ? std::clamp(descendAnalog.x, 0.0f, 1.0f) : 0.0f),
+            .rightTrigger = ascend ? 1.0f : (ascendAnalog.bActive ? std::clamp(ascendAnalog.x, 0.0f, 1.0f) : 0.0f),
             .leftShoulder = rollLeft,
             .rightShoulder = rollRight || sprint,
             .rightStickPressed = alignUp,
@@ -394,6 +400,8 @@ void SteamService::initializeSteamInput(const std::filesystem::path& inputManife
     m_lookAction = SteamInput()->GetAnalogActionHandle("look");
     m_ascendAction = SteamInput()->GetDigitalActionHandle("ascend");
     m_descendAction = SteamInput()->GetDigitalActionHandle("descend");
+    m_ascendAnalogAction = SteamInput()->GetAnalogActionHandle("ascend_analog");
+    m_descendAnalogAction = SteamInput()->GetAnalogActionHandle("descend_analog");
     m_rollLeftAction = SteamInput()->GetDigitalActionHandle("roll_left");
     m_rollRightAction = SteamInput()->GetDigitalActionHandle("roll_right");
     m_sprintAction = SteamInput()->GetDigitalActionHandle("sprint");

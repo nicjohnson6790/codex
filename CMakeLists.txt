@@ -305,6 +305,7 @@ add_executable(terrain_sandbox
     src/FoliageCanopyRenderer.cpp
     src/FoliageImposterRenderer.cpp
     src/FreeFlightCameraController.cpp
+    src/CityBuilderCameraController.cpp
     src/GamepadInput.cpp
     src/Gameplay.cpp
     src/HeightmapDataset.cpp
@@ -419,6 +420,12 @@ target_link_libraries(terrain_sandbox
 
 if (CODEX_BUILD_TESTS)
     enable_testing()
+    add_executable(camera_controller_tests tests/CameraControllerTests.cpp
+        src/CityBuilderCameraController.cpp src/FreeFlightCameraController.cpp src/CameraManager.cpp)
+    set_target_properties(camera_controller_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})
+    target_include_directories(camera_controller_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${glm_SOURCE_DIR})
+    target_link_libraries(camera_controller_tests PRIVATE SDL3::Headers)
+    add_test(NAME camera_controller_tests COMMAND $<TARGET_FILE:camera_controller_tests>)
     add_executable(foliage_capture_tests tests/FoliageCaptureTests.cpp
         src/assets/RuntimeAssetReader.cpp src/assets/RuntimeAssetCompression.cpp)
     set_target_properties(foliage_capture_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR})

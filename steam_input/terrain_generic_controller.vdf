@@ -26,6 +26,11 @@
 					"input_mode"		"joystick_move"
 				}
 			}
+			"AnalogTrigger"
+			{
+				"ascend_analog" "#Ascend"
+				"descend_analog" "#Descend"
+			}
 			"Button"
 			{
 				"ascend"		"#Ascend"
@@ -105,44 +110,26 @@
 	}
 	"group"
 	{
-		"id"		"2"
-		"mode"		"trigger"
+		"id" "2"
+		"mode" "trigger"
 		"inputs"
 		{
-			"edge"
-			{
-				"activators"
-				{
-					"Full_Press"
-					{
-						"bindings"
-						{
-							"binding"		"game_action terrain_controls descend"
-						}
-					}
-				}
-			}
+		}
+		"gameactions"
+		{
+			"terrain_controls" "descend_analog"
 		}
 	}
 	"group"
 	{
-		"id"		"3"
-		"mode"		"trigger"
+		"id" "3"
+		"mode" "trigger"
 		"inputs"
 		{
-			"edge"
-			{
-				"activators"
-				{
-					"Full_Press"
-					{
-						"bindings"
-						{
-							"binding"		"game_action terrain_controls ascend"
-						}
-					}
-				}
-			}
+		}
+		"gameactions"
+		{
+			"terrain_controls" "ascend_analog"
 		}
 	}
 	"group"
