@@ -63,12 +63,16 @@ void SkyIlluminationRenderer::upload(SDL_GPUCopyPass* pass)
     SDL_UploadToGPUBuffer(pass,&source,&destination,true);
 }
 void SkyIlluminationRenderer::dispatch(SDL_GPUCommandBuffer* command,SDL_GPUBuffer* heights,
-    const CloudRenderer::SamplingResources& clouds,const SkyboxRenderer& sky,const LightingSystem& lighting,int cloudBudget)
+    const CloudRenderer::SamplingResources& clouds,const SkyboxRenderer& sky,const LightingSystem& lighting,int cloudBudget,
+    const WaterSettings& water)
 {
     HELLO_PROFILE_SCOPE_GROUPS("SkyIlluminationRenderer::Compute",ProfileScopeGroup::Renderer);
     if(m_manager.jobs().empty()) return;
     Uniforms u{}; u.cloud=clouds.state; u.cloud.march.w=float(std::clamp(cloudBudget,128,1024));
     u.skyRotation=lighting.skyboxRotationMatrix();
+    u.waterSurface={water.waterLevel,AppConfig::Water::kEnabled && water.enabled ? 1.0f : 0.0f,0,0};
+    const auto& medium=sky.waterMediumSettings();
+    u.waterExtinction=glm::vec4(glm::max(medium.absorption,glm::vec3(0))+glm::max(medium.scattering,glm::vec3(0)),0);
     std::copy(m_manager.jobs().begin(),m_manager.jobs().end(),u.jobs.begin());
     // Never cycle this persistent field: prior graphics reads, compute updates
     // and subsequent graphics reads are ordered on the same command queue.

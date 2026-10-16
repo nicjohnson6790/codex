@@ -18,6 +18,7 @@ using namespace glm;
 #include "../shaders/authored_color.glsl"
 #include "../shaders/water_medium.glsl"
 #include "../shaders/water_interface.glsl"
+#include "../shaders/water_column.glsl"
 }
 
 namespace
@@ -45,6 +46,22 @@ double numericalColumn(double height, double dy, double length, double scale)
 int main()
 {
     using namespace ShaderMath;
+    // Actual shared incoming-water helper: distinguish the water leg from
+    // camera-side attenuation, and verify RGB Beer depth/angle behavior.
+    const vec3 columnExtinction(0.2f,0.08f,0.03f);
+    for(float depth:{0.0f,0.1f,2.0f,20.0f,1000.0f})
+        for(float cosine:{0.01f,0.25f,0.5f,1.0f})
+        {
+            const vec3 actual=waterColumnTransmission(depth,cosine,columnExtinction);
+            for(int c=0;c<3;++c)
+                near(actual[c],std::exp(-double(columnExtinction[c])*double(depth)/double(cosine)));
+            assert(actual.r<=actual.g && actual.g<=actual.b);
+        }
+    near(glm::length(waterColumnTransmission(-2.0f,1.0f,columnExtinction)-vec3(1)),0);
+    near(glm::length(waterColumnTransmission(2.0f,1.0f,vec3(0))-vec3(1)),0);
+    near(glm::length(waterColumnTransmission(2.0f,0.0f,columnExtinction)),0);
+    near(glm::length(waterColumnTransmission(2.0f,-0.5f,columnExtinction)),0);
+    near(glm::length(waterColumnTransmission(0.0f,0.0f,columnExtinction)-vec3(1)),0);
     // Percentile trimming splits boundary bins, including fractional counts.
     near(exposureRetained(0,3,100),1);
     // Even the brightest cubemap texel rounded to black in the old UNORM path.

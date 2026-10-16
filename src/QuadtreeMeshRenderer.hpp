@@ -76,11 +76,15 @@ class QuadtreeMeshRenderer : private EngineRendererBase
         glm::vec4 params;
         SkyboxRenderer::AtmosphereOptics optics;
         glm::vec4 atmosphere;
+        glm::vec4 waterSurface;
+        glm::vec4 waterExtinction;
     };
-    static_assert(sizeof(CloudShadowUniforms) == 240);
+    static_assert(sizeof(CloudShadowUniforms) == 272);
     static_assert(offsetof(CloudShadowUniforms, params) == 128);
     static_assert(offsetof(CloudShadowUniforms, optics) == 144);
     static_assert(offsetof(CloudShadowUniforms, atmosphere) == 224);
+    static_assert(offsetof(CloudShadowUniforms, waterSurface) == 240);
+    static_assert(offsetof(CloudShadowUniforms, waterExtinction) == 256);
 
     QuadtreeMeshRenderer() = default;
     ~QuadtreeMeshRenderer() = default;
@@ -137,7 +141,7 @@ class QuadtreeMeshRenderer : private EngineRendererBase
     void render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection,
                 const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer, float timeSeconds,
                 const CloudRenderer::SamplingResources &clouds, int cloudShadowSamples,
-                SkyIlluminationRenderer::SamplingResources illumination) const;
+                SkyIlluminationRenderer::SamplingResources illumination,const SkyboxRenderer& sky) const;
     std::span<const SkyIlluminationManager::Tile> illuminationTiles() const
     {
         return {m_illuminationTiles.data(),m_instanceCount};

@@ -1264,7 +1264,7 @@ void QuadtreeMeshRenderer::collectCompletedFoliagePageLiveCounts(std::vector<Gen
 void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandBuffer *commandBuffer, const glm::mat4 &viewProjection,
                                   const LightingSystem &lightingSystem, const QuadtreeWaterMeshRenderer &waterRenderer,
                                   float timeSeconds, const CloudRenderer::SamplingResources &clouds, int cloudShadowSamples,
-                                  SkyIlluminationRenderer::SamplingResources illumination) const
+                                  SkyIlluminationRenderer::SamplingResources illumination,const SkyboxRenderer& sky) const
 {
     HELLO_PROFILE_SCOPE("QuadtreeMeshRenderer::Render");
 
@@ -1342,9 +1342,12 @@ void QuadtreeMeshRenderer::render(SDL_GPURenderPass *renderPass, SDL_GPUCommandB
     }
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+    const auto& medium=sky.waterMediumSettings();
     const CloudShadowUniforms shadowUniforms{clouds.state.field,
         {clouds.state.scattering.x, clouds.state.march.y, clouds.state.march.z,
-         float(std::clamp(cloudShadowSamples, 1, 32))}, clouds.state.optics, clouds.state.atmosphere};
+         float(std::clamp(cloudShadowSamples, 1, 32))}, clouds.state.optics, clouds.state.atmosphere,
+         {m_waterSettings.waterLevel,AppConfig::Water::kEnabled && m_waterSettings.enabled ? 1.0f : 0.0f,0,0},
+         glm::vec4(glm::max(medium.absorption,glm::vec3(0))+glm::max(medium.scattering,glm::vec3(0)),0)};
     SDL_PushGPUFragmentUniformData(commandBuffer, 1, &shadowUniforms, sizeof(shadowUniforms));
 
     if (m_instanceCount > 0)

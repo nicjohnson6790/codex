@@ -1,6 +1,7 @@
 #pragma once
 #include "CloudRenderer.hpp"
 #include "SkyIlluminationManager.hpp"
+#include "WaterSettings.hpp"
 
 // Owns GPU probe storage and compute only. SamplingResources is intentionally
 // independent of terrain shading, for later foliage/environment consumers.
@@ -13,7 +14,7 @@ public:
     void prepare(std::span<const SkyIlluminationManager::Tile>,const Position&,double seconds);
     void upload(SDL_GPUCopyPass*);
     void dispatch(SDL_GPUCommandBuffer*,SDL_GPUBuffer* heightmaps,const CloudRenderer::SamplingResources&,
-                  const SkyboxRenderer&,const LightingSystem&,int cloudBudget);
+                  const SkyboxRenderer&,const LightingSystem&,int cloudBudget,const WaterSettings&);
     SamplingResources samplingResources() const { return {m_coefficients,m_regions}; }
     CacheIndex regionForPosition(glm::vec2 p) const {
         const auto regions=m_manager.regions();
@@ -37,7 +38,10 @@ private:
     {
         CloudRenderer::SamplingState cloud;
         glm::mat4 skyRotation;
+        glm::vec4 waterSurface; // mean level, enabled, reserved
+        glm::vec4 waterExtinction; // shared absorption + scattering, RGB
         std::array<SkyIlluminationManager::Job,SkyIlluminationManager::kMaxUpdates> jobs;
     };
-    static_assert(sizeof(Uniforms)==1904 && offsetof(Uniforms,skyRotation)==304 && offsetof(Uniforms,jobs)==368);
+    static_assert(sizeof(Uniforms)==1936 && offsetof(Uniforms,skyRotation)==304 &&
+        offsetof(Uniforms,waterSurface)==368 && offsetof(Uniforms,waterExtinction)==384 && offsetof(Uniforms,jobs)==400);
 };

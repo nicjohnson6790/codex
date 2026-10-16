@@ -277,7 +277,7 @@ void SDLRenderer::renderFrame(
         HELLO_PROFILE_SCOPE_GROUPS("SDLRenderer::DispatchTerrainCompute", ProfileScopeGroup::Renderer);
         quadtreeMeshRenderer.dispatchHeightmapGenerations(commandBuffer);
         illuminationRenderer.dispatch(commandBuffer,quadtreeMeshRenderer.heightmapBuffer(),cloudRenderer.samplingResources(),
-            skyboxRenderer,lightingSystem,cloudRenderer.settings().fullscreenBudget);
+            skyboxRenderer,lightingSystem,cloudRenderer.settings().fullscreenBudget,waterMeshRenderer.settings());
         if constexpr (AppConfig::Foliage::kCanopyEnabled)
         {
             canopyRenderer.dispatchCellGenerations(commandBuffer, quadtreeMeshRenderer.heightmapBuffer());
@@ -364,7 +364,7 @@ void SDLRenderer::renderFrame(
                 lightingSystem,
                 waterMeshRenderer,
                 timeSeconds,
-                cloudRenderer.samplingResources(), cloudRenderer.settings().terrainShadowSamples,illuminationRenderer.samplingResources());
+                cloudRenderer.samplingResources(), cloudRenderer.settings().terrainShadowSamples,illuminationRenderer.samplingResources(),skyboxRenderer);
         }
         if constexpr (AppConfig::Water::kEnabled)
         {

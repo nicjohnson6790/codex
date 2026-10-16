@@ -6,6 +6,7 @@
 #include "cloud_shadow.glsl"
 #include "terrain_lighting.glsl"
 #include "sky_illumination.glsl"
+#include "water_column.glsl"
 
 layout(set=3, binding=1) uniform CloudShadowUniforms
 {
@@ -13,6 +14,8 @@ layout(set=3, binding=1) uniform CloudShadowUniforms
     vec4 params;
     AtmosphereOptics optics;
     vec4 atmosphere;
+    vec4 waterSurface;
+    vec4 waterExtinction;
 } cloudShadow;
 
 layout(set=3, binding=0) uniform TerrainUniforms
@@ -325,8 +328,10 @@ void main()
     vec3 specular = (distribution * geometry * fresnel) / max(4.0 * max(nDotV, 0.05) * max(nDotL, 0.05), 0.0001);
     vec3 diffuse = (albedo * (1.0 - fresnel) / kPi) * nDotL;
 
-    vec3 sunRadiance = surfaceSunIrradiance(worldHeight, sunDirection,
-        cloudShadow.atmosphere.y, cloudShadow.optics);
+    float waterDepth=cloudShadow.waterSurface.y>0.5 ? max(cloudShadow.waterSurface.x-worldHeight,0.0) : 0.0;
+    vec3 sunRadiance = surfaceSunIrradiance(worldHeight+waterDepth, sunDirection,
+        cloudShadow.atmosphere.y, cloudShadow.optics)
+        * waterColumnTransmission(waterDepth,sunDirection.y,cloudShadow.waterExtinction.rgb);
     vec3 directLighting = (diffuse + (specular * 0.12)) * sunRadiance;
     vec3 ambient = albedo / kPi * sampleSkyIllumination(fragLocalPosition, normal, fragIlluminationRegion)
         * mix(0.45, 1.0, ao);
@@ -339,7 +344,7 @@ void main()
         // Both terrain vertices and CloudRenderer::upload use the active camera
         // Position as render origin. Y already includes the sampled terrain height.
         solarTransmission = solarVisibility * terrainCloudTransmission(
-            fragLocalPosition, sunDirection, cloudShadow.field, cloudShadow.params,
+            fragLocalPosition+sunDirection*(waterDepth/max(sunDirection.y,1e-6)), sunDirection, cloudShadow.field, cloudShadow.params,
             cloudCoverageTexture, cloudNoiseTexture);
     }
     vec3 litColor = ambient + directLighting * solarTransmission;
