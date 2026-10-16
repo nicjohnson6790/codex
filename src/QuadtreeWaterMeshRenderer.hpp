@@ -41,7 +41,7 @@ public:
         glm::mat4 skyRotation{ 1.0f };
         glm::vec4 atmosphereParams{ 0.0f };
         glm::vec4 sunDirectionTimeOfDay{ 0.0f };
-        glm::vec4 opticalParams{ 0.0f };
+        glm::vec4 opticalParams{ 0.0f }; // solar horizon sine, roughness, slope strength, reflection
         glm::vec4 refractionParams{ 0.0f };
         glm::vec4 distanceLodParams{ 0.0f };
         glm::vec4 cascadeFilterParams{ 0.0f };

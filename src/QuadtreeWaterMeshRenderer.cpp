@@ -1097,7 +1097,7 @@ QuadtreeWaterMeshRenderer::WaterUniforms QuadtreeWaterMeshRenderer::buildWaterUn
     uniforms.atmosphereParams = sharedSkyUniforms.atmosphereParams;
     uniforms.sunDirectionTimeOfDay = sharedSkyUniforms.sunDirectionTimeOfDay;
     uniforms.opticalParams = glm::vec4(
-        0.0f, // Reserved; shader derives dielectric F0 from its fixed water IOR.
+        std::sin(glm::radians(AppConfig::Terrain::kSolarHorizonFadeDegrees)),
         AppConfig::Water::kBaseRoughness,
         AppConfig::Water::kSlopeRoughnessStrength,
         AppConfig::Water::kEnvironmentReflectionStrength);

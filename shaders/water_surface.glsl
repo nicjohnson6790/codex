@@ -16,7 +16,7 @@ layout(set=WATER_UNIFORM_SET, binding=WATER_UNIFORM_BINDING) uniform WaterUnifor
     mat4 skyRotation;
     vec4 atmosphereParams;
     vec4 sunDirectionTimeOfDay;
-    vec4 opticalParams;
+    vec4 opticalParams; // sine of solar horizon fade end, roughness, slope strength, reflection
     vec4 refractionParams;
     vec4 distanceLodParams;
     vec4 cascadeFilterParams;

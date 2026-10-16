@@ -6,6 +6,7 @@
 #include "water_medium.glsl"
 #include "water_interface.glsl"
 #include "cloud_integration.glsl"
+#include "terrain_lighting.glsl"
 
 layout(set=3,binding=1) uniform WaterCloudUniforms { CloudSamplingState state; } clouds;
 
@@ -27,7 +28,7 @@ layout(set=3, binding=0) uniform WaterUniforms
     mat4 skyRotation;
     vec4 atmosphereParams;
     vec4 sunDirectionTimeOfDay;
-    vec4 opticalParams;
+    vec4 opticalParams; // sine of solar horizon fade end, roughness, slope strength, reflection
     vec4 refractionParams;
     vec4 distanceLodParams;
     vec4 cascadeFilterParams;
@@ -429,6 +430,12 @@ void main()
     vec3 halfVector = normalize(sunDirection + viewDir);
     float normalDotLight = saturate(dot(normal, sunDirection));
     float normalDotView = saturate(dot(normal, viewDir));
+    // Direct surface light shares the atmosphere's linear source calibration.
+    // The horizon gate applies to sunlight only, never to ambient sky radiance.
+    vec3 sunIrradiance = surfaceSunIrradiance(
+        water.cameraAndTime.z + fragWorldPosition.y, sunDirection,
+        water.atmosphereParams.x, water.atmosphereOptics)
+        * terrainSolarVisibility(sunDirection.y, water.opticalParams.x);
     float normalDotHalf = saturate(dot(normal, halfVector));
     float viewDotHalf = saturate(dot(viewDir, halfVector));
     vec3 f0 = vec3(kWaterF0);
@@ -463,8 +470,7 @@ void main()
     float denominator = max(4.0 * normalDotLight * normalDotView, 0.0001);
     vec3 directSpecular =
         (numerator / denominator) *
-        water.sunColorAmbient.rgb *
-        (water.sunDirectionIntensity.w * normalDotLight);
+        sunIrradiance * normalDotLight;
     directSpecular *= mix(1.0, 0.30, foamReflectivityFade);
 
     vec3 reflectionNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), farReflectionFlattenT));
@@ -531,10 +537,9 @@ void main()
     if (drawFoam && foamSignal > 0.0)
     {
         float foamViewBoost = mix(0.85, 1.15, pow(1.0 - normalDotView, 0.35));
-        float foamDiffuse = 0.30 + (0.70 * normalDotLight);
         vec3 foamLighting =
             (ambientSky * 0.55) +
-            (water.sunColorAmbient.rgb * water.sunDirectionIntensity.w * foamDiffuse * 0.45);
+            (sunIrradiance * (normalDotLight / kPi));
         vec3 foamColor = authoredColor(water.foamColor.rgb) * foamLighting * water.foamColor.a * foamViewBoost;
         foamOverlay = foamColor * (saturate(foamSignal * 0.72) + (foamSignal * 0.12));
     }
